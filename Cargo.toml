@@ -1,0 +1,14 @@
+[package]
+name = "gmw-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitvec = "1.0.0"
+tokio = { version = "1.17.0", features = ["full"]}
+futures = "0.3.21"
+thiserror = "1.0.30"
+pin-project = "1.0.10"
+nom = "7.1.0"
