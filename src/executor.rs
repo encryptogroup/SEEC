@@ -6,11 +6,12 @@ use crate::executor::ExecutorMsg::AndLayer;
 use crate::mult_triple::MultTriple;
 use crate::transport::Transport;
 
+use petgraph::adj::IndexType;
 use std::fmt::Debug;
 use std::iter;
 
-pub struct Executor {
-    circuit: Circuit,
+pub struct Executor<Idx> {
+    circuit: Circuit<Idx>,
     gate_outputs: BitVec,
     party_id: usize,
 }
@@ -24,13 +25,10 @@ pub enum ExecutorMsg {
 // Todo: optimize this, data can probably be hoisted into BitVec, should reduce size by 7/8
 pub struct AndMessage {
     data: (bool, bool),
-    // // is it even necessary to transmit gate_ids? I don't think so, as the other side knows
-    // // which gates to expect in which order...
-    // gate_id: u64,
 }
 
-impl Executor {
-    pub fn new(circuit: Circuit, party_id: usize) -> Self {
+impl<Idx: IndexType> Executor<Idx> {
+    pub fn new(circuit: Circuit<Idx>, party_id: usize) -> Self {
         let mut gate_outputs = BitVec::new();
         gate_outputs.resize(circuit.gate_count(), false);
         Self {
@@ -113,7 +111,7 @@ impl Executor {
         Ok(BitVec::from(&self.gate_outputs[output_range]))
     }
 
-    fn gate_inputs(&self, id: GateId) -> impl Iterator<Item = bool> + '_ {
+    fn gate_inputs(&self, id: GateId<Idx>) -> impl Iterator<Item = bool> + '_ {
         self.circuit
             .parent_gates(id)
             .map(move |parent_id| self.gate_outputs[parent_id.as_usize()])
@@ -132,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn execute_simple_circuit() {
         use Gate::*;
-        let mut circuit = Circuit::new();
+        let mut circuit = Circuit::<u32>::new();
         let in_1 = circuit.add_gate(Input);
         let in_2 = circuit.add_gate(Input);
         let and_1 = circuit.add_gate(And);
