@@ -27,7 +27,7 @@ impl<Item> Stream for InMemory<Item> {
     type Item = Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
+        let this = self.project();
         this.receiver.poll_next(cx)
     }
 }
@@ -36,22 +36,22 @@ impl<Item> Sink<Item> for InMemory<Item> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut this = self.project();
+        let this = self.project();
         this.sender.poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Item) -> Result<(), Self::Error> {
-        let mut this = self.project();
+        let this = self.project();
         this.sender.start_send(item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut this = self.project();
+        let this = self.project();
         this.sender.poll_flush(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut this = self.project();
+        let this = self.project();
         this.sender.poll_close(cx)
     }
 }

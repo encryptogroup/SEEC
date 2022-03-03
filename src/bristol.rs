@@ -3,9 +3,9 @@ use nom::bytes::complete::tag;
 use nom::character::complete::{digit1, multispace0};
 use nom::combinator::{all_consuming, map, map_res};
 use nom::error::ParseError;
-use nom::multi::{count, fill, many0, many1_count};
+use nom::multi::{count, fill};
 use nom::sequence::{delimited, tuple};
-use nom::{error, IResult};
+use nom::IResult;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
@@ -32,6 +32,7 @@ pub enum Gate {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct GateData {
+    // TODO maube use smallvecs here since these very often o
     input_wires: Vec<GateId>,
     output_wires: Vec<GateId>,
 }
