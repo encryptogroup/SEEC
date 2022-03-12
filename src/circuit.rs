@@ -68,7 +68,7 @@ impl<Idx: IndexType> Circuit<Idx> {
             Gate::Input => self.input_count += 1,
             _ => (),
         }
-        let gate_id = self.graph.add_node(gate.clone()).into();
+        let gate_id = self.graph.add_node(gate).into();
         debug!(%gate_id, "Added gate");
         gate_id
     }

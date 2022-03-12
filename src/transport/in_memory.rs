@@ -1,19 +1,10 @@
 use futures::channel::mpsc;
 use futures::channel::mpsc::{unbounded, SendError};
-use futures::{Sink, SinkExt, Stream, StreamExt};
+use futures::{Sink, Stream};
 use pin_project::pin_project;
-use std::fmt::Debug;
+use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-
-pub trait Transport<Item, Err: Debug>:
-    SinkExt<Item, Error = Err> + StreamExt<Item = Item> + Unpin
-{
-}
-impl<Item, Err: Debug, C: SinkExt<Item, Error = Err> + StreamExt<Item = Item> + Unpin>
-    Transport<Item, Err> for C
-{
-}
 
 #[pin_project]
 pub struct InMemory<Item> {
@@ -24,11 +15,11 @@ pub struct InMemory<Item> {
 }
 
 impl<Item> Stream for InMemory<Item> {
-    type Item = Item;
+    type Item = Result<Item, Infallible>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
-        this.receiver.poll_next(cx)
+        this.receiver.poll_next(cx).map(|val| val.map(Ok))
     }
 }
 
