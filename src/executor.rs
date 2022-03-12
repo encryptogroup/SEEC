@@ -59,14 +59,21 @@ impl<Idx: IndexType> Executor<Idx> {
                         .evaluate_non_interactive(iter::once(inputs[id.as_usize()]), self.party_id),
                     _ => {
                         let inputs = self.gate_inputs(id);
-                        gate.evaluate_non_interactive(inputs, self.party_id)
+                        let dbg_inputs: Vec<_> = self.gate_inputs(id).collect();
+                        let output = gate.evaluate_non_interactive(inputs, self.party_id);
+                        if self.party_id == 0 {
+                            println!(
+                                "eval {gate:?} id {id:?} inputs: {dbg_inputs:?} output: {output}"
+                            );
+                        }
+                        output
                     }
                 };
 
                 self.gate_outputs.set(id.as_usize(), output);
             }
 
-            // TODO ugh, the and handling is ugly and brittle
+            // TODO ugh, the AND handling is ugly and brittle
             let (and_messages, mts): (Vec<_>, Vec<_>) = layer
                 .and_gates
                 .iter()
@@ -104,17 +111,23 @@ impl<Idx: IndexType> Executor<Idx> {
 
             for (output, id) in and_outputs {
                 self.gate_outputs.set(id.as_usize(), output);
+                if self.party_id == 0 {
+                    println!("eval AND with id {id:?} output: {output}");
+                }
             }
         }
         let output_range =
-            self.circuit.gate_count() - self.circuit.output_count..self.circuit.gate_count();
+            self.circuit.gate_count() - self.circuit.output_count()..self.circuit.gate_count();
         Ok(BitVec::from(&self.gate_outputs[output_range]))
     }
 
     fn gate_inputs(&self, id: GateId<Idx>) -> impl Iterator<Item = bool> + '_ {
-        self.circuit
-            .parent_gates(id)
-            .map(move |parent_id| self.gate_outputs[parent_id.as_usize()])
+        self.circuit.parent_gates(id).map(move |parent_id| {
+            if self.party_id == 0 {
+                println!("parent id {parent_id:?}");
+            }
+            self.gate_outputs[parent_id.as_usize()]
+        })
     }
 }
 
