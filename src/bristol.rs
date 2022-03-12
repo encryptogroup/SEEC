@@ -1,7 +1,7 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{digit1, multispace0};
-use nom::combinator::{all_consuming, map, map_res};
+use nom::combinator::{all_consuming, map_res};
 use nom::error::ParseError;
 use nom::multi::{count, fill};
 use nom::sequence::{delimited, tuple};
@@ -9,18 +9,18 @@ use nom::IResult;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
-    header: Header,
-    gates: Vec<Gate>,
+    pub header: Header,
+    pub gates: Vec<Gate>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Header {
-    gates: usize,
-    wires: usize,
+    pub gates: usize,
+    pub wires: usize,
     /// number n1 and n2 of wires in the inputs to the function given by the circuit
-    input_wires: [usize; 2],
+    pub input_wires: [usize; 2],
     /// n3, number of wires in the output
-    output_wires: usize,
+    pub output_wires: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -30,15 +30,19 @@ pub enum Gate {
     Inv(GateData),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct GateData {
-    // TODO maube use smallvecs here since these very often o
-    input_wires: Vec<GateId>,
-    output_wires: Vec<GateId>,
+impl Gate {
+    pub fn get_data(&self) -> &GateData {
+        let (Gate::And(data) | Gate::Xor(data) | Gate::Inv(data)) = self;
+        data
+    }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct GateId(usize);
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct GateData {
+    // TODO maybe use smallvecs here since these very often 2 and 1
+    pub input_wires: Vec<usize>,
+    pub output_wires: Vec<usize>,
+}
 
 fn integer(i: &str) -> IResult<&str, usize> {
     map_res(digit1, |s: &str| s.parse())(i)
@@ -46,10 +50,6 @@ fn integer(i: &str) -> IResult<&str, usize> {
 
 fn integer_ws(i: &str) -> IResult<&str, usize> {
     ws(integer)(i)
-}
-
-fn gate_id(i: &str) -> IResult<&str, GateId> {
-    map(integer_ws, GateId)(i)
 }
 
 fn header(i: &str) -> IResult<&str, Header> {
@@ -69,8 +69,8 @@ fn header(i: &str) -> IResult<&str, Header> {
 
 fn gate(i: &str) -> IResult<&str, Gate> {
     let (i, (num_in_wires, num_out_wires)) = tuple((ws(integer), ws(integer)))(i)?;
-    let (i, input_wires) = count(gate_id, num_in_wires)(i)?;
-    let (i, output_wires) = count(gate_id, num_out_wires)(i)?;
+    let (i, input_wires) = count(integer_ws, num_in_wires)(i)?;
+    let (i, output_wires) = count(integer_ws, num_out_wires)(i)?;
     let gate_data = GateData {
         input_wires,
         output_wires,
@@ -118,7 +118,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::bristol::{circuit, gate, header, Gate, GateData, GateId, Header};
+    use crate::bristol::{circuit, gate, header, Gate, GateData, Header};
     use std::fs;
 
     #[test]
@@ -142,8 +142,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::Xor(GateData {
-                input_wires: vec![GateId(215), GateId(87)],
-                output_wires: vec![GateId(32601)]
+                input_wires: vec![215, 87],
+                output_wires: vec![32601]
             }),
             parsed
         );
@@ -155,8 +155,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::Inv(GateData {
-                input_wires: vec![GateId(215)],
-                output_wires: vec![GateId(87), GateId(32601), GateId(42)]
+                input_wires: vec![215],
+                output_wires: vec![87, 32601, 42]
             }),
             parsed
         );
@@ -168,8 +168,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::And(GateData {
-                input_wires: vec![GateId(215), GateId(87)],
-                output_wires: vec![GateId(32601)]
+                input_wires: vec![215, 87],
+                output_wires: vec![32601]
             }),
             parsed
         );

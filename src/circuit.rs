@@ -6,6 +6,7 @@ use petgraph::visit::{IntoNeighbors, IntoNodeIdentifiers, Reversed};
 use petgraph::visit::{VisitMap, Visitable};
 use petgraph::{Directed, Direction, Graph};
 
+use crate::bristol;
 use petgraph::adj::IndexType;
 use std::collections::{HashSet, VecDeque};
 use std::hash::Hash;
@@ -111,6 +112,8 @@ impl<Idx: IndexType> Circuit<Idx> {
             p.set_extension("dot");
             p
         };
+        // TODO it would be nice to display the gate type AND id, however this doesn't seem to be
+        //  possible with the current api of petgraph
         let dot_content = Dot::with_config(&self.graph, &[Config::EdgeNoLabel]);
         fs::write(path, format!("{dot_content:?}")).map_err(CircuitError::SaveAsDot)?;
         Ok(())
@@ -121,13 +124,61 @@ impl<Idx: IndexType> Circuit<Idx> {
     }
 }
 
+impl Circuit<usize> {
+    pub fn from_bristol(bristol: bristol::Circuit) -> Result<Self, CircuitError> {
+        let mut circuit = Self::with_capacity(bristol.header.gates, bristol.header.wires);
+        let total_input_wires = bristol.header.input_wires.iter().sum();
+        // We treat the output wires of the bristol::Gates as their GateIds. Unfortunately,
+        // the output wires are not given in ascending order, so we need to save a mapping
+        // of wire ids to GateIds
+        let mut wire_mapping = vec![GateId::from(0); bristol.header.wires];
+        for mapping in &mut wire_mapping[0..total_input_wires] {
+            let added_id = circuit.add_gate(Gate::Input);
+            *mapping = added_id;
+        }
+        for gate in &bristol.gates {
+            let gate_data = gate.get_data();
+            let added_id = circuit.add_gate(gate.into());
+            println!("added {gate:?} gate with id {added_id:?}");
+            for out_wire in &gate_data.output_wires {
+                match wire_mapping.get_mut(*out_wire) {
+                    None => return Err(CircuitError::ConversionError),
+                    Some(mapped) => *mapped = added_id,
+                }
+            }
+            for input_wire in &gate_data.input_wires {
+                let mapped_input = wire_mapping
+                    .get(*input_wire)
+                    .ok_or(CircuitError::ConversionError)?;
+                circuit.add_wire(*mapped_input, added_id);
+                println!(
+                    "added wire between {mapped_input:?} (orig {input_wire}) <-> {added_id:?}"
+                );
+            }
+        }
+        let output_gates = bristol.header.wires - bristol.header.output_wires..bristol.header.wires;
+        for output_id in &wire_mapping[output_gates] {
+            let added_id = circuit.add_gate(Gate::Output);
+            println!("added output gate  with {added_id:?} for original {output_id:?}");
+            circuit.add_wire(*output_id, added_id);
+        }
+        Ok(circuit)
+    }
+
+    pub fn load_bristol(path: impl AsRef<Path>) -> Result<Self, CircuitError> {
+        let bristol_text = fs::read_to_string(path)?;
+        let parsed = bristol::circuit(&bristol_text).map_err(|err| err.to_owned())?;
+        Circuit::from_bristol(parsed)
+    }
+}
+
 impl<Idx: IndexType> Clone for Circuit<Idx> {
     fn clone(&self) -> Self {
         Self {
             graph: self.graph.clone(),
-            input_count: self.input_count.clone(),
-            and_count: self.and_count.clone(),
-            output_count: self.output_count.clone(),
+            input_count: self.input_count,
+            and_count: self.and_count,
+            output_count: self.output_count,
         }
     }
 }
@@ -168,6 +219,16 @@ impl Gate {
                 );
                 inp
             }
+        }
+    }
+}
+
+impl From<&bristol::Gate> for Gate {
+    fn from(gate: &bristol::Gate) -> Self {
+        match gate {
+            bristol::Gate::And(_) => Gate::And,
+            bristol::Gate::Xor(_) => Gate::Xor,
+            bristol::Gate::Inv(_) => Gate::Inv,
         }
     }
 }
@@ -311,7 +372,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::bristol;
     use crate::circuit::{Circuit, CircuitLayer, CircuitLayerIter, Gate, GateId};
+    use std::fs;
 
     #[test]
     fn circuit_layer_iter() {
@@ -388,5 +451,25 @@ mod tests {
                 circuit.add_wire(GateId::from(from_id), to_id);
             }
         }
+    }
+
+    #[test]
+    fn convert_bristol_aes_circuit() {
+        let aes_text =
+            fs::read_to_string("test_resources/bristol-circuits/AES-non-expanded.txt").unwrap();
+        let parsed = bristol::circuit(&aes_text).unwrap();
+        let converted = Circuit::from_bristol(parsed.clone()).unwrap();
+        assert_eq!(
+            parsed.header.gates + converted.input_count() + converted.output_count(),
+            converted.gate_count()
+        );
+        assert_eq!(
+            converted.input_count(),
+            parsed.header.input_wires.iter().sum()
+        );
+        assert_eq!(parsed.header.output_wires, converted.output_count());
+        // TODO comparing the wire counts is a little tricky since we have a slightly different
+        // view of what a wire is
+        // assert_eq!(parsed.header.wires, converted.wire_count());
     }
 }

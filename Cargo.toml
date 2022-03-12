@@ -15,3 +15,7 @@ nom = "7.1.0"
 petgraph = "0.6.0"
 smallvec = { version = "1.8.0", features = ["union", "const_generics", "serde"]}
 itertools = "0.10.3"
+
+[dev-dependencies]
+aes = "0.8.1"
+hex-literal = "0.3.4"
