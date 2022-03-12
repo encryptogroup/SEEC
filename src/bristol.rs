@@ -6,6 +6,7 @@ use nom::error::ParseError;
 use nom::multi::{count, fill};
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
+use smallvec::SmallVec;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
@@ -39,9 +40,8 @@ impl Gate {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct GateData {
-    // TODO maybe use smallvecs here since these very often 2 and 1
-    pub input_wires: Vec<usize>,
-    pub output_wires: Vec<usize>,
+    pub input_wires: SmallVec<[usize; 2]>,
+    pub output_wires: SmallVec<[usize; 1]>,
 }
 
 fn integer(i: &str) -> IResult<&str, usize> {
@@ -69,8 +69,10 @@ fn header(i: &str) -> IResult<&str, Header> {
 
 fn gate(i: &str) -> IResult<&str, Gate> {
     let (i, (num_in_wires, num_out_wires)) = tuple((ws(integer), ws(integer)))(i)?;
-    let (i, input_wires) = count(integer_ws, num_in_wires)(i)?;
-    let (i, output_wires) = count(integer_ws, num_out_wires)(i)?;
+    let mut input_wires = SmallVec::from_elem(0, num_in_wires);
+    let mut output_wires = SmallVec::from_elem(0, num_out_wires);
+    let (i, _) = fill(integer_ws, &mut input_wires)(i)?;
+    let (i, _) = fill(integer_ws, &mut output_wires)(i)?;
     let gate_data = GateData {
         input_wires,
         output_wires,
@@ -142,8 +144,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::Xor(GateData {
-                input_wires: vec![215, 87],
-                output_wires: vec![32601]
+                input_wires: vec![215, 87].into(),
+                output_wires: vec![32601].into()
             }),
             parsed
         );
@@ -155,8 +157,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::Inv(GateData {
-                input_wires: vec![215],
-                output_wires: vec![87, 32601, 42]
+                input_wires: vec![215].into(),
+                output_wires: vec![87, 32601, 42].into()
             }),
             parsed
         );
@@ -168,8 +170,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::And(GateData {
-                input_wires: vec![215, 87],
-                output_wires: vec![32601]
+                input_wires: vec![215, 87].into(),
+                output_wires: vec![32601].into()
             }),
             parsed
         );
