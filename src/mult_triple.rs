@@ -1,7 +1,7 @@
-use crate::common::BitVec;
+use bitvec::bitarr;
 use bitvec::prelude::*;
-use bitvec::{bitarr, bitvec};
 
+#[derive(Debug)]
 pub struct MultTriple {
     // holds a single u8, since we only need 3 bits (Note: 5 bits are wasted here, this could
     // maybe be optimized by not having individual MultTriple structs but storing multiple triples

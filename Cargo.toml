@@ -12,3 +12,6 @@ futures = "0.3.21"
 thiserror = "1.0.30"
 pin-project = "1.0.10"
 nom = "7.1.0"
+petgraph = "0.6.0"
+smallvec = { version = "1.8.0", features = ["union", "const_generics", "serde"]}
+itertools = "0.10.3"
