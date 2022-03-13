@@ -16,17 +16,11 @@ pub(crate) fn create_and_tree(depth: u32) -> Circuit {
         previous_layer = previous_layer
             .into_iter()
             .tuples()
-            .map(|(from_a, from_b)| {
-                let to = circuit.add_gate(Gate::And);
-                circuit.add_wire(from_a, to);
-                circuit.add_wire(from_b, to);
-                to
-            })
+            .map(|(from_a, from_b)| circuit.add_wired_gate(Gate::And, &[from_a, from_b]))
             .collect();
     }
     debug_assert_eq!(1, previous_layer.len());
-    let out = circuit.add_gate(Gate::Output);
-    circuit.add_wire(previous_layer[0], out);
+    circuit.add_wired_gate(Gate::Output, &[previous_layer[0]]);
     circuit
 }
 

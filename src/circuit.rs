@@ -79,6 +79,14 @@ impl<Idx: IndexType> Circuit<Idx> {
         debug!("Added wire");
     }
 
+    pub fn add_wired_gate(&mut self, gate: Gate, from: &[GateId<Idx>]) -> GateId<Idx> {
+        let added = self.add_gate(gate);
+        for from_id in from {
+            self.add_wire(*from_id, added);
+        }
+        added
+    }
+
     pub fn and_count(&self) -> usize {
         self.and_count
     }

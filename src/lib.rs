@@ -7,6 +7,7 @@ pub mod errors;
 pub mod evaluate;
 pub mod executor;
 pub mod mult_triple;
+pub mod share_wrapper;
 #[cfg(test)]
 pub(crate) mod test_utils;
 pub mod transport;
