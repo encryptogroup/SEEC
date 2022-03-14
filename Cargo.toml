@@ -15,3 +15,10 @@ nom = "7.1.0"
 petgraph = "0.6.0"
 smallvec = { version = "1.8.0", features = ["union", "const_generics", "serde"]}
 itertools = "0.10.3"
+tracing = "0.1.32"
+itoa = "1.0.1"
+
+[dev-dependencies]
+aes = "0.8.1"
+hex-literal = "0.3.4"
+tracing-subscriber = { version = "0.3.9", features = ["env-filter"]}

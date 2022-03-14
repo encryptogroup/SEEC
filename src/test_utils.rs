@@ -1,5 +1,7 @@
 use crate::circuit::{Circuit, Gate};
 use itertools::Itertools;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 pub(crate) fn create_and_tree(depth: u32) -> Circuit {
     let total_nodes = 2_u32.pow(depth);
@@ -26,4 +28,21 @@ pub(crate) fn create_and_tree(depth: u32) -> Circuit {
     let out = circuit.add_gate(Gate::Output);
     circuit.add_wire(previous_layer[0], out);
     circuit
+}
+
+/// Initializes tracing subscriber with EnvFilter for usage in tests. This should be the first call
+/// in each test, with the returned value being assigned to a variable to prevent dropping.  
+/// Output can be configured via RUST_LOG env variable as explained
+/// [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/struct.EnvFilter.html)
+///
+/// ```
+/// fn some_test() {
+///     let _guard = init_tracing();
+/// }
+/// ```
+pub(crate) fn init_tracing() -> tracing::dispatcher::DefaultGuard {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_test_writer()
+        .set_default()
 }

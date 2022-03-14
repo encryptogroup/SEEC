@@ -1,26 +1,27 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{digit1, multispace0};
-use nom::combinator::{all_consuming, map, map_res};
+use nom::combinator::{all_consuming, map_res};
 use nom::error::ParseError;
 use nom::multi::{count, fill};
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
+use smallvec::SmallVec;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
-    header: Header,
-    gates: Vec<Gate>,
+    pub header: Header,
+    pub gates: Vec<Gate>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Header {
-    gates: usize,
-    wires: usize,
+    pub gates: usize,
+    pub wires: usize,
     /// number n1 and n2 of wires in the inputs to the function given by the circuit
-    input_wires: [usize; 2],
+    pub input_wires: [usize; 2],
     /// n3, number of wires in the output
-    output_wires: usize,
+    pub output_wires: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -30,15 +31,18 @@ pub enum Gate {
     Inv(GateData),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct GateData {
-    // TODO maube use smallvecs here since these very often o
-    input_wires: Vec<GateId>,
-    output_wires: Vec<GateId>,
+impl Gate {
+    pub fn get_data(&self) -> &GateData {
+        let (Gate::And(data) | Gate::Xor(data) | Gate::Inv(data)) = self;
+        data
+    }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct GateId(usize);
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct GateData {
+    pub input_wires: SmallVec<[usize; 2]>,
+    pub output_wires: SmallVec<[usize; 1]>,
+}
 
 fn integer(i: &str) -> IResult<&str, usize> {
     map_res(digit1, |s: &str| s.parse())(i)
@@ -46,10 +50,6 @@ fn integer(i: &str) -> IResult<&str, usize> {
 
 fn integer_ws(i: &str) -> IResult<&str, usize> {
     ws(integer)(i)
-}
-
-fn gate_id(i: &str) -> IResult<&str, GateId> {
-    map(integer_ws, GateId)(i)
 }
 
 fn header(i: &str) -> IResult<&str, Header> {
@@ -69,8 +69,10 @@ fn header(i: &str) -> IResult<&str, Header> {
 
 fn gate(i: &str) -> IResult<&str, Gate> {
     let (i, (num_in_wires, num_out_wires)) = tuple((ws(integer), ws(integer)))(i)?;
-    let (i, input_wires) = count(gate_id, num_in_wires)(i)?;
-    let (i, output_wires) = count(gate_id, num_out_wires)(i)?;
+    let mut input_wires = SmallVec::from_elem(0, num_in_wires);
+    let mut output_wires = SmallVec::from_elem(0, num_out_wires);
+    let (i, _) = fill(integer_ws, &mut input_wires)(i)?;
+    let (i, _) = fill(integer_ws, &mut output_wires)(i)?;
     let gate_data = GateData {
         input_wires,
         output_wires,
@@ -118,7 +120,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::bristol::{circuit, gate, header, Gate, GateData, GateId, Header};
+    use crate::bristol::{circuit, gate, header, Gate, GateData, Header};
     use std::fs;
 
     #[test]
@@ -142,8 +144,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::Xor(GateData {
-                input_wires: vec![GateId(215), GateId(87)],
-                output_wires: vec![GateId(32601)]
+                input_wires: vec![215, 87].into(),
+                output_wires: vec![32601].into()
             }),
             parsed
         );
@@ -155,8 +157,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::Inv(GateData {
-                input_wires: vec![GateId(215)],
-                output_wires: vec![GateId(87), GateId(32601), GateId(42)]
+                input_wires: vec![215].into(),
+                output_wires: vec![87, 32601, 42].into()
             }),
             parsed
         );
@@ -168,8 +170,8 @@ mod tests {
         let parsed = gate(gate_text).unwrap().1;
         assert_eq!(
             Gate::And(GateData {
-                input_wires: vec![GateId(215), GateId(87)],
-                output_wires: vec![GateId(32601)]
+                input_wires: vec![215, 87].into(),
+                output_wires: vec![32601].into()
             }),
             parsed
         );
