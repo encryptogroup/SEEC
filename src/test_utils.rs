@@ -34,7 +34,7 @@ pub(crate) fn create_and_tree(depth: u32) -> Circuit {
 ///     let _guard = init_tracing();
 /// }
 /// ```
-pub(crate) fn init_tracing() -> tracing::dispatcher::DefaultGuard {
+pub fn init_tracing() -> tracing::dispatcher::DefaultGuard {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_test_writer()

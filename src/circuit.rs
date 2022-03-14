@@ -470,7 +470,7 @@ mod tests {
     fn big_circuit() {
         // create a circuit with 10_000 layer of 10_000 nodes each (100_000_000 nodes)
         // this test currently allocates 3.5 GB of memory for a graph idx type of u32
-        let mut circuit = Circuit::<u32>::new();
+        let mut circuit = Circuit::<u32>::with_capacity(100_000_000, 100_000_000);
         for i in 0..10_000 {
             for j in 0..10_000 {
                 if i == 0 {

@@ -54,7 +54,7 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
             .map(|_| MultTriple::zeroes())
             .collect();
 
-        for layer in CircuitLayerIter::new(&self.circuit) {
+        for layer in CircuitLayerIter::new(self.circuit) {
             for (gate, id) in layer.non_interactive {
                 let output = match gate {
                     Gate::Input => gate

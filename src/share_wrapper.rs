@@ -1,13 +1,15 @@
 use crate::circuit::{Circuit, Gate, GateId};
+use itertools::Itertools;
 use petgraph::graph::IndexType;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
+use std::mem;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct ShareWrapper<Idx> {
-    circuit: Rc<RefCell<Circuit<Idx>>>,
+    pub(crate) circuit: Rc<RefCell<Circuit<Idx>>>,
     output_of: GateId<Idx>,
 }
 
@@ -117,4 +119,46 @@ pub fn inputs<Idx: IndexType>(
     (0..inputs)
         .map(|_| ShareWrapper::input(circuit.clone()))
         .collect()
+}
+
+/// Reduce the slice of ShareWrappers with the provided operation. The operation can be a closure
+/// or simply one of the operations implemented on [`ShareWrapper`]s, like [`std::ops::bitand`].  
+/// The circuit will be constructed such that the depth is minimal.
+///
+/// ```rust
+///# use std::cell::RefCell;
+///# use std::rc::Rc;
+///# use gmw_rs::circuit::Circuit;
+///# use gmw_rs::share_wrapper::{inputs, low_depth_reduce};
+///#
+/// let and_tree = Rc::new(RefCell::new(Circuit::<u16>::new()));
+/// let inputs = inputs(and_tree.clone(), 23);
+/// low_depth_reduce(&inputs, std::ops::BitAnd::bitand)
+///     .unwrap()
+///     .output();
+/// ```
+///
+pub fn low_depth_reduce<
+    Idx: IndexType,
+    F: FnMut(ShareWrapper<Idx>, ShareWrapper<Idx>) -> ShareWrapper<Idx>,
+>(
+    shares: &[ShareWrapper<Idx>],
+    mut f: F,
+) -> Option<ShareWrapper<Idx>> {
+    // Todo: This implementation is probably a little bit inefficient. It might be possible to use
+    //  the lower level api to construct the circuit faster. This should be benchmarked however.
+    let mut old_buf = Vec::with_capacity(shares.len() / 2);
+    let mut buf = shares.to_owned();
+    while buf.len() > 1 {
+        mem::swap(&mut buf, &mut old_buf);
+        let mut iter = old_buf.drain(..).tuples();
+        for (s1, s2) in iter.by_ref() {
+            buf.push(f(s1, s2));
+        }
+        for odd in iter.into_buffer() {
+            buf.push(odd)
+        }
+    }
+    debug_assert!(buf.len() <= 1);
+    buf.pop()
 }
