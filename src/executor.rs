@@ -9,6 +9,7 @@ use crate::transport::Transport;
 use petgraph::adj::IndexType;
 use std::fmt::Debug;
 use std::iter;
+use tracing::{info, trace};
 
 pub struct Executor<Idx> {
     circuit: Circuit<Idx>,
@@ -38,11 +39,13 @@ impl<Idx: IndexType> Executor<Idx> {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(party_id = self.party_id), ret)]
     pub async fn execute<Err: Debug, C: Transport<ExecutorMsg, Err>>(
         &mut self,
         inputs: BitVec,
         mut channel: C,
     ) -> Result<BitVec, ExecutorError> {
+        info!(?inputs, "Executing circuit");
         assert_eq!(
             self.circuit.input_count(),
             inputs.len(),
@@ -55,20 +58,25 @@ impl<Idx: IndexType> Executor<Idx> {
         for layer in CircuitLayerIter::new(&self.circuit) {
             for (gate, id) in layer.non_interactive {
                 let output = match gate {
-                    Gate::Input => gate
-                        .evaluate_non_interactive(iter::once(inputs[id.as_usize()]), self.party_id),
+                    Gate::Input => {
+                        let output = gate.evaluate_non_interactive(
+                            iter::once(inputs[id.as_usize()]),
+                            self.party_id,
+                        );
+                        output
+                    }
                     _ => {
                         let inputs = self.gate_inputs(id);
-                        let dbg_inputs: Vec<_> = self.gate_inputs(id).collect();
                         let output = gate.evaluate_non_interactive(inputs, self.party_id);
-                        if self.party_id == 0 {
-                            println!(
-                                "eval {gate:?} id {id:?} inputs: {dbg_inputs:?} output: {output}"
-                            );
-                        }
                         output
                     }
                 };
+                trace!(
+                    output,
+                    gate_id = %id,
+                    "Evaluated {:?} gate",
+                    gate
+                );
 
                 self.gate_outputs.set(id.as_usize(), output);
             }
@@ -111,9 +119,7 @@ impl<Idx: IndexType> Executor<Idx> {
 
             for (output, id) in and_outputs {
                 self.gate_outputs.set(id.as_usize(), output);
-                if self.party_id == 0 {
-                    println!("eval AND with id {id:?} output: {output}");
-                }
+                trace!(output, gate_id = %id, "Evaluated And gate");
             }
         }
         let output_range =
@@ -122,12 +128,9 @@ impl<Idx: IndexType> Executor<Idx> {
     }
 
     fn gate_inputs(&self, id: GateId<Idx>) -> impl Iterator<Item = bool> + '_ {
-        self.circuit.parent_gates(id).map(move |parent_id| {
-            if self.party_id == 0 {
-                println!("parent id {parent_id:?}");
-            }
-            self.gate_outputs[parent_id.as_usize()]
-        })
+        self.circuit
+            .parent_gates(id)
+            .map(move |parent_id| self.gate_outputs[parent_id.as_usize()])
     }
 }
 
@@ -136,7 +139,7 @@ mod tests {
     use crate::circuit::{Circuit, Gate};
     use crate::common::BitVec;
     use crate::executor::Executor;
-    use crate::test_utils::create_and_tree;
+    use crate::test_utils::{create_and_tree, init_tracing};
     use crate::transport::InMemory;
     use aes::cipher::generic_array::GenericArray;
     use aes::cipher::{BlockEncrypt, KeyInit};
@@ -147,6 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_simple_circuit() {
+        let _guard = init_tracing();
         use Gate::*;
         let mut circuit = Circuit::<u32>::new();
         let in_1 = circuit.add_gate(Input);
@@ -175,6 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn eval_and_tree() {
+        let _guard = init_tracing();
         let and_tree = create_and_tree(10);
         let inputs_0 = {
             let mut bits = BitVec::new();
@@ -195,6 +200,7 @@ mod tests {
 
     #[tokio::test]
     async fn eval_2_bit_adder() {
+        let _guard = init_tracing();
         let mut adder = Circuit::<u16>::new();
         let in_a_0 = adder.add_gate(Gate::Input);
         let in_a_1 = adder.add_gate(Gate::Input);
@@ -269,6 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn eval_8_bit_adder() {
+        let _guard = init_tracing();
         let adder = Circuit::load_bristol("test_resources/bristol-circuits/int_add8_depth.bristol")
             .unwrap();
         let inputs_0 = {
@@ -303,6 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn eval_aes_circuit() {
+        let _guard = init_tracing();
         let adder =
             Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt").unwrap();
         let inputs_0 = {
@@ -339,6 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn eval_sha_256_circuit() {
+        let _guard = init_tracing();
         let adder = Circuit::load_bristol("test_resources/bristol-circuits/sha-256.txt").unwrap();
         let inputs_0 = {
             let mut bits = bitvec![u8, Lsb0;0];

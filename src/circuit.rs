@@ -9,9 +9,11 @@ use petgraph::{Directed, Direction, Graph};
 use crate::bristol;
 use petgraph::adj::IndexType;
 use std::collections::{HashSet, VecDeque};
+use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::path::Path;
 use std::{fs, ops};
+use tracing::{debug, info};
 
 type CircuitGraph<Idx> = Graph<Gate, Wire, Directed, Idx>;
 type DefaultIdx = u32;
@@ -58,6 +60,7 @@ impl<Idx: IndexType> Circuit<Idx> {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn add_gate(&mut self, gate: Gate) -> GateId<Idx> {
         match &gate {
             Gate::And => self.and_count += 1,
@@ -65,11 +68,15 @@ impl<Idx: IndexType> Circuit<Idx> {
             Gate::Input => self.input_count += 1,
             _ => (),
         }
-        self.graph.add_node(gate).into()
+        let gate_id = self.graph.add_node(gate.clone()).into();
+        debug!(%gate_id, "Added gate");
+        gate_id
     }
 
+    #[tracing::instrument(skip(self), fields(%from, %to))]
     pub fn add_wire(&mut self, from: GateId<Idx>, to: GateId<Idx>) {
         self.graph.add_edge(from.0, to.0, Wire);
+        debug!("Added wire");
     }
 
     pub fn and_count(&self) -> usize {
@@ -125,7 +132,12 @@ impl<Idx: IndexType> Circuit<Idx> {
 }
 
 impl Circuit<usize> {
+    #[tracing::instrument(skip(bristol))]
     pub fn from_bristol(bristol: bristol::Circuit) -> Result<Self, CircuitError> {
+        info!(
+            "Converting bristol circuit with header: {:?}",
+            bristol.header
+        );
         let mut circuit = Self::with_capacity(bristol.header.gates, bristol.header.wires);
         let total_input_wires = bristol.header.input_wires.iter().sum();
         // We treat the output wires of the bristol::Gates as their GateIds. Unfortunately,
@@ -139,7 +151,6 @@ impl Circuit<usize> {
         for gate in &bristol.gates {
             let gate_data = gate.get_data();
             let added_id = circuit.add_gate(gate.into());
-            println!("added {gate:?} gate with id {added_id:?}");
             for out_wire in &gate_data.output_wires {
                 match wire_mapping.get_mut(*out_wire) {
                     None => return Err(CircuitError::ConversionError),
@@ -151,15 +162,11 @@ impl Circuit<usize> {
                     .get(*input_wire)
                     .ok_or(CircuitError::ConversionError)?;
                 circuit.add_wire(*mapped_input, added_id);
-                println!(
-                    "added wire between {mapped_input:?} (orig {input_wire}) <-> {added_id:?}"
-                );
             }
         }
         let output_gates = bristol.header.wires - bristol.header.output_wires..bristol.header.wires;
         for output_id in &wire_mapping[output_gates] {
             let added_id = circuit.add_gate(Gate::Output);
-            println!("added output gate  with {added_id:?} for original {output_id:?}");
             circuit.add_wire(*output_id, added_id);
         }
         Ok(circuit)
@@ -367,6 +374,12 @@ where
 {
     fn from(val: usize) -> Self {
         GateId(val.into())
+    }
+}
+
+impl<Idx: IndexType> Display for GateId<Idx> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(itoa::Buffer::new().format(self.0.index()))
     }
 }
 
