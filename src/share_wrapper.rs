@@ -24,6 +24,11 @@ impl<Idx: IndexType> ShareWrapper<Idx> {
     }
 }
 
+// TODO currently the std::ops traits are only implemented for Rhs = Self, this means that
+//  users of the Api need to explicitly clone ShareWrapper if they want to use the output of a gate
+//  multiple times. We could implement the traits also for Rhs = &Self which might make it more
+//  ergonomic
+
 impl<Idx: IndexType> BitXor for ShareWrapper<Idx> {
     type Output = Self;
 

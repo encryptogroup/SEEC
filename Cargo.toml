@@ -23,5 +23,6 @@ itoa = "1.0.1"
 
 [dev-dependencies]
 aes = "0.8.1"
+anyhow = "1.0.56"
 hex-literal = "0.3.4"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter"]}

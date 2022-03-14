@@ -3,6 +3,7 @@ use futures::{Sink, Stream};
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::fmt::Debug;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -11,6 +12,7 @@ use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::info;
 
 #[pin_project]
 pub struct Tcp<Item> {
@@ -62,14 +64,17 @@ impl<Item: Serialize> Sink<Item> for Tcp<Item> {
 }
 
 impl<Item> Tcp<Item> {
-    pub async fn listen(addr: impl ToSocketAddrs) -> Result<Self, io::Error> {
+    #[tracing::instrument(err)]
+    pub async fn listen(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
+        info!("Listening for connections");
         let listener = TcpListener::bind(addr).await?;
-        println!("listening on {:?}", listener.local_addr());
         let (socket, _) = listener.accept().await?;
         Ok(Self::from_tcp_stream(socket))
     }
 
-    pub async fn connect(addr: impl ToSocketAddrs) -> Result<Self, io::Error> {
+    #[tracing::instrument(err)]
+    pub async fn connect(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
+        info!("Connecting to remote");
         let socket = TcpStream::connect(addr).await?;
         Ok(Self::from_tcp_stream(socket))
     }

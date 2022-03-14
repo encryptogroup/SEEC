@@ -9,7 +9,7 @@ use petgraph::{Directed, Direction, Graph};
 use crate::bristol;
 use petgraph::adj::IndexType;
 use std::collections::{HashSet, VecDeque};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::path::Path;
 use std::{fs, ops};
@@ -201,6 +201,16 @@ impl<Idx: IndexType> Clone for Circuit<Idx> {
 impl<Idx: IndexType> Default for Circuit<Idx> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<Idx: IndexType> Debug for Circuit<Idx> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Circuit")
+            .field("input_count", &self.input_count)
+            .field("and_count", &self.and_count)
+            .field("output_count", &self.output_count)
+            .finish()
     }
 }
 
