@@ -7,6 +7,7 @@ use crate::mult_triple::MultTriple;
 use crate::transport::Transport;
 
 use petgraph::adj::IndexType;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::iter;
 use tracing::{info, trace};
@@ -17,15 +18,9 @@ pub struct Executor<Idx> {
     party_id: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExecutorMsg {
-    AndLayer(Vec<AndMessage>),
-}
-
-#[derive(Debug, Clone)]
-// Todo: optimize this, data can probably be hoisted into BitVec, should reduce size by 7/8
-pub struct AndMessage {
-    data: (bool, bool),
+    AndLayer { e: BitVec, d: BitVec },
 }
 
 impl<Idx: IndexType> Executor<Idx> {
@@ -40,7 +35,11 @@ impl<Idx: IndexType> Executor<Idx> {
     }
 
     #[tracing::instrument(skip_all, fields(party_id = self.party_id), ret)]
-    pub async fn execute<Err: Debug, C: Transport<ExecutorMsg, Err>>(
+    pub async fn execute<
+        SinkErr: Debug,
+        StreamErr: Debug,
+        C: Transport<ExecutorMsg, SinkErr, StreamErr>,
+    >(
         &mut self,
         inputs: BitVec,
         mut channel: C,
@@ -58,17 +57,11 @@ impl<Idx: IndexType> Executor<Idx> {
         for layer in CircuitLayerIter::new(&self.circuit) {
             for (gate, id) in layer.non_interactive {
                 let output = match gate {
-                    Gate::Input => {
-                        let output = gate.evaluate_non_interactive(
-                            iter::once(inputs[id.as_usize()]),
-                            self.party_id,
-                        );
-                        output
-                    }
+                    Gate::Input => gate
+                        .evaluate_non_interactive(iter::once(inputs[id.as_usize()]), self.party_id),
                     _ => {
                         let inputs = self.gate_inputs(id);
-                        let output = gate.evaluate_non_interactive(inputs, self.party_id);
-                        output
+                        gate.evaluate_non_interactive(inputs, self.party_id)
                     }
                 };
                 trace!(
@@ -82,7 +75,7 @@ impl<Idx: IndexType> Executor<Idx> {
             }
 
             // TODO ugh, the AND handling is ugly and brittle
-            let (and_messages, mts): (Vec<_>, Vec<_>) = layer
+            let ((d, e), mts): ((BitVec, BitVec), Vec<_>) = layer
                 .and_gates
                 .iter()
                 .map(|id| {
@@ -93,28 +86,37 @@ impl<Idx: IndexType> Executor<Idx> {
                         "Currently only support AND gates with 2 inputs"
                     );
                     let mt = mts.pop().expect("Out of mts");
-                    let msg = AndMessage {
-                        data: and::compute_shares(x, y, &mt),
-                    };
+                    let msg = and::compute_shares(x, y, &mt);
                     (msg, mt)
                 })
                 .unzip();
 
             // TODO unnecessary clone
-            channel.send(AndLayer(and_messages.clone())).await.unwrap();
-            let response = channel.next().await.unwrap();
-            let ExecutorMsg::AndLayer(response_and_messages) = response;
+            channel
+                .send(AndLayer {
+                    d: d.clone(),
+                    e: e.clone(),
+                })
+                .await
+                .unwrap();
+            let response = channel.next().await.unwrap().unwrap();
+            let ExecutorMsg::AndLayer {
+                d: resp_d,
+                e: resp_e,
+            } = response;
 
             let and_outputs = layer
                 .and_gates
                 .iter()
-                .zip(and_messages)
-                .zip(response_and_messages)
+                .zip(d)
+                .zip(e)
+                .zip(resp_d)
+                .zip(resp_e)
                 .zip(mts)
-                .map(|(((id, msg_1), msg_2), mt)| {
-                    let d = [msg_1.data.0, msg_2.data.0];
-                    let e = [msg_1.data.1, msg_2.data.1];
-                    (and::evaluate(d, e, mt, self.party_id), *id)
+                .map(|(((((gate_id, d), e), d_resp), e_resp), mt)| {
+                    let d = [d, d_resp];
+                    let e = [e, e_resp];
+                    (and::evaluate(d, e, mt, self.party_id), *gate_id)
                 });
 
             for (output, id) in and_outputs {

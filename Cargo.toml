@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bitvec = "1.0.0"
+bitvec = { version = "1.0.0", features = ["serde"]}
 tokio = { version = "1.17.0", features = ["full"]}
 futures = "0.3.21"
 thiserror = "1.0.30"
@@ -15,6 +15,9 @@ nom = "7.1.0"
 petgraph = "0.6.0"
 smallvec = { version = "1.8.0", features = ["union", "const_generics", "serde"]}
 itertools = "0.10.3"
+tokio-serde = { version = "0.8.0", features = ["bincode"]}
+tokio-util = { version = "0.7.0", features = ["codec"]}
+serde = { version = "1.0.136", features = ["derive"]}
 tracing = "0.1.32"
 itoa = "1.0.1"
 
