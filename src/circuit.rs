@@ -23,6 +23,9 @@ pub struct Circuit<Idx = u32> {
     pub(crate) input_count: usize,
     pub(crate) and_count: usize,
     pub(crate) output_count: usize,
+    // TODO maybe save ids of input and output gates? This would increase overhead a little,
+    //  but would make the circuit more flexible. Currently input gates need to be the ones with
+    // the lowest ids and output gates with the highest
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -181,8 +184,7 @@ impl Circuit<usize> {
     }
 
     pub fn load_bristol(path: impl AsRef<Path>) -> Result<Self, CircuitError> {
-        let bristol_text = fs::read_to_string(path)?;
-        let parsed = bristol::circuit(&bristol_text).map_err(|err| err.to_owned())?;
+        let parsed = bristol::Circuit::load(path)?;
         Circuit::from_bristol(parsed)
     }
 }

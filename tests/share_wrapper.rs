@@ -1,16 +1,16 @@
-use crate::common::init_tracing;
+use crate::common::{execute_circuit, init_tracing};
+use anyhow::Result;
 use gmw_rs::circuit::Circuit;
 use gmw_rs::common::BitVec;
-use gmw_rs::executor::Executor;
 use gmw_rs::share_wrapper::{inputs, low_depth_reduce};
-use gmw_rs::transport::InMemory;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 mod common;
 
 #[tokio::test]
-async fn and_tree() {
+async fn and_tree() -> Result<()> {
+    // TODO assert depth
     let _guard = init_tracing();
     let and_tree = Rc::new(RefCell::new(Circuit::<u16>::new()));
     let inputs = inputs(and_tree.clone(), 23);
@@ -28,13 +28,7 @@ async fn and_tree() {
 
     let exp_output: BitVec = BitVec::repeat(true, 1);
     let and_tree = &and_tree.borrow();
-    let mut ex1 = Executor::new(and_tree, 0);
-    let mut ex2 = Executor::new(and_tree, 1);
-
-    let (t1, t2) = InMemory::new_pair();
-    let h1 = async move { ex1.execute(inputs_0, t1).await };
-    let h2 = async move { ex2.execute(inputs_1, t2).await };
-    let (out1, out2) = futures::join!(h1, h2);
-    let (out1, out2) = (out1.unwrap(), out2.unwrap());
-    assert_eq!(exp_output, out1 ^ out2);
+    let out = execute_circuit(and_tree, (inputs_0, inputs_1)).await?;
+    assert_eq!(exp_output, out);
+    Ok(())
 }

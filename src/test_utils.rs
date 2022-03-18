@@ -1,5 +1,10 @@
 use crate::circuit::{Circuit, Gate};
+use crate::common::BitVec;
+use crate::executor::Executor;
+use crate::transport::InMemory;
+use anyhow::Result;
 use itertools::Itertools;
+use petgraph::graph::IndexType;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
@@ -34,9 +39,24 @@ pub(crate) fn create_and_tree(depth: u32) -> Circuit {
 ///     let _guard = init_tracing();
 /// }
 /// ```
-pub fn init_tracing() -> tracing::dispatcher::DefaultGuard {
+pub(crate) fn init_tracing() -> tracing::dispatcher::DefaultGuard {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_test_writer()
         .set_default()
+}
+
+#[tracing::instrument(skip_all)]
+pub(crate) async fn execute_circuit<Idx: IndexType>(
+    circuit: &Circuit<Idx>,
+    (input_a, input_b): (BitVec, BitVec),
+) -> Result<BitVec> {
+    let (t1, t2) = InMemory::new_pair();
+    let mut ex1 = Executor::new(circuit, 0);
+    let mut ex2 = Executor::new(circuit, 1);
+
+    let h1 = ex1.execute(input_a, t1);
+    let h2 = ex2.execute(input_b, t2);
+    let (out1, out2) = futures::try_join!(h1, h2)?;
+    Ok(out1 ^ out2)
 }

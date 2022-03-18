@@ -1,3 +1,4 @@
+use crate::errors::BristolError;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{digit1, multispace0};
@@ -7,6 +8,8 @@ use nom::multi::{count, fill};
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
 use smallvec::SmallVec;
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
@@ -29,6 +32,13 @@ pub enum Gate {
     And(GateData),
     Xor(GateData),
     Inv(GateData),
+}
+
+impl Circuit {
+    pub fn load(path: impl AsRef<Path>) -> Result<Circuit, BristolError> {
+        let bristol_text = fs::read_to_string(path)?;
+        circuit(&bristol_text).map_err(|err| err.to_owned().into())
+    }
 }
 
 impl Gate {

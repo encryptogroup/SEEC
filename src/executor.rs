@@ -141,21 +141,15 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
 mod tests {
     use crate::circuit::{Circuit, Gate};
     use crate::common::BitVec;
-    use crate::executor::Executor;
     use crate::share_wrapper::{inputs, ShareWrapper};
-    use crate::test_utils::{create_and_tree, init_tracing};
-    use crate::transport::InMemory;
-    use aes::cipher::generic_array::GenericArray;
-    use aes::cipher::{BlockEncrypt, KeyInit};
-    use aes::Aes128;
-    use bitvec::prelude::Msb0;
+    use crate::test_utils::{create_and_tree, execute_circuit, init_tracing};
+    use anyhow::Result;
     use bitvec::{bitvec, prelude::Lsb0};
-    use hex_literal::hex;
     use std::cell::RefCell;
     use std::rc::Rc;
 
     #[tokio::test]
-    async fn execute_simple_circuit() {
+    async fn execute_simple_circuit() -> Result<()> {
         let _guard = init_tracing();
         use Gate::*;
         let mut circuit = Circuit::<u32>::new();
@@ -165,19 +159,16 @@ mod tests {
         let xor_1 = circuit.add_wired_gate(Xor, &[in_2, and_1]);
         let and_2 = circuit.add_wired_gate(And, &[and_1, xor_1]);
         circuit.add_wired_gate(Output, &[and_2]);
-        let mut ex1 = Executor::new(&circuit, 0);
-        let mut ex2 = Executor::new(&circuit, 1);
 
-        let (t1, t2) = InMemory::new_pair();
-        let h1 = async move { ex1.execute(bitvec![u8, Lsb0; 1, 1], t1).await };
-        let h2 = async move { ex2.execute(bitvec![u8, Lsb0; 0, 0], t2).await };
-        let (out1, out2) = futures::join!(h1, h2);
-        let (out1, out2) = (out1.unwrap(), out2.unwrap());
-        assert_eq!(false, out1[0] ^ out2[0]);
+        let inputs = (BitVec::repeat(true, 2), BitVec::repeat(false, 2));
+        let out = execute_circuit(&circuit, inputs).await?;
+        assert_eq!(1, out.len());
+        assert_eq!(false, out[0]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn eval_and_tree() {
+    async fn eval_and_tree() -> Result<()> {
         let _guard = init_tracing();
         let and_tree = create_and_tree(10);
         let inputs_0 = {
@@ -186,19 +177,14 @@ mod tests {
             bits
         };
         let inputs_1 = !inputs_0.clone();
-        let mut ex1 = Executor::new(&and_tree, 0);
-        let mut ex2 = Executor::new(&and_tree, 1);
-
-        let (t1, t2) = InMemory::new_pair();
-        let h1 = async move { ex1.execute(inputs_0, t1).await };
-        let h2 = async move { ex2.execute(inputs_1, t2).await };
-        let (out1, out2) = futures::join!(h1, h2);
-        let (out1, out2) = (out1.unwrap(), out2.unwrap());
-        assert_eq!(true, out1[0] ^ out2[0]);
+        let out = execute_circuit(&and_tree, (inputs_0, inputs_1)).await?;
+        assert_eq!(1, out.len());
+        assert_eq!(true, out[0]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn eval_2_bit_adder() {
+    async fn eval_2_bit_adder() -> Result<()> {
         let _guard = init_tracing();
         let adder = Rc::new(RefCell::new(Circuit::<u16>::new()));
         let inputs = inputs(adder.clone(), 4);
@@ -231,110 +217,8 @@ mod tests {
             bits
         };
         let adder = &adder.borrow();
-        let mut ex1 = Executor::new(adder, 0);
-        let mut ex2 = Executor::new(adder, 1);
-
-        let (t1, t2) = InMemory::new_pair();
-        let h1 = async move { ex1.execute(inputs_0, t1).await };
-        let h2 = async move { ex2.execute(inputs_1, t2).await };
-        let (out1, out2) = futures::join!(h1, h2);
-        let (out1, out2) = (out1.unwrap(), out2.unwrap());
-        assert_eq!(exp_output, out1 ^ out2);
-    }
-
-    #[tokio::test]
-    async fn eval_8_bit_adder() {
-        let _guard = init_tracing();
-        let adder = Circuit::load_bristol("test_resources/bristol-circuits/int_add8_depth.bristol")
-            .unwrap();
-        let inputs_0 = {
-            let mut bits = bitvec![u8, Lsb0;
-                1, 1, 1, 1, 0, 0, 0, 0,
-                1, 0, 1, 0, 0, 0, 0, 0,
-            ];
-            bits.resize(adder.input_count(), false);
-            bits
-        };
-        let inputs_1 = {
-            let mut bits = bitvec![u8, Lsb0; 0];
-            bits.resize(adder.input_count(), false);
-            bits
-        };
-
-        let exp_output: BitVec = {
-            let mut bits = bitvec![u8, Lsb0; 0, 0, 1, 0, 1, 0, 0, 0];
-            bits.resize(adder.output_count(), false);
-            bits
-        };
-        let mut ex1 = Executor::new(&adder, 0);
-        let mut ex2 = Executor::new(&adder, 1);
-
-        let (t1, t2) = InMemory::new_pair();
-        let h1 = async move { ex1.execute(inputs_0, t1).await };
-        let h2 = async move { ex2.execute(inputs_1, t2).await };
-        let (out1, out2) = futures::join!(h1, h2);
-        let (out1, out2) = (out1.unwrap(), out2.unwrap());
-        assert_eq!(exp_output, out1 ^ out2);
-    }
-
-    #[tokio::test]
-    async fn eval_aes_circuit() {
-        let _guard = init_tracing();
-        let adder =
-            Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt").unwrap();
-        let inputs_0 = {
-            let mut bits = bitvec![u8, Lsb0;0];
-            bits.resize(adder.input_count(), false);
-            bits
-        };
-        let inputs_1 = {
-            let mut bits = bitvec![u8, Lsb0; 0];
-            bits.resize(adder.input_count(), false);
-            bits
-        };
-
-        // It seems that the output of the circuit and the aes crate use different bit orderings
-        // for the output.
-        let exp_output: bitvec::vec::BitVec<u8, Msb0> = {
-            let key = GenericArray::from([0u8; 16]);
-            let mut block = GenericArray::from([0u8; 16]);
-            let cipher = Aes128::new(&key);
-            cipher.encrypt_block(&mut block);
-
-            bitvec::vec::BitVec::from_slice(block.as_slice())
-        };
-        let mut ex1 = Executor::new(&adder, 0);
-        let mut ex2 = Executor::new(&adder, 1);
-
-        let (t1, t2) = InMemory::new_pair();
-        let h1 = async move { ex1.execute(inputs_0, t1).await };
-        let h2 = async move { ex2.execute(inputs_1, t2).await };
-        let (out1, out2) = futures::join!(h1, h2);
-        let (out1, out2) = (out1.unwrap(), out2.unwrap());
-        assert_eq!(exp_output, out1 ^ out2);
-    }
-
-    #[tokio::test]
-    async fn eval_sha_256_circuit() {
-        let _guard = init_tracing();
-        let sha = Circuit::load_bristol("test_resources/bristol-circuits/sha-256.txt").unwrap();
-        let inputs_0 = BitVec::repeat(false, sha.input_count());
-        let inputs_1 = BitVec::repeat(false, sha.input_count());
-
-        // The output of the circuit is apparently in Msb order
-        let exp_output: bitvec::vec::BitVec<u8, Msb0> = bitvec::vec::BitVec::from_slice(&hex!(
-            // From: https://homes.esat.kuleuven.be/~nsmart/MPC/sha-256-test.txt
-            // The output of the circuit is not the *normal* sha256 output
-            "da5698be17b9b46962335799779fbeca8ce5d491c0d26243bafef9ea1837a9d8"
-        ));
-        let mut ex1 = Executor::new(&sha, 0);
-        let mut ex2 = Executor::new(&sha, 1);
-
-        let (t1, t2) = InMemory::new_pair();
-        let h1 = async move { ex1.execute(inputs_0, t1).await };
-        let h2 = async move { ex2.execute(inputs_1, t2).await };
-        let (out1, out2) = futures::join!(h1, h2);
-        let (out1, out2) = (out1.unwrap(), out2.unwrap());
-        assert_eq!(exp_output, out1 ^ out2);
+        let out = execute_circuit(adder, (inputs_0, inputs_1)).await?;
+        assert_eq!(exp_output, out);
+        Ok(())
     }
 }
