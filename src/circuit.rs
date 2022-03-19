@@ -35,6 +35,7 @@ pub enum Gate {
     Inv,
     Output,
     Input,
+    Constant(bool),
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Hash, Debug)]
@@ -238,6 +239,13 @@ impl Gate {
                     inp
                 }
             }
+            &Gate::Constant(constant) => {
+                if party_id == 0 {
+                    constant
+                } else {
+                    !constant
+                }
+            }
             Gate::Output | Gate::Input => {
                 let inp = input.next().expect("Empty input");
                 debug_assert!(
@@ -326,7 +334,7 @@ impl<'a, Idx: IndexType> Iterator for CircuitLayerIter<'a, Idx> {
                             })
                         }));
                 }
-                Gate::Input | Gate::Output | Gate::Xor | Gate::Inv => {
+                Gate::Input | Gate::Output | Gate::Xor | Gate::Inv | Gate::Constant(_) => {
                     self.visited.visit(node_idx);
                     layer.add_non_interactive((gate.clone(), node_idx.into()));
                     for neigh in self.graph.neighbors(node_idx) {
@@ -407,7 +415,13 @@ impl<Idx: IndexType> Display for GateId<Idx> {
 mod tests {
     use crate::bristol;
     use crate::circuit::{Circuit, CircuitLayer, CircuitLayerIter, Gate, GateId};
-    use std::fs;
+    use std::{fs, mem};
+
+    #[test]
+    fn gate_size() {
+        // Assert that the gate size stays at 1 byte (might change in the future)
+        assert_eq!(1, mem::size_of::<Gate>());
+    }
 
     #[test]
     fn circuit_layer_iter() {
