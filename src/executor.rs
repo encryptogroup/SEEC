@@ -53,8 +53,9 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
         let mut mts: Vec<_> = (0..self.circuit.and_count())
             .map(|_| MultTriple::zeroes())
             .collect();
-
+        let mut layer_count = 0;
         for layer in CircuitLayerIter::new(self.circuit) {
+            layer_count += 1;
             for (gate, id) in layer.non_interactive {
                 let output = match gate {
                     Gate::Input => gate
@@ -124,6 +125,7 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
                 trace!(output, gate_id = %id, "Evaluated And gate");
             }
         }
+        info!(layer_count);
         // TODO this assumes that the Output gates are the ones with the highest ids
         let output_range =
             self.circuit.gate_count() - self.circuit.output_count()..self.circuit.gate_count();
@@ -141,8 +143,11 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
 mod tests {
     use crate::circuit::{Circuit, Gate};
     use crate::common::BitVec;
+    use crate::executor::ExecutorMsg;
+    use crate::private_test_utils::{
+        create_and_tree, execute_circuit, init_tracing, TestTransport,
+    };
     use crate::share_wrapper::{inputs, ShareWrapper};
-    use crate::test_utils::{create_and_tree, execute_circuit, init_tracing};
     use anyhow::Result;
     use bitvec::{bitvec, prelude::Lsb0};
     use std::cell::RefCell;
@@ -161,7 +166,7 @@ mod tests {
         circuit.add_wired_gate(Output, &[and_2]);
 
         let inputs = (BitVec::repeat(true, 2), BitVec::repeat(false, 2));
-        let out = execute_circuit(&circuit, inputs).await?;
+        let out = execute_circuit(&circuit, inputs, TestTransport::InMemory).await?;
         assert_eq!(1, out.len());
         assert_eq!(false, out[0]);
         Ok(())
@@ -177,7 +182,7 @@ mod tests {
             bits
         };
         let inputs_1 = !inputs_0.clone();
-        let out = execute_circuit(&and_tree, (inputs_0, inputs_1)).await?;
+        let out = execute_circuit(&and_tree, (inputs_0, inputs_1), TestTransport::InMemory).await?;
         assert_eq!(1, out.len());
         assert_eq!(true, out[0]);
         Ok(())
@@ -217,7 +222,7 @@ mod tests {
             bits
         };
         let adder = &adder.borrow();
-        let out = execute_circuit(adder, (inputs_0, inputs_1)).await?;
+        let out = execute_circuit(adder, (inputs_0, inputs_1), TestTransport::InMemory).await?;
         assert_eq!(exp_output, out);
         Ok(())
     }

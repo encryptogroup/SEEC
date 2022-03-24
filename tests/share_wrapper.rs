@@ -1,12 +1,10 @@
-use crate::common::{execute_circuit, init_tracing};
 use anyhow::Result;
 use gmw_rs::circuit::Circuit;
 use gmw_rs::common::BitVec;
+use gmw_rs::private_test_utils::{execute_circuit, init_tracing, TestTransport};
 use gmw_rs::share_wrapper::{inputs, low_depth_reduce};
 use std::cell::RefCell;
 use std::rc::Rc;
-
-mod common;
 
 #[tokio::test]
 async fn and_tree() -> Result<()> {
@@ -28,7 +26,7 @@ async fn and_tree() -> Result<()> {
 
     let exp_output: BitVec = BitVec::repeat(true, 1);
     let and_tree = &and_tree.borrow();
-    let out = execute_circuit(and_tree, (inputs_0, inputs_1)).await?;
+    let out = execute_circuit(and_tree, (inputs_0, inputs_1), TestTransport::Tcp).await?;
     assert_eq!(exp_output, out);
     Ok(())
 }
