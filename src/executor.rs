@@ -143,7 +143,6 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
 mod tests {
     use crate::circuit::{Circuit, Gate};
     use crate::common::BitVec;
-    use crate::executor::ExecutorMsg;
     use crate::private_test_utils::{
         create_and_tree, execute_circuit, init_tracing, TestTransport,
     };

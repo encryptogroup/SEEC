@@ -512,7 +512,7 @@ mod tests {
         );
         assert_eq!(
             converted.input_count(),
-            parsed.header.input_wires.iter().sum()
+            parsed.header.input_wires.iter().sum::<usize>()
         );
         assert_eq!(parsed.header.output_wires, converted.output_count());
         // TODO comparing the wire counts is a little tricky since we have a slightly different

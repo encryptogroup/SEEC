@@ -69,6 +69,8 @@ impl<Item> Tcp<Item> {
         info!("Listening for connections");
         let listener = TcpListener::bind(addr).await?;
         let (socket, _) = listener.accept().await?;
+        // send data ASAP
+        socket.set_nodelay(true)?;
         Ok(Self::from_tcp_stream(socket))
     }
 
@@ -76,6 +78,8 @@ impl<Item> Tcp<Item> {
     pub async fn connect(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
         info!("Connecting to remote");
         let socket = TcpStream::connect(addr).await?;
+        // send data ASAP
+        socket.set_nodelay(true)?;
         Ok(Self::from_tcp_stream(socket))
     }
 
