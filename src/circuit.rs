@@ -9,7 +9,7 @@ use petgraph::{Directed, Direction, Graph};
 use crate::bristol;
 use petgraph::adj::IndexType;
 use std::collections::{HashSet, VecDeque};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::path::Path;
 use std::{fs, ops};
@@ -23,6 +23,9 @@ pub struct Circuit<Idx = u32> {
     pub(crate) input_count: usize,
     pub(crate) and_count: usize,
     pub(crate) output_count: usize,
+    // TODO maybe save ids of input and output gates? This would increase overhead a little,
+    //  but would make the circuit more flexible. Currently input gates need to be the ones with
+    // the lowest ids and output gates with the highest
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -32,6 +35,7 @@ pub enum Gate {
     Inv,
     Output,
     Input,
+    Constant(bool),
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Hash, Debug)]
@@ -77,6 +81,14 @@ impl<Idx: IndexType> Circuit<Idx> {
     pub fn add_wire(&mut self, from: GateId<Idx>, to: GateId<Idx>) {
         self.graph.add_edge(from.0, to.0, Wire);
         debug!("Added wire");
+    }
+
+    pub fn add_wired_gate(&mut self, gate: Gate, from: &[GateId<Idx>]) -> GateId<Idx> {
+        let added = self.add_gate(gate);
+        for from_id in from {
+            self.add_wire(*from_id, added);
+        }
+        added
     }
 
     pub fn and_count(&self) -> usize {
@@ -173,8 +185,7 @@ impl Circuit<usize> {
     }
 
     pub fn load_bristol(path: impl AsRef<Path>) -> Result<Self, CircuitError> {
-        let bristol_text = fs::read_to_string(path)?;
-        let parsed = bristol::circuit(&bristol_text).map_err(|err| err.to_owned())?;
+        let parsed = bristol::Circuit::load(path)?;
         Circuit::from_bristol(parsed)
     }
 }
@@ -193,6 +204,16 @@ impl<Idx: IndexType> Clone for Circuit<Idx> {
 impl<Idx: IndexType> Default for Circuit<Idx> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<Idx: IndexType> Debug for Circuit<Idx> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Circuit")
+            .field("input_count", &self.input_count)
+            .field("and_count", &self.and_count)
+            .field("output_count", &self.output_count)
+            .finish()
     }
 }
 
@@ -216,6 +237,13 @@ impl Gate {
                     !inp
                 } else {
                     inp
+                }
+            }
+            &Gate::Constant(constant) => {
+                if party_id == 0 {
+                    constant
+                } else {
+                    !constant
                 }
             }
             Gate::Output | Gate::Input => {
@@ -306,7 +334,7 @@ impl<'a, Idx: IndexType> Iterator for CircuitLayerIter<'a, Idx> {
                             })
                         }));
                 }
-                Gate::Input | Gate::Output | Gate::Xor | Gate::Inv => {
+                Gate::Input | Gate::Output | Gate::Xor | Gate::Inv | Gate::Constant(_) => {
                     self.visited.visit(node_idx);
                     layer.add_non_interactive((gate.clone(), node_idx.into()));
                     for neigh in self.graph.neighbors(node_idx) {
@@ -387,7 +415,13 @@ impl<Idx: IndexType> Display for GateId<Idx> {
 mod tests {
     use crate::bristol;
     use crate::circuit::{Circuit, CircuitLayer, CircuitLayerIter, Gate, GateId};
-    use std::fs;
+    use std::{fs, mem};
+
+    #[test]
+    fn gate_size() {
+        // Assert that the gate size stays at 1 byte (might change in the future)
+        assert_eq!(1, mem::size_of::<Gate>());
+    }
 
     #[test]
     fn circuit_layer_iter() {
@@ -452,7 +486,7 @@ mod tests {
     fn big_circuit() {
         // create a circuit with 10_000 layer of 10_000 nodes each (100_000_000 nodes)
         // this test currently allocates 3.5 GB of memory for a graph idx type of u32
-        let mut circuit = Circuit::<u32>::new();
+        let mut circuit = Circuit::<u32>::with_capacity(100_000_000, 100_000_000);
         for i in 0..10_000 {
             for j in 0..10_000 {
                 if i == 0 {
@@ -478,7 +512,7 @@ mod tests {
         );
         assert_eq!(
             converted.input_count(),
-            parsed.header.input_wires.iter().sum()
+            parsed.header.input_wires.iter().sum::<usize>()
         );
         assert_eq!(parsed.header.output_wires, converted.output_count());
         // TODO comparing the wire counts is a little tricky since we have a slightly different

@@ -3,6 +3,7 @@ use futures::{Sink, Stream};
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::fmt::Debug;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -11,6 +12,7 @@ use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::info;
 
 #[pin_project]
 pub struct Tcp<Item> {
@@ -62,23 +64,43 @@ impl<Item: Serialize> Sink<Item> for Tcp<Item> {
 }
 
 impl<Item> Tcp<Item> {
-    pub async fn listen(addr: impl ToSocketAddrs) -> Result<Self, io::Error> {
+    #[tracing::instrument(err)]
+    pub async fn listen(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
+        info!("Listening for connections");
         let listener = TcpListener::bind(addr).await?;
-        println!("listening on {:?}", listener.local_addr());
         let (socket, _) = listener.accept().await?;
+        // send data ASAP
+        socket.set_nodelay(true)?;
         Ok(Self::from_tcp_stream(socket))
     }
 
-    pub async fn connect(addr: impl ToSocketAddrs) -> Result<Self, io::Error> {
+    #[tracing::instrument(err)]
+    pub async fn connect(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
+        info!("Connecting to remote");
         let socket = TcpStream::connect(addr).await?;
+        // send data ASAP
+        socket.set_nodelay(true)?;
         Ok(Self::from_tcp_stream(socket))
     }
 
-    /// For testing purposes. Create Server/Client communicating via TcpStreams on localhost:port
-    pub async fn new_pair(port: u16) -> Result<(Self, Self), io::Error> {
+    /// For testing purposes. Create two parties communicating via TcpStreams on localhost:port
+    /// If None is supplied, a random available port is selected
+    pub async fn new_local_pair(port: Option<u16>) -> Result<(Self, Self), io::Error> {
+        // use port 0 to bind to available random one
+        let mut port = port.unwrap_or(0);
         let addr = ("127.0.0.1", port);
-        let (server, client) = tokio::join!(Self::listen(addr), Self::connect(addr));
-        Ok((server?, client?))
+        let listener = TcpListener::bind(addr).await?;
+        if port == 0 {
+            // get the actual port bound to
+            port = listener.local_addr()?.port();
+        }
+        let addr = ("127.0.0.1", port);
+        let accept = async {
+            let (socket, _) = listener.accept().await?;
+            Ok(Self::from_tcp_stream(socket))
+        };
+        let (server, client) = tokio::try_join!(accept, Self::connect(addr))?;
+        Ok((server, client))
     }
 
     fn from_tcp_stream(socket: TcpStream) -> Self {
@@ -119,7 +141,7 @@ mod tests {
         #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
         struct Dummy([u8; 32]);
 
-        let (mut t1, mut t2) = Tcp::new_pair(7744).await.unwrap();
+        let (mut t1, mut t2) = Tcp::new_local_pair(None).await.unwrap();
 
         t1.send(Dummy::default()).await.unwrap();
         assert_eq!(t2.next().await.unwrap().unwrap(), Dummy::default());
