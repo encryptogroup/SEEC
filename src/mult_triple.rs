@@ -1,30 +1,77 @@
-use bitvec::bitarr;
 use bitvec::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize)]
+pub struct MultTriples {
+    a: BitVec,
+    b: BitVec,
+    c: BitVec,
+}
+
+impl MultTriples {
+    /// Create `size` multiplication triples where a,b,c are set to zero. Intended for testing
+    /// purposes.
+    pub fn zeros(size: usize) -> Self {
+        let zeros = BitVec::repeat(false, size);
+        Self {
+            a: zeros.clone(),
+            b: zeros.clone(),
+            c: zeros,
+        }
+    }
+
+    /// Return the amount of multiplication triples.
+    pub fn len(&self) -> usize {
+        self.a.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.a.is_empty()
+    }
+
+    /// Split of the last `count` many multiplication triples into a new `MultTriples`.
+    pub fn split_off_last(&mut self, count: usize) -> Self {
+        let len = self.len();
+        let a = self.a.split_off(len - count);
+        let b = self.b.split_off(len - count);
+        let c = self.c.split_off(len - count);
+        Self { a, b, c }
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = MultTriple> + ExactSizeIterator<Item = MultTriple> + '_ {
+        self.a
+            .iter()
+            .by_vals()
+            .zip(self.b.iter().by_vals())
+            .zip(self.c.iter().by_vals())
+            .map(|((a, b), c)| MultTriple { a, b, c })
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct MultTriple {
-    // holds a single u8, since we only need 3 bits (Note: 5 bits are wasted here, this could
-    // maybe be optimized by not having individual MultTriple structs but storing multiple triples
-    // continuously
-    /// Stores data as [c, a, b]
-    data: BitArray<[u8; 1]>,
+    a: bool,
+    b: bool,
+    c: bool,
 }
 
 impl MultTriple {
-    pub fn zeroes() -> Self {
-        let zeroes = bitarr![u8, Lsb0; 0;3];
-        Self { data: zeroes }
+    pub fn zeros() -> Self {
+        // Default of bool is false
+        Self::default()
     }
 
-    pub fn get_c(&self) -> bool {
-        self.data[0]
+    pub fn a(&self) -> bool {
+        self.a
     }
 
-    pub fn get_a(&self) -> bool {
-        self.data[1]
+    pub fn b(&self) -> bool {
+        self.b
     }
 
-    pub fn get_b(&self) -> bool {
-        self.data[2]
+    pub fn c(&self) -> bool {
+        self.c
     }
 }

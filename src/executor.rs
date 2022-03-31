@@ -3,7 +3,7 @@ use crate::common::BitVec;
 use crate::errors::ExecutorError;
 use crate::evaluate::and;
 use crate::executor::ExecutorMsg::AndLayer;
-use crate::mult_triple::MultTriple;
+use crate::mult_triple::MultTriples;
 use crate::transport::Transport;
 
 use petgraph::adj::IndexType;
@@ -50,9 +50,7 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
             inputs.len(),
             "Length of inputs must be equal to circuit input size"
         );
-        let mut mts: Vec<_> = (0..self.circuit.and_count())
-            .map(|_| MultTriple::zeroes())
-            .collect();
+        let mut mts = MultTriples::zeros(self.circuit.and_count());
         let mut layer_count = 0;
         for layer in CircuitLayerIter::new(self.circuit) {
             layer_count += 1;
@@ -75,20 +73,21 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
                 self.gate_outputs.set(id.as_usize(), output);
             }
 
+            let layer_mts = mts.split_off_last(layer.and_gates.len());
+
             // TODO ugh, the AND handling is ugly and brittle
-            let ((d, e), mts): ((BitVec, BitVec), Vec<_>) = layer
+            let (d, e): (BitVec, BitVec) = layer
                 .and_gates
                 .iter()
-                .map(|id| {
+                .zip(layer_mts.iter())
+                .map(|(id, mt)| {
                     let mut inputs = self.gate_inputs(*id);
                     let (x, y) = (inputs.next().unwrap(), inputs.next().unwrap());
                     debug_assert!(
                         inputs.next().is_none(),
                         "Currently only support AND gates with 2 inputs"
                     );
-                    let mt = mts.pop().expect("Out of mts");
-                    let msg = and::compute_shares(x, y, &mt);
-                    (msg, mt)
+                    and::compute_shares(x, y, &mt)
                 })
                 .unzip();
 
@@ -113,7 +112,7 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
                 .zip(e)
                 .zip(resp_d)
                 .zip(resp_e)
-                .zip(mts)
+                .zip(layer_mts.iter())
                 .map(|(((((gate_id, d), e), d_resp), e_resp), mt)| {
                     let d = [d, d_resp];
                     let e = [e, e_resp];
