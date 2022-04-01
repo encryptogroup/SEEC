@@ -21,3 +21,13 @@ pub enum BristolError {
     #[error("Unable to parse bristol file")]
     ParseFailed(#[from] nom::Err<nom::error::Error<String>>),
 }
+
+#[derive(Debug, Error)]
+pub enum MTProviderError<ReadError, WriteError> {
+    #[error("Sending MT request failed")]
+    RequestFailed(#[source] WriteError),
+    #[error("Receiving MTs failed")]
+    ReceiveFailed(#[source] Option<ReadError>),
+    #[error("Received illegal message from provided")]
+    IllegalMessage,
+}

@@ -1,9 +1,9 @@
 use crate::circuit::{Circuit, CircuitLayerIter, Gate, GateId};
 use crate::common::BitVec;
-use crate::errors::ExecutorError;
+use crate::errors::{CircuitError, ExecutorError};
 use crate::evaluate::and;
 use crate::executor::ExecutorMsg::AndLayer;
-use crate::mult_triple::MultTriples;
+use crate::mult_triple::{MTProvider, MultTriples};
 use crate::transport::Transport;
 
 use petgraph::adj::IndexType;
@@ -16,6 +16,7 @@ pub struct Executor<'c, Idx> {
     circuit: &'c Circuit<Idx>,
     gate_outputs: BitVec,
     party_id: usize,
+    mts: MultTriples,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,33 +25,41 @@ pub enum ExecutorMsg {
 }
 
 impl<'c, Idx: IndexType> Executor<'c, Idx> {
-    pub fn new(circuit: &'c Circuit<Idx>, party_id: usize) -> Self {
+    pub async fn new<P: MTProvider>(
+        circuit: &'c Circuit<Idx>,
+        party_id: usize,
+        mut mt_provider: P,
+    ) -> Result<Executor<'c, Idx>, CircuitError>
+    where
+        P::Error: Debug,
+    {
         let mut gate_outputs = BitVec::new();
         gate_outputs.resize(circuit.gate_count(), false);
-        Self {
+        let mts = mt_provider.request_mts(circuit.and_count()).await.unwrap();
+        Ok(Self {
             circuit,
             gate_outputs,
             party_id,
-        }
+            mts,
+        })
     }
 
     #[tracing::instrument(skip_all, fields(party_id = self.party_id), ret)]
-    pub async fn execute<
-        SinkErr: Debug,
-        StreamErr: Debug,
-        C: Transport<ExecutorMsg, SinkErr, StreamErr>,
-    >(
+    pub async fn execute<C: Transport<ExecutorMsg>>(
         &mut self,
         inputs: BitVec,
         mut channel: C,
-    ) -> Result<BitVec, ExecutorError> {
+    ) -> Result<BitVec, ExecutorError>
+    where
+        C::SinkError: Debug,
+        C::StreamError: Debug,
+    {
         info!(?inputs, "Executing circuit");
         assert_eq!(
             self.circuit.input_count(),
             inputs.len(),
             "Length of inputs must be equal to circuit input size"
         );
-        let mut mts = MultTriples::zeros(self.circuit.and_count());
         let mut layer_count = 0;
         for layer in CircuitLayerIter::new(self.circuit) {
             layer_count += 1;
@@ -73,7 +82,7 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
                 self.gate_outputs.set(id.as_usize(), output);
             }
 
-            let layer_mts = mts.split_off_last(layer.and_gates.len());
+            let layer_mts = self.mts.split_off_last(layer.and_gates.len());
 
             // TODO ugh, the AND handling is ugly and brittle
             let (d, e): (BitVec, BitVec) = layer

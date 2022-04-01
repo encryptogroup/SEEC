@@ -1,3 +1,4 @@
+use crate::transport::Transport;
 use futures::channel::mpsc;
 use futures::channel::mpsc::{unbounded, SendError};
 use futures::{Sink, Stream};
@@ -45,6 +46,11 @@ impl<Item> Sink<Item> for InMemory<Item> {
         let this = self.project();
         this.sender.poll_close(cx)
     }
+}
+
+impl<Item> Transport<Item> for InMemory<Item> {
+    type SinkError = SendError;
+    type StreamError = Infallible;
 }
 
 impl<Item> InMemory<Item> {

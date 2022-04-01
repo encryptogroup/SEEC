@@ -1,5 +1,17 @@
-use bitvec::prelude::*;
+use crate::common::BitVec;
+use async_trait::async_trait;
+use num_integer::div_ceil;
+use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
+
+pub mod insecure_provider;
+pub mod trusted_provider;
+
+#[async_trait]
+pub trait MTProvider {
+    type Error;
+    async fn request_mts(&mut self, amount: usize) -> Result<MultTriples, Self::Error>;
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct MultTriples {
@@ -18,6 +30,25 @@ impl MultTriples {
             b: zeros.clone(),
             c: zeros,
         }
+    }
+
+    pub fn random<RNG: CryptoRng + Rng>(size: usize, rng: &mut RNG) -> [Self; 2] {
+        let bytes = div_ceil(size, 8);
+        let mut bufs = [(); 5].map(|_| vec![0_u8; bytes]);
+        for buf in &mut bufs {
+            rng.fill_bytes(buf);
+        }
+        let bit_bufs = bufs.map(BitVec::from_vec);
+        let [a1, a2, b1, b2, c1] = bit_bufs;
+        let mut c2 = c1.clone();
+        c2 ^= (a1.clone() ^ &a2) & (b1.clone() ^ &b2);
+        [Self::from_raw(a1, b1, c1), Self::from_raw(a2, b2, c2)]
+    }
+
+    fn from_raw(a: BitVec, b: BitVec, c: BitVec) -> Self {
+        assert_eq!(a.len(), b.len());
+        assert_eq!(b.len(), c.len());
+        Self { a, b, c }
     }
 
     /// Return the amount of multiplication triples.
@@ -73,5 +104,19 @@ impl MultTriple {
 
     pub fn c(&self) -> bool {
         self.c
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mult_triple::MultTriples;
+    use rand::thread_rng;
+
+    #[test]
+    fn random_triple() {
+        let [p1, p2] = MultTriples::random(512, &mut thread_rng());
+        let left = p1.c ^ p2.c;
+        let right = (p1.a ^ p2.a) & (p1.b ^ p2.b);
+        assert_eq!(left, right);
     }
 }

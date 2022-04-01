@@ -1,4 +1,6 @@
 use super::util::{TrackingReader, TrackingWriter};
+use crate::transport::Transport;
+use async_stream::stream;
 use futures::{Sink, Stream};
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
@@ -63,6 +65,11 @@ impl<Item: Serialize> Sink<Item> for Tcp<Item> {
     }
 }
 
+impl<Item: DeserializeOwned + Serialize + Unpin> Transport<Item> for Tcp<Item> {
+    type SinkError = io::Error;
+    type StreamError = io::Error;
+}
+
 impl<Item> Tcp<Item> {
     #[tracing::instrument(err)]
     pub async fn listen(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
@@ -81,6 +88,24 @@ impl<Item> Tcp<Item> {
         // send data ASAP
         socket.set_nodelay(true)?;
         Ok(Self::from_tcp_stream(socket))
+    }
+
+    #[tracing::instrument(err)]
+    pub async fn server(
+        addr: impl ToSocketAddrs + Debug,
+    ) -> Result<impl Stream<Item = Self>, io::Error> {
+        info!("Starting Tcp Server");
+        let listener = TcpListener::bind(addr).await?;
+        let s = stream! {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                // send data ASAP
+                socket.set_nodelay(true).unwrap();
+                yield Self::from_tcp_stream(socket);
+
+            }
+        };
+        Ok(s)
     }
 
     /// For testing purposes. Create two parties communicating via TcpStreams on localhost:port
