@@ -1,11 +1,12 @@
 use crate::common::BitVec;
 use async_trait::async_trait;
 use num_integer::div_ceil;
-use rand::{CryptoRng, Rng};
+use rand::{CryptoRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 pub mod insecure_provider;
 pub mod trusted_provider;
+pub mod trusted_seed_provider;
 
 #[async_trait]
 pub trait MTProvider {
@@ -32,17 +33,22 @@ impl MultTriples {
         }
     }
 
-    pub fn random<RNG: CryptoRng + Rng>(size: usize, rng: &mut RNG) -> [Self; 2] {
-        let bytes = div_ceil(size, 8);
-        let mut bufs = [(); 5].map(|_| vec![0_u8; bytes]);
-        for buf in &mut bufs {
-            rng.fill_bytes(buf);
-        }
-        let bit_bufs = bufs.map(BitVec::from_vec);
-        let [a1, a2, b1, b2, c1] = bit_bufs;
-        let mut c2 = c1.clone();
-        c2 ^= (a1.clone() ^ &a2) & (b1.clone() ^ &b2);
-        [Self::from_raw(a1, b1, c1), Self::from_raw(a2, b2, c2)]
+    pub fn random_pair<R: CryptoRng + Rng>(size: usize, rng: &mut R) -> [Self; 2] {
+        let [a1, a2, b1, b2, c1] = rand_mt_bufs(size, rng);
+        let mts1 = Self::from_raw(a1, b1, c1);
+        let c2 = compute_c(&mts1, &a2, &b2);
+        let mts2 = Self::from_raw(a2, b2, c2);
+        [mts1, mts2]
+    }
+
+    pub fn random<R: Rng + CryptoRng + SeedableRng>(size: usize, rng: &mut R) -> Self {
+        let [a, b, c] = rand_mt_bufs(size, rng);
+        Self::from_raw(a, b, c)
+    }
+
+    pub fn random_with_fixed_c<R: Rng + CryptoRng + SeedableRng>(c: BitVec, rng: &mut R) -> Self {
+        let [a, b] = rand_mt_bufs(c.len(), rng);
+        Self::from_raw(a, b, c)
     }
 
     fn from_raw(a: BitVec, b: BitVec, c: BitVec) -> Self {
@@ -81,6 +87,23 @@ impl MultTriples {
     }
 }
 
+fn compute_c(mts: &MultTriples, a: &BitVec, b: &BitVec) -> BitVec {
+    (a.clone() ^ &mts.a) & (b.clone() ^ &mts.b) ^ &mts.c
+}
+
+fn compute_c_owned(mts: MultTriples, a: BitVec, b: BitVec) -> BitVec {
+    (a ^ mts.a) & (b ^ mts.b) ^ mts.c
+}
+
+fn rand_mt_bufs<R: CryptoRng + Rng, const N: usize>(size: usize, rng: &mut R) -> [BitVec; N] {
+    let bytes = div_ceil(size, 8);
+    let mut bufs = [(); N].map(|_| vec![0_u8; bytes]);
+    for buf in &mut bufs {
+        rng.fill_bytes(buf);
+    }
+    bufs.map(BitVec::from_vec)
+}
+
 #[derive(Debug, Default)]
 pub struct MultTriple {
     a: bool,
@@ -114,7 +137,7 @@ mod tests {
 
     #[test]
     fn random_triple() {
-        let [p1, p2] = MultTriples::random(512, &mut thread_rng());
+        let [p1, p2] = MultTriples::random_pair(512, &mut thread_rng());
         let left = p1.c ^ p2.c;
         let right = (p1.a ^ p2.a) & (p1.b ^ p2.b);
         assert_eq!(left, right);

@@ -22,7 +22,7 @@ struct Args {
     #[clap(long)]
     server: SocketAddr,
 
-    /// Optional address of trusted server providing MT's
+    /// Optional address of trusted server providing MTs
     #[clap(long)]
     mt_provider: Option<SocketAddr>,
 
