@@ -3,7 +3,7 @@ use crate::common::BitVec;
 use crate::errors::{CircuitError, ExecutorError};
 use crate::evaluate::and;
 use crate::executor::ExecutorMsg::AndLayer;
-use crate::mult_triple::{MTProvider, MultTriples};
+use crate::mul_triple::{MTProvider, MulTriples};
 use crate::transport::Transport;
 
 use petgraph::adj::IndexType;
@@ -16,7 +16,7 @@ pub struct Executor<'c, Idx> {
     circuit: &'c Circuit<Idx>,
     gate_outputs: BitVec,
     party_id: usize,
-    mts: MultTriples,
+    mts: MulTriples,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

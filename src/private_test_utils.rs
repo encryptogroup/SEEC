@@ -1,7 +1,7 @@
 use crate::circuit::{Circuit, Gate};
 use crate::common::BitVec;
 use crate::executor::Executor;
-use crate::mult_triple::insecure_provider::InsecureMTProvider;
+use crate::mul_triple::insecure_provider::InsecureMTProvider;
 
 use crate::transport::{InMemory, Tcp};
 use anyhow::Result;

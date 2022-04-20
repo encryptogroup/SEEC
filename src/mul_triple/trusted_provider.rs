@@ -1,5 +1,12 @@
+//! Trusted Multiplication Triple Provider.
+//!
+//! This module implements a very basic trusted multiplication provider client/server.
+//! The [`TrustedMTProviderClient`] is used to connect to a [`TrustedMTProviderServer`]. When
+//! [`MTProvider::request_mts`] is called on the client, a request is sent to the server. Upon
+//! receiving it, the server generates random multiplication triples by calling
+//! [`MulTriples::random_pair`] and returns one [`MulTriples`] struct to each party.
 use crate::errors::MTProviderError;
-use crate::mult_triple::{MTProvider, MultTriples};
+use crate::mul_triple::{MTProvider, MulTriples};
 use crate::transport::{Tcp, Transport};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -21,13 +28,13 @@ pub struct TrustedMTProviderClient<T> {
 #[derive(Clone)]
 pub struct TrustedMTProviderServer<T> {
     transport: T,
-    mts: Arc<Mutex<HashMap<String, MultTriples>>>,
+    mts: Arc<Mutex<HashMap<String, MulTriples>>>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum Message {
     RequestTriples { id: String, amount: usize },
-    MultTriples(MultTriples),
+    MulTriples(MulTriples),
 }
 
 impl<T> TrustedMTProviderClient<T> {
@@ -39,7 +46,7 @@ impl<T> TrustedMTProviderClient<T> {
 #[async_trait]
 impl<T: Transport<Message> + Send> MTProvider for TrustedMTProviderClient<T> {
     type Error = MTProviderError<T::StreamError, T::SinkError>;
-    async fn request_mts(&mut self, amount: usize) -> Result<MultTriples, Self::Error> {
+    async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
         self.transport
             .send(Message::RequestTriples {
                 id: self.id.clone(),
@@ -54,7 +61,7 @@ impl<T: Transport<Message> + Send> MTProvider for TrustedMTProviderClient<T> {
             .ok_or(Self::Error::ReceiveFailed(None))?
             .map_err(|err| Self::Error::ReceiveFailed(Some(err)))?;
         match msg {
-            Message::MultTriples(mts) => Ok(mts),
+            Message::MulTriples(mts) => Ok(mts),
             _ => Err(Self::Error::IllegalMessage),
         }
     }
@@ -81,13 +88,13 @@ impl<T: Transport<Message> + Send> TrustedMTProviderServer<T> {
                 // TODO `random` call might be blocking, better use rayon here
                 //  Note: It's fine for the moment, as the Server is not really able to utilize
                 //  parallelization anyway, due to the lock
-                let [mt1, mt2] = MultTriples::random_pair(amount, &mut thread_rng());
+                let [mt1, mt2] = MulTriples::random_pair(amount, &mut thread_rng());
                 vacant.insert(mt1);
                 mt2
             }
             Entry::Occupied(occupied) => occupied.remove(),
         };
-        self.transport.send(Message::MultTriples(mt)).await?;
+        self.transport.send(Message::MulTriples(mt)).await?;
         Ok(())
     }
 

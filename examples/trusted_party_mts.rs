@@ -1,10 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
-
+use gmw_rs::mul_triple::trusted_seed_provider::TrustedMTProviderServer;
 use std::net::SocketAddr;
-
-use gmw_rs::mult_triple::trusted_provider::TrustedMTProviderServer;
+use tracing_subscriber::EnvFilter;
 
 /// Example usage of the `TrustedMTProviderServer`.
 #[derive(Parser, Debug)]

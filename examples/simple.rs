@@ -10,7 +10,7 @@ use bitvec::prelude::*;
 use bitvec::bitvec;
 use gmw_rs::circuit::Circuit;
 use gmw_rs::executor::Executor;
-use gmw_rs::mult_triple::insecure_provider::InsecureMTProvider;
+use gmw_rs::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw_rs::share_wrapper::{inputs, ShareWrapper};
 use gmw_rs::transport::Tcp;
 use std::cell::RefCell;
@@ -46,13 +46,14 @@ fn build_circuit(circuit: Rc<RefCell<Circuit>>) {
 
 #[tracing::instrument(skip(circuit), err)]
 async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
+    // Create a new insecure MTProvider. This will simply provide both parties with multiplication
+    // triples consisting of zeros. The sha256 and trusted_party_mts examples show how to use
+    // a trusted provider.
     let mt_provider = InsecureMTProvider::default();
     // Create a new Executor for the circuit. It's important that the party_id is either 0 or 1,
     // as otherwise wrong results might be computed. In the future, there might be support for more
     // than two parties
-    let mut executor = Executor::new(&circuit, party_id, mt_provider)
-        .await
-        .unwrap();
+    let mut executor = Executor::new(&circuit, party_id, mt_provider).await?;
 
     // Create inputs as a BitVector. The inputs will be used for the input gate with the
     // corresponding index.
