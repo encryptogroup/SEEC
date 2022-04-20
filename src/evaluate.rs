@@ -1,12 +1,14 @@
 pub mod and {
     use crate::mul_triple::MulTriple;
 
+    #[inline]
     pub fn compute_shares(x: bool, y: bool, mt: &MulTriple) -> (bool, bool) {
         let d = x ^ mt.a();
         let e = y ^ mt.b();
         (d, e)
     }
 
+    #[inline]
     pub fn evaluate(d: [bool; 2], e: [bool; 2], mt: MulTriple, party_id: usize) -> bool {
         let d = d[0] ^ d[1];
         let e = e[0] ^ e[1];

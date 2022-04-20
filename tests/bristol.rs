@@ -4,9 +4,10 @@ use aes::Aes128;
 use anyhow::Result;
 use bitvec::bitvec;
 use bitvec::order::{Lsb0, Msb0};
+use hex_literal::hex;
+
 use gmw_rs::common::BitVec;
 use gmw_rs::private_test_utils::{execute_bristol, init_tracing, TestTransport};
-use hex_literal::hex;
 
 #[tokio::test]
 async fn eval_8_bit_adder() -> Result<()> {

@@ -1,8 +1,9 @@
-use pin_project::pin_project;
 use std::io;
 use std::io::{Error, IoSlice};
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 #[pin_project]

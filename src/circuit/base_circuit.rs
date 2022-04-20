@@ -1,86 +1,108 @@
-use crate::errors::CircuitError;
-
-use petgraph::dot::{Config, Dot};
-use petgraph::graph::NodeIndex;
-use petgraph::visit::{IntoNeighbors, IntoNodeIdentifiers, Reversed};
-use petgraph::visit::{VisitMap, Visitable};
-use petgraph::{Directed, Direction, Graph};
-
-use crate::bristol;
-use petgraph::adj::IndexType;
 use std::collections::{HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::path::Path;
 use std::{fs, ops};
-use tracing::{debug, info};
+
+use petgraph::dot::{Config, Dot};
+use petgraph::graph::NodeIndex;
+use petgraph::visit::{IntoNeighbors, Reversed};
+use petgraph::visit::{VisitMap, Visitable};
+use petgraph::{Directed, Direction, Graph};
+use tracing::{debug, info, trace};
+
+use crate::bristol;
+use crate::circuit::{DefaultIdx, GateIdx, LayerIterable};
+use crate::errors::CircuitError;
 
 type CircuitGraph<Idx> = Graph<Gate, Wire, Directed, Idx>;
-pub type DefaultIdx = u32;
 
-pub struct Circuit<Idx = DefaultIdx> {
-    pub(crate) graph: CircuitGraph<Idx>,
-    pub(crate) input_count: usize,
-    pub(crate) and_count: usize,
-    pub(crate) output_count: usize,
-    // TODO maybe save ids of input and output gates? This would increase overhead a little,
-    //  but would make the circuit more flexible. Currently input gates need to be the ones with
-    // the lowest ids and output gates with the highest
+pub struct BaseCircuit<Idx = u32> {
+    graph: CircuitGraph<Idx>,
+    and_count: usize,
+    input_gates: Vec<GateId<Idx>>,
+    output_gates: Vec<GateId<Idx>>,
+    constant_gates: Vec<GateId<Idx>>,
+    // TODO I don't think this field is needed anymore
+    sub_circuit_output_gates: Vec<GateId<Idx>>,
+    pub(crate) sub_circuit_input_gates: Vec<GateId<Idx>>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Gate {
     And,
     Xor,
     Inv,
     Output,
     Input,
+    // Input from a sub circuit called within a circuit.
+    SubCircuitInput,
+    // Output from this circuit into another sub circuit
+    SubCircuitOutput,
     Constant(bool),
 }
 
-#[derive(Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Hash, Debug)]
-pub struct GateId<Idx = DefaultIdx>(NodeIndex<Idx>);
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Hash)]
+pub struct GateId<Idx = DefaultIdx>(pub(crate) Idx);
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Wire;
 
-impl<Idx: IndexType> Circuit<Idx> {
+impl<Idx: GateIdx> BaseCircuit<Idx> {
     pub fn new() -> Self {
         Self {
             graph: Default::default(),
-            input_count: 0,
             and_count: 0,
-            output_count: 0,
+            input_gates: vec![],
+            output_gates: vec![],
+            constant_gates: vec![],
+            sub_circuit_output_gates: vec![],
+            sub_circuit_input_gates: vec![],
         }
     }
 
     pub fn with_capacity(gates: usize, wires: usize) -> Self {
-        let graph = Graph::with_capacity(gates, wires);
-        Self {
-            graph,
-            input_count: 0,
-            and_count: 0,
-            output_count: 0,
-        }
+        let mut new = Self::new();
+        new.graph = Graph::with_capacity(gates, wires);
+        new
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub fn add_gate(&mut self, gate: Gate) -> GateId<Idx> {
-        match &gate {
+        let gate_id = self.graph.add_node(gate).into();
+        match gate {
+            Gate::Input => self.input_gates.push(gate_id),
+            Gate::Constant(_) => self.constant_gates.push(gate_id),
+            Gate::Output => self.output_gates.push(gate_id),
+            Gate::SubCircuitOutput => self.sub_circuit_output_gates.push(gate_id),
+            Gate::SubCircuitInput => self.sub_circuit_input_gates.push(gate_id),
             Gate::And => self.and_count += 1,
-            Gate::Output => self.output_count += 1,
-            Gate::Input => self.input_count += 1,
             _ => (),
         }
-        let gate_id = self.graph.add_node(gate).into();
-        debug!(%gate_id, "Added gate");
+        trace!(%gate_id, "Added gate");
         gate_id
     }
 
-    #[tracing::instrument(skip(self), fields(%from, %to))]
+    #[tracing::instrument(level = "debug", skip(self))]
+    pub fn add_sc_input_gate(&mut self, gate: Gate) -> GateId<Idx> {
+        let gate_id = self.graph.add_node(gate).into();
+        match gate {
+            Gate::Input => self.input_gates.push(gate_id),
+            Gate::Constant(_) => self.constant_gates.push(gate_id),
+            Gate::Output => self.output_gates.push(gate_id),
+            Gate::SubCircuitOutput => self.sub_circuit_output_gates.push(gate_id),
+            Gate::And => self.and_count += 1,
+            _ => (),
+        }
+        self.sub_circuit_input_gates.push(gate_id);
+        debug!(%gate_id, ?gate, "Added sub circuit input gate");
+        gate_id
+    }
+
+    #[tracing::instrument(level="trace", skip(self), fields(%from, %to))]
     pub fn add_wire(&mut self, from: GateId<Idx>, to: GateId<Idx>) {
-        self.graph.add_edge(from.0, to.0, Wire);
-        debug!("Added wire");
+        self.graph.add_edge(from.into(), to.into(), Wire);
+        trace!("Added wire");
     }
 
     pub fn add_wired_gate(&mut self, gate: Gate, from: &[GateId<Idx>]) -> GateId<Idx> {
@@ -91,16 +113,18 @@ impl<Idx: IndexType> Circuit<Idx> {
         added
     }
 
-    pub fn and_count(&self) -> usize {
-        self.and_count
+    pub fn get_gate(&self, id: impl Into<GateId<Idx>>) -> Gate {
+        let id = id.into();
+        self.graph[NodeIndex::from(id)]
     }
 
-    pub fn input_count(&self) -> usize {
-        self.input_count
-    }
-
-    pub fn output_count(&self) -> usize {
-        self.output_count
+    pub fn parent_gates(
+        &self,
+        id: impl Into<GateId<Idx>>,
+    ) -> impl Iterator<Item = GateId<Idx>> + '_ {
+        self.graph
+            .neighbors_directed(id.into().into(), Direction::Incoming)
+            .map(GateId::from)
     }
 
     pub fn gate_count(&self) -> usize {
@@ -109,20 +133,6 @@ impl<Idx: IndexType> Circuit<Idx> {
 
     pub fn wire_count(&self) -> usize {
         self.graph.edge_count()
-    }
-
-    pub fn get_gate(&self, id: impl Into<GateId<Idx>>) -> &Gate {
-        let id = id.into().0;
-        &self.graph[id]
-    }
-
-    pub fn parent_gates(
-        &self,
-        id: impl Into<GateId<Idx>>,
-    ) -> impl Iterator<Item = GateId<Idx>> + '_ {
-        self.graph
-            .neighbors_directed(id.into().0, Direction::Incoming)
-            .map(GateId::from)
     }
 
     pub fn save_dot(&self, path: impl AsRef<Path>) -> Result<(), CircuitError> {
@@ -138,12 +148,42 @@ impl<Idx: IndexType> Circuit<Idx> {
         Ok(())
     }
 
-    pub(crate) fn as_graph(&self) -> &CircuitGraph<Idx> {
+    pub fn as_graph(&self) -> &CircuitGraph<Idx> {
         &self.graph
     }
 }
 
-impl Circuit<usize> {
+impl<Idx> BaseCircuit<Idx> {
+    pub fn and_count(&self) -> usize {
+        self.and_count
+    }
+
+    pub fn input_count(&self) -> usize {
+        self.input_gates.len()
+    }
+
+    pub fn input_gates(&self) -> &[GateId<Idx>] {
+        &self.input_gates
+    }
+
+    pub fn sub_circuit_input_gates(&self) -> &[GateId<Idx>] {
+        &self.sub_circuit_input_gates
+    }
+
+    pub fn output_count(&self) -> usize {
+        self.output_gates.len()
+    }
+
+    pub fn output_gates(&self) -> &[GateId<Idx>] {
+        &self.output_gates
+    }
+
+    pub fn sub_circuit_output_gates(&self) -> &[GateId<Idx>] {
+        &self.sub_circuit_output_gates
+    }
+}
+
+impl BaseCircuit<usize> {
     #[tracing::instrument(skip(bristol))]
     pub fn from_bristol(bristol: bristol::Circuit) -> Result<Self, CircuitError> {
         info!(
@@ -155,7 +195,7 @@ impl Circuit<usize> {
         // We treat the output wires of the bristol::Gates as their GateIds. Unfortunately,
         // the output wires are not given in ascending order, so we need to save a mapping
         // of wire ids to GateIds
-        let mut wire_mapping = vec![GateId::from(0); bristol.header.wires];
+        let mut wire_mapping = vec![GateId::from(0_u32); bristol.header.wires];
         for mapping in &mut wire_mapping[0..total_input_wires] {
             let added_id = circuit.add_gate(Gate::Input);
             *mapping = added_id;
@@ -186,39 +226,58 @@ impl Circuit<usize> {
 
     pub fn load_bristol(path: impl AsRef<Path>) -> Result<Self, CircuitError> {
         let parsed = bristol::Circuit::load(path)?;
-        Circuit::from_bristol(parsed)
+        BaseCircuit::from_bristol(parsed)
     }
 }
 
-impl<Idx: IndexType> Clone for Circuit<Idx> {
+impl<Idx: GateIdx> Clone for BaseCircuit<Idx> {
     fn clone(&self) -> Self {
         Self {
             graph: self.graph.clone(),
-            input_count: self.input_count,
             and_count: self.and_count,
-            output_count: self.output_count,
+            input_gates: self.input_gates.clone(),
+            output_gates: self.output_gates.clone(),
+            constant_gates: self.constant_gates.clone(),
+            sub_circuit_output_gates: self.sub_circuit_output_gates.clone(),
+            sub_circuit_input_gates: self.sub_circuit_input_gates.clone(),
         }
     }
 }
 
-impl<Idx: IndexType> Default for Circuit<Idx> {
+impl<Idx: GateIdx> Default for BaseCircuit<Idx> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<Idx: IndexType> Debug for Circuit<Idx> {
+impl<Idx> Debug for BaseCircuit<Idx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Circuit")
-            .field("input_count", &self.input_count)
-            .field("and_count", &self.and_count)
-            .field("output_count", &self.output_count)
+            .field("input_count", &self.input_count())
+            .field(
+                "sub_circuit_input_gates",
+                &self.sub_circuit_input_gates().len(),
+            )
+            .field("and_count", &self.and_count())
+            .field("output_count", &self.output_count())
+            .field(
+                "sub_circuit_output_gates",
+                &self.sub_circuit_output_gates().len(),
+            )
             .finish()
     }
 }
 
 impl Gate {
-    // TODO mauby have more generic evaluation context?
+    pub fn input_count(&self) -> usize {
+        match self {
+            Gate::Input | Gate::Constant(_) => 0,
+            Gate::Inv | Gate::Output | Gate::SubCircuitInput | Gate::SubCircuitOutput => 1,
+            Gate::And | Gate::Xor => 2,
+        }
+    }
+
+    // TODO maybe have more generic evaluation context?
     pub(crate) fn evaluate_non_interactive(
         &self,
         mut input: impl Iterator<Item = bool>,
@@ -229,7 +288,7 @@ impl Gate {
             Gate::Xor => input.fold(false, ops::BitXor::bitxor),
             Gate::Inv => {
                 let inp = input.next().expect("Empty input");
-                debug_assert!(
+                assert!(
                     input.next().is_none(),
                     "Gate::Output, Gate::Input and Gate::Inv must have single input"
                 );
@@ -246,9 +305,11 @@ impl Gate {
                     !constant
                 }
             }
-            Gate::Output | Gate::Input => {
-                let inp = input.next().expect("Empty input");
-                debug_assert!(
+            Gate::Output | Gate::Input | Gate::SubCircuitInput | Gate::SubCircuitOutput => {
+                let inp = input
+                    .next()
+                    .unwrap_or_else(|| panic!("Empty input for {self:?}"));
+                assert!(
                     input.next().is_none(),
                     "Gate::Output, Gate::Input and Gate::Inv must have single input"
                 );
@@ -268,42 +329,68 @@ impl From<&bristol::Gate> for Gate {
     }
 }
 
-pub struct CircuitLayerIter<'a, Idx: IndexType> {
-    graph: &'a CircuitGraph<Idx>,
+#[derive(Debug)]
+pub struct BaseLayerIter<'a, Idx: GateIdx> {
+    circuit: &'a BaseCircuit<Idx>,
     to_visit: VecDeque<NodeIndex<Idx>>,
     next_layer: VecDeque<NodeIndex<Idx>>,
     visited: <CircuitGraph<Idx> as Visitable>::Map,
 }
 
-impl<'a, Idx: IndexType> CircuitLayerIter<'a, Idx> {
-    pub fn new(circuit: &'a Circuit<Idx>) -> Self {
-        // this assumes that the firs circuit.input_count nodes are the input nodes
-        let graph = circuit.as_graph();
+impl<'a, Idx: GateIdx> BaseLayerIter<'a, Idx> {
+    pub fn new(circuit: &'a BaseCircuit<Idx>) -> Self {
+        let mut uninit = Self::new_uninit(circuit);
+        uninit.next_layer.extend(
+            circuit
+                .input_gates
+                .iter()
+                .chain(&circuit.constant_gates)
+                .copied()
+                .map(Into::<NodeIndex<Idx>>::into),
+        );
+        uninit
+    }
+
+    pub fn new_uninit(circuit: &'a BaseCircuit<Idx>) -> Self {
         let to_visit = VecDeque::new();
-        let next_layer = graph.node_identifiers().take(circuit.input_count).collect();
-        let visited = graph.visit_map();
+        let next_layer = VecDeque::new();
+        let visited = circuit.graph.visit_map();
         Self {
-            graph,
+            circuit,
             to_visit,
             next_layer,
             visited,
         }
     }
+
+    pub fn add_to_visit(&mut self, idx: NodeIndex<Idx>) {
+        self.to_visit.push_back(idx);
+    }
+
+    pub fn add_to_next_layer(&mut self, idx: NodeIndex<Idx>) {
+        self.next_layer.push_back(idx);
+    }
 }
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Eq, PartialEq, Clone)]
 pub struct CircuitLayer<Idx: Hash + PartialEq + Eq> {
+    // TODO alignment of the tuple? Check this and maybe split it into two vecs
     pub(crate) non_interactive: Vec<(Gate, GateId<Idx>)>,
     pub(crate) and_gates: Vec<GateId<Idx>>,
 }
 
-impl<Idx: IndexType> CircuitLayer<Idx> {
+impl<Idx: GateIdx> CircuitLayer<Idx> {
     fn new() -> Self {
         Default::default()
     }
 
-    fn add_non_interactive(&mut self, data: (Gate, GateId<Idx>)) {
-        self.non_interactive.push(data);
+    fn add_non_interactive(&mut self, (gate, gate_id): (Gate, GateId<Idx>)) {
+        match gate {
+            Gate::And => {
+                panic!("Called add_non_interactive() on And gate")
+            }
+            non_interactive => self.non_interactive.push((non_interactive, gate_id)),
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -311,11 +398,13 @@ impl<Idx: IndexType> CircuitLayer<Idx> {
     }
 }
 
-impl<'a, Idx: IndexType> Iterator for CircuitLayerIter<'a, Idx> {
+impl<'a, Idx: GateIdx> Iterator for BaseLayerIter<'a, Idx> {
     type Item = CircuitLayer<Idx>;
 
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     fn next(&mut self) -> Option<Self::Item> {
         // TODO clean this method up
+        let graph = self.circuit.as_graph();
         let mut layer = CircuitLayer::new();
         let mut and_gates: HashSet<GateId<Idx>> = HashSet::new();
         std::mem::swap(&mut self.to_visit, &mut self.next_layer);
@@ -323,27 +412,27 @@ impl<'a, Idx: IndexType> Iterator for CircuitLayerIter<'a, Idx> {
             if self.visited.is_visited(&node_idx) {
                 continue;
             }
-            let gate = &self.graph[node_idx];
+            let gate = &graph[node_idx];
             match gate {
                 Gate::And => {
                     and_gates.insert(node_idx.into());
                     self.next_layer
-                        .extend(self.graph.neighbors(node_idx).filter(|neigh| {
-                            Reversed(self.graph).neighbors(*neigh).all(|b| {
+                        .extend(graph.neighbors(node_idx).filter(|neigh| {
+                            Reversed(graph).neighbors(*neigh).all(|b| {
                                 self.visited.is_visited(&b) || and_gates.contains(&b.into())
                             })
                         }));
                 }
-                Gate::Input | Gate::Output | Gate::Xor | Gate::Inv | Gate::Constant(_) => {
+                _non_interactive => {
                     self.visited.visit(node_idx);
-                    layer.add_non_interactive((gate.clone(), node_idx.into()));
-                    for neigh in self.graph.neighbors(node_idx) {
-                        if Reversed(self.graph)
+                    layer.add_non_interactive((*gate, node_idx.into()));
+                    for neigh in graph.neighbors(node_idx) {
+                        if Reversed(graph)
                             .neighbors(neigh)
                             .all(|b| self.visited.is_visited(&b))
                         {
                             self.to_visit.push_back(neigh);
-                        } else if Reversed(self.graph)
+                        } else if Reversed(graph)
                             .neighbors(neigh)
                             .all(|b| self.visited.is_visited(&b) || and_gates.contains(&b.into()))
                         {
@@ -366,46 +455,81 @@ impl<'a, Idx: IndexType> Iterator for CircuitLayerIter<'a, Idx> {
     }
 }
 
-impl<Idx: IndexType> GateId<Idx> {
+impl<Idx: GateIdx> LayerIterable for BaseCircuit<Idx> {
+    type Layer = CircuitLayer<Idx>;
+    type LayerIter<'this> = BaseLayerIter<'this, Idx> where Self: 'this;
+
+    fn layer_iter(&self) -> Self::LayerIter<'_> {
+        BaseLayerIter::new(self)
+    }
+}
+
+impl<Idx: GateIdx> GateId<Idx> {
     pub fn as_usize(&self) -> usize {
         self.0.index()
     }
 }
 
-impl<Idx: IndexType> From<NodeIndex<Idx>> for GateId<Idx> {
+impl<Idx> From<NodeIndex<Idx>> for GateId<Idx>
+where
+    Idx: GateIdx,
+{
     fn from(idx: NodeIndex<Idx>) -> Self {
-        Self(idx)
+        Self(
+            idx.index()
+                .try_into()
+                .map_err(|_| ())
+                .expect("idx must fit into Idx"),
+        )
+    }
+}
+
+impl<Idx: GateIdx> From<GateId<Idx>> for NodeIndex<Idx> {
+    fn from(id: GateId<Idx>) -> Self {
+        NodeIndex::from(id.0)
     }
 }
 
 impl<Idx> From<u16> for GateId<Idx>
 where
-    NodeIndex<Idx>: From<u16>,
+    Idx: TryFrom<u16>,
 {
     fn from(val: u16) -> Self {
-        GateId(val.into())
+        GateId(
+            val.try_into()
+                .map_err(|_| ())
+                .expect("val must fit into Idx"),
+        )
     }
 }
 
 impl<Idx> From<u32> for GateId<Idx>
 where
-    NodeIndex<Idx>: From<u32>,
+    Idx: TryFrom<u32>,
 {
     fn from(val: u32) -> Self {
-        GateId(val.into())
+        GateId(
+            val.try_into()
+                .map_err(|_| ())
+                .expect("val must fit into Idx"),
+        )
     }
 }
 
 impl<Idx> From<usize> for GateId<Idx>
 where
-    NodeIndex<Idx>: From<usize>,
+    Idx: TryFrom<usize>,
 {
     fn from(val: usize) -> Self {
-        GateId(val.into())
+        GateId(
+            val.try_into()
+                .map_err(|_| ())
+                .expect("val must fit into Idx"),
+        )
     }
 }
 
-impl<Idx: IndexType> Display for GateId<Idx> {
+impl<Idx: GateIdx> Display for GateId<Idx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(itoa::Buffer::new().format(self.0.index()))
     }
@@ -413,9 +537,11 @@ impl<Idx: IndexType> Display for GateId<Idx> {
 
 #[cfg(test)]
 mod tests {
-    use crate::bristol;
-    use crate::circuit::{Circuit, CircuitLayer, CircuitLayerIter, Gate, GateId};
     use std::{fs, mem};
+
+    use crate::bristol;
+    use crate::circuit::base_circuit::{BaseLayerIter, CircuitLayer};
+    use crate::circuit::{BaseCircuit, Gate, GateId};
 
     #[test]
     fn gate_size() {
@@ -425,39 +551,40 @@ mod tests {
 
     #[test]
     fn circuit_layer_iter() {
-        let mut circuit = Circuit::<u32>::new();
+        let mut circuit = BaseCircuit::<u32>::new();
         let inp = || Gate::Input;
         let and = || Gate::And;
         let xor = || Gate::Xor;
         let out = || Gate::Output;
         let in_1 = circuit.add_gate(inp());
         let in_2 = circuit.add_gate(inp());
-        let and_1 = circuit.add_gate(and());
-        let xor_1 = circuit.add_gate(xor());
-        let and_2 = circuit.add_gate(and());
         let out_1 = circuit.add_gate(out());
-        circuit.add_wire(in_1, and_1);
-        circuit.add_wire(in_2, and_1);
-        circuit.add_wire(in_2, xor_1);
-        circuit.add_wire(and_1, xor_1);
-        circuit.add_wire(and_1, and_2);
-        circuit.add_wire(xor_1, and_2);
-        circuit.add_wire(and_2, out_1);
+        let and_1 = circuit.add_wired_gate(and(), &[in_1, in_2]);
+        let in_3 = circuit.add_gate(inp());
+        let xor_1 = circuit.add_wired_gate(xor(), &[in_3, and_1]);
+        let and_2 = circuit.add_wired_gate(and(), &[and_1, xor_1]);
+        let _ = circuit.add_wire(and_2, out_1);
 
-        let mut cl_iter = CircuitLayerIter::new(&circuit);
+        let mut cl_iter = BaseLayerIter::new(&circuit);
 
         let first_layer = CircuitLayer {
-            non_interactive: [(inp(), 0.into()), (inp(), 1.into())].into_iter().collect(),
-            and_gates: [2.into()].into_iter().collect(),
+            non_interactive: [
+                (inp(), 0_u32.into()),
+                (inp(), 1_u32.into()),
+                (inp(), 4_u32.into()),
+            ]
+            .into_iter()
+            .collect(),
+            and_gates: [3_u32.into()].into_iter().collect(),
         };
 
         let snd_layer = CircuitLayer {
-            non_interactive: [(xor(), 3.into())].into_iter().collect(),
-            and_gates: [4.into()].into_iter().collect(),
+            non_interactive: [(xor(), 5_u32.into())].into_iter().collect(),
+            and_gates: [6_u32.into()].into_iter().collect(),
         };
 
         let third_layer = CircuitLayer {
-            non_interactive: [(out(), 5.into())].into_iter().collect(),
+            non_interactive: [(out(), 2_u32.into())].into_iter().collect(),
             and_gates: [].into_iter().collect(),
         };
 
@@ -469,7 +596,7 @@ mod tests {
 
     #[test]
     fn parent_gates() {
-        let mut circuit = Circuit::<u32>::new();
+        let mut circuit = BaseCircuit::<u32>::new();
         let from_0 = circuit.add_gate(Gate::Input);
         let from_1 = circuit.add_gate(Gate::Input);
         let to = circuit.add_gate(Gate::And);
@@ -486,9 +613,9 @@ mod tests {
     fn big_circuit() {
         // create a circuit with 10_000 layer of 10_000 nodes each (100_000_000 nodes)
         // this test currently allocates 3.5 GB of memory for a graph idx type of u32
-        let mut circuit = Circuit::<u32>::with_capacity(100_000_000, 100_000_000);
-        for i in 0..10_000 {
-            for j in 0..10_000 {
+        let mut circuit = BaseCircuit::<u32>::with_capacity(100_000_000, 100_000_000);
+        for i in 0_u32..10_000 {
+            for j in 0_u32..10_000 {
                 if i == 0 {
                     circuit.add_gate(Gate::Input);
                     continue;
@@ -505,7 +632,7 @@ mod tests {
         let aes_text =
             fs::read_to_string("test_resources/bristol-circuits/AES-non-expanded.txt").unwrap();
         let parsed = bristol::circuit(&aes_text).unwrap();
-        let converted = Circuit::from_bristol(parsed.clone()).unwrap();
+        let converted = BaseCircuit::from_bristol(parsed.clone()).unwrap();
         assert_eq!(
             parsed.header.gates + converted.input_count() + converted.output_count(),
             converted.gate_count()
@@ -516,7 +643,7 @@ mod tests {
         );
         assert_eq!(parsed.header.output_wires, converted.output_count());
         // TODO comparing the wire counts is a little tricky since we have a slightly different
-        // view of what a wire is
-        // assert_eq!(parsed.header.wires, converted.wire_count());
+        //  view of what a wire is
+        //  assert_eq!(parsed.header.wires, converted.wire_count());
     }
 }

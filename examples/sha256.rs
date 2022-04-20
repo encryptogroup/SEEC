@@ -1,16 +1,18 @@
+use std::fs::File;
+use std::io::BufWriter;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::Parser;
-use gmw_rs::circuit::Circuit;
+use tracing_subscriber::EnvFilter;
+
+use gmw_rs::circuit::BaseCircuit;
 use gmw_rs::common::BitVec;
 use gmw_rs::executor::Executor;
 use gmw_rs::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw_rs::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 use gmw_rs::transport::Tcp;
-use std::fs::File;
-use std::io::BufWriter;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -38,7 +40,7 @@ struct Args {
 async fn main() -> Result<()> {
     let _guard = init_tracing()?;
     let args = Args::parse();
-    let circuit = Circuit::load_bristol(args.circuit)?;
+    let circuit = BaseCircuit::load_bristol(args.circuit)?.into();
     let mut transport = match args.id {
         0 => Tcp::listen(args.server).await?,
         1 => Tcp::connect(args.server).await?,

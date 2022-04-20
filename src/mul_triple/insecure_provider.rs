@@ -1,7 +1,9 @@
 //! Insecure MTProvider, intended for testing.
-use crate::mul_triple::{MTProvider, MulTriples};
-use async_trait::async_trait;
 use std::convert::Infallible;
+
+use async_trait::async_trait;
+
+use crate::mul_triple::{MTProvider, MulTriples};
 
 /// An insecure [`MTProvider`] which simply returns [`MulTriples::zeros`]. **Do not use in
 /// production!**.

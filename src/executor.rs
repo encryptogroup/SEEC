@@ -1,4 +1,13 @@
-use crate::circuit::{Circuit, CircuitLayerIter, Gate, GateId};
+#[cfg(debug_assertions)]
+use std::collections::HashSet;
+use std::fmt::Debug;
+use std::iter;
+
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info, trace};
+
+use crate::circuit::builder::SubCircuitGate;
+use crate::circuit::{Circuit, CircuitLayerIter, Gate, GateIdx};
 use crate::common::BitVec;
 use crate::errors::{CircuitError, ExecutorError};
 use crate::evaluate::and;
@@ -6,25 +15,24 @@ use crate::executor::ExecutorMsg::AndLayer;
 use crate::mul_triple::{MTProvider, MulTriples};
 use crate::transport::Transport;
 
-use petgraph::adj::IndexType;
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-use std::iter;
-use tracing::{info, trace};
-
 pub struct Executor<'c, Idx> {
     circuit: &'c Circuit<Idx>,
-    gate_outputs: BitVec,
+    gate_outputs: Vec<BitVec>,
     party_id: usize,
     mts: MulTriples,
+    // Used as a sanity check in debug builds. Stores for which gates we have set the output,
+    // so that we can check if an ouput is set before accessing it.
+    #[cfg(debug_assertions)]
+    output_set: HashSet<SubCircuitGate<Idx>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExecutorMsg {
-    AndLayer { e: BitVec, d: BitVec },
+    // TODO ser/de the BitVecs or Vecs? Or maybe a single Vec? e and d have the same length
+    AndLayer { e: Vec<u8>, d: Vec<u8> },
 }
 
-impl<'c, Idx: IndexType> Executor<'c, Idx> {
+impl<'c, Idx: GateIdx> Executor<'c, Idx> {
     pub async fn new<P: MTProvider>(
         circuit: &'c Circuit<Idx>,
         party_id: usize,
@@ -33,14 +41,16 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
     where
         P::Error: Debug,
     {
-        let mut gate_outputs = BitVec::new();
-        gate_outputs.resize(circuit.gate_count(), false);
+        let gate_outputs = vec![BitVec::new(); circuit.circuits.len()];
+
         let mts = mt_provider.request_mts(circuit.and_count()).await.unwrap();
         Ok(Self {
             circuit,
             gate_outputs,
             party_id,
             mts,
+            #[cfg(debug_assertions)]
+            output_set: HashSet::new(),
         })
     }
 
@@ -54,117 +64,161 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
         C::SinkError: Debug,
         C::StreamError: Debug,
     {
-        info!(?inputs, "Executing circuit");
+        info!("Executing circuit");
         assert_eq!(
             self.circuit.input_count(),
             inputs.len(),
             "Length of inputs must be equal to circuit input size"
         );
+        // TODO only count layers if there are and gates
         let mut layer_count = 0;
+        let party_id = self.party_id;
+        let mut and_cnt = 0;
+        // TODO provide the option to calculate next layer  during and communication
+        //  take care to not block tokio threads -> use tokio rayon
         for layer in CircuitLayerIter::new(self.circuit) {
-            layer_count += 1;
-            for (gate, id) in layer.non_interactive {
+            for (gate, sc_gate_id) in layer.non_interactive_iter() {
                 let output = match gate {
-                    Gate::Input => gate
-                        .evaluate_non_interactive(iter::once(inputs[id.as_usize()]), self.party_id),
+                    Gate::Input => {
+                        assert_eq!(
+                            sc_gate_id.circuit_id, 0,
+                            "Input gate in SubCircuit. Use SubCircuitInput"
+                        );
+                        gate.evaluate_non_interactive(
+                            iter::once(inputs[sc_gate_id.gate_id.as_usize()]),
+                            self.party_id,
+                        )
+                    }
                     _ => {
-                        let inputs = self.gate_inputs(id);
+                        let inputs = self.gate_inputs(sc_gate_id);
                         gate.evaluate_non_interactive(inputs, self.party_id)
                     }
                 };
                 trace!(
                     output,
-                    gate_id = %id,
+                    sc_gate_id = %sc_gate_id,
                     "Evaluated {:?} gate",
                     gate
                 );
 
-                self.gate_outputs.set(id.as_usize(), output);
+                self.set_gate_output(sc_gate_id, output);
             }
 
-            let layer_mts = self.mts.split_off_last(layer.and_gates.len());
+            // TODO count() there should be a more efficient option
+            let layer_mts = self.mts.split_off_last(layer.and_iter().count());
 
             // TODO ugh, the AND handling is ugly and brittle
             let (d, e): (BitVec, BitVec) = layer
-                .and_gates
-                .iter()
+                .and_iter()
                 .zip(layer_mts.iter())
                 .map(|(id, mt)| {
-                    let mut inputs = self.gate_inputs(*id);
+                    let mut inputs = self.gate_inputs(id);
                     let (x, y) = (inputs.next().unwrap(), inputs.next().unwrap());
                     debug_assert!(
                         inputs.next().is_none(),
                         "Currently only support AND gates with 2 inputs"
                     );
+                    and_cnt += 1;
                     and::compute_shares(x, y, &mt)
                 })
                 .unzip();
 
+            if d.is_empty() {
+                // If the layer does not contain and gates we continue
+                continue;
+            }
+            // Only count layers with and gates
+            layer_count += 1;
             // TODO unnecessary clone
             channel
                 .send(AndLayer {
-                    d: d.clone(),
-                    e: e.clone(),
+                    d: d.as_raw_slice().to_owned(),
+                    e: e.as_raw_slice().to_owned(),
                 })
                 .await
                 .unwrap();
+            debug!(size = d.len(), "Sending And layer");
             let response = channel.next().await.unwrap().unwrap();
-            let ExecutorMsg::AndLayer {
+            let AndLayer {
                 d: resp_d,
                 e: resp_e,
             } = response;
 
             let and_outputs = layer
-                .and_gates
-                .iter()
+                .and_iter()
                 .zip(d)
                 .zip(e)
-                .zip(resp_d)
-                .zip(resp_e)
+                .zip(BitVec::from_vec(resp_d))
+                .zip(BitVec::from_vec(resp_e))
                 .zip(layer_mts.iter())
                 .map(|(((((gate_id, d), e), d_resp), e_resp), mt)| {
                     let d = [d, d_resp];
                     let e = [e, e_resp];
-                    (and::evaluate(d, e, mt, self.party_id), *gate_id)
+                    (and::evaluate(d, e, mt, party_id), gate_id)
                 });
 
             for (output, id) in and_outputs {
-                self.gate_outputs.set(id.as_usize(), output);
+                self.set_gate_output(id, output);
                 trace!(output, gate_id = %id, "Evaluated And gate");
             }
         }
-        info!(layer_count);
-        // TODO this assumes that the Output gates are the ones with the highest ids
-        let output_range =
-            self.circuit.gate_count() - self.circuit.output_count()..self.circuit.gate_count();
-        Ok(BitVec::from(&self.gate_outputs[output_range]))
+        info!(layer_count, and_cnt);
+        let output_iter = self.circuit.circuits[0].output_gates().iter().map(|id| {
+            #[cfg(debug_assertions)]
+            assert!(
+                self.output_set.contains(&SubCircuitGate::new(0, *id)),
+                "output gate with id {id:?} is not set",
+            );
+            self.gate_outputs[0][id.as_usize()]
+        });
+        Ok(BitVec::from_iter(output_iter))
     }
 
-    fn gate_inputs(&self, id: GateId<Idx>) -> impl Iterator<Item = bool> + '_ {
-        self.circuit
-            .parent_gates(id)
-            .map(move |parent_id| self.gate_outputs[parent_id.as_usize()])
+    fn gate_inputs(&self, id: SubCircuitGate<Idx>) -> impl Iterator<Item = bool> + '_ {
+        self.circuit.parent_gates(id).map(move |parent_id| {
+            #[cfg(debug_assertions)]
+            assert!(
+                self.output_set.contains(&parent_id),
+                "parent {} of {} not set",
+                parent_id,
+                id
+            );
+            self.gate_outputs[parent_id.circuit_id as usize][parent_id.gate_id.as_usize()]
+        })
+    }
+
+    fn set_gate_output(&mut self, id: SubCircuitGate<Idx>, output: bool) {
+        let sc_outputs = &mut self.gate_outputs[id.circuit_id as usize];
+        if sc_outputs.is_empty() {
+            *sc_outputs = BitVec::repeat(
+                false,
+                self.circuit.circuits[id.circuit_id as usize].gate_count(),
+            )
+        }
+        sc_outputs.set(id.gate_id.as_usize(), output);
+        #[cfg(debug_assertions)]
+        self.output_set.insert(id);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::circuit::{Circuit, Gate};
+    use anyhow::Result;
+    use bitvec::{bitvec, prelude::Lsb0};
+
+    use crate::circuit::{BaseCircuit, Gate};
     use crate::common::BitVec;
     use crate::private_test_utils::{
         create_and_tree, execute_circuit, init_tracing, TestTransport,
     };
     use crate::share_wrapper::{inputs, ShareWrapper};
-    use anyhow::Result;
-    use bitvec::{bitvec, prelude::Lsb0};
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use crate::CircuitBuilder;
 
     #[tokio::test]
     async fn execute_simple_circuit() -> Result<()> {
         let _guard = init_tracing();
         use Gate::*;
-        let mut circuit = Circuit::<u32>::new();
+        let mut circuit = BaseCircuit::<u32>::new();
         let in_1 = circuit.add_gate(Input);
         let in_2 = circuit.add_gate(Input);
         let and_1 = circuit.add_wired_gate(And, &[in_1, in_2]);
@@ -173,7 +227,7 @@ mod tests {
         circuit.add_wired_gate(Output, &[and_2]);
 
         let inputs = (BitVec::repeat(true, 2), BitVec::repeat(false, 2));
-        let out = execute_circuit(&circuit, inputs, TestTransport::InMemory).await?;
+        let out = execute_circuit(&circuit.into(), inputs, TestTransport::InMemory).await?;
         assert_eq!(1, out.len());
         assert_eq!(false, out[0]);
         Ok(())
@@ -189,7 +243,12 @@ mod tests {
             bits
         };
         let inputs_1 = !inputs_0.clone();
-        let out = execute_circuit(&and_tree, (inputs_0, inputs_1), TestTransport::InMemory).await?;
+        let out = execute_circuit(
+            &and_tree.into(),
+            (inputs_0, inputs_1),
+            TestTransport::InMemory,
+        )
+        .await?;
         assert_eq!(1, out.len());
         assert_eq!(true, out[0]);
         Ok(())
@@ -198,9 +257,8 @@ mod tests {
     #[tokio::test]
     async fn eval_2_bit_adder() -> Result<()> {
         let _guard = init_tracing();
-        let adder = Rc::new(RefCell::new(Circuit::<u16>::new()));
-        let inputs = inputs(adder.clone(), 4);
-        let [a0, a1, b0, b1]: [ShareWrapper<_>; 4] = inputs.try_into().unwrap();
+        let inputs = inputs(4);
+        let [a0, a1, b0, b1]: [ShareWrapper; 4] = inputs.try_into().unwrap();
         let xor1 = a0.clone() ^ b0.clone();
         let and1 = a0 & b0;
         let xor2 = a1.clone() ^ b1.clone();
@@ -212,24 +270,12 @@ mod tests {
             share.output();
         }
 
-        let inputs_0 = {
-            let mut bits = bitvec![u8, Lsb0; 1, 1, 0, 0];
-            bits.resize(adder.borrow().input_count(), false);
-            bits
-        };
-        let inputs_1 = {
-            let mut bits = bitvec![u8, Lsb0; 0, 1, 0, 1];
-            bits.resize(adder.borrow().input_count(), false);
-            bits
-        };
+        let inputs_0 = bitvec![u8, Lsb0; 1, 1, 0, 0];
+        let inputs_1 = bitvec![u8, Lsb0; 0, 1, 0, 1];
+        let exp_output = bitvec![u8, Lsb0; 1, 1, 0];
 
-        let exp_output: BitVec = {
-            let mut bits = bitvec![u8, Lsb0; 1, 1, 0];
-            bits.resize(adder.borrow().output_count(), false);
-            bits
-        };
-        let adder = &adder.borrow();
-        let out = execute_circuit(adder, (inputs_0, inputs_1), TestTransport::InMemory).await?;
+        let adder = CircuitBuilder::global_into_circuit();
+        let out = execute_circuit(&adder, (inputs_0, inputs_1), TestTransport::InMemory).await?;
         assert_eq!(exp_output, out);
         Ok(())
     }
