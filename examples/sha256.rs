@@ -3,6 +3,8 @@ use clap::Parser;
 use gmw_rs::circuit::Circuit;
 use gmw_rs::common::BitVec;
 use gmw_rs::executor::Executor;
+use gmw_rs::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw_rs::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 use gmw_rs::transport::Tcp;
 use std::fs::File;
 use std::io::BufWriter;
@@ -19,6 +21,10 @@ struct Args {
     /// Address of server to bind or connect to
     #[clap(long)]
     server: SocketAddr,
+
+    /// Optional address of trusted server providing MTs
+    #[clap(long)]
+    mt_provider: Option<SocketAddr>,
 
     /// Sha256 as a bristol circuit
     #[clap(
@@ -38,7 +44,14 @@ async fn main() -> Result<()> {
         1 => Tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
-    let mut executor = Executor::new(&circuit, args.id);
+    let mut executor = if let Some(addr) = args.mt_provider {
+        let transport = Tcp::connect(addr).await?;
+        let mt_provider = TrustedMTProviderClient::new("unique-id".into(), transport);
+        Executor::new(&circuit, args.id, mt_provider).await?
+    } else {
+        let mt_provider = InsecureMTProvider::default();
+        Executor::new(&circuit, args.id, mt_provider).await?
+    };
     let input = BitVec::repeat(false, 768);
     let out = executor.execute(input, &mut transport).await?;
     println!("{out:?}");

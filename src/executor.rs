@@ -1,9 +1,9 @@
 use crate::circuit::{Circuit, CircuitLayerIter, Gate, GateId};
 use crate::common::BitVec;
-use crate::errors::ExecutorError;
+use crate::errors::{CircuitError, ExecutorError};
 use crate::evaluate::and;
 use crate::executor::ExecutorMsg::AndLayer;
-use crate::mult_triple::MultTriple;
+use crate::mul_triple::{MTProvider, MulTriples};
 use crate::transport::Transport;
 
 use petgraph::adj::IndexType;
@@ -16,6 +16,7 @@ pub struct Executor<'c, Idx> {
     circuit: &'c Circuit<Idx>,
     gate_outputs: BitVec,
     party_id: usize,
+    mts: MulTriples,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,35 +25,41 @@ pub enum ExecutorMsg {
 }
 
 impl<'c, Idx: IndexType> Executor<'c, Idx> {
-    pub fn new(circuit: &'c Circuit<Idx>, party_id: usize) -> Self {
+    pub async fn new<P: MTProvider>(
+        circuit: &'c Circuit<Idx>,
+        party_id: usize,
+        mut mt_provider: P,
+    ) -> Result<Executor<'c, Idx>, CircuitError>
+    where
+        P::Error: Debug,
+    {
         let mut gate_outputs = BitVec::new();
         gate_outputs.resize(circuit.gate_count(), false);
-        Self {
+        let mts = mt_provider.request_mts(circuit.and_count()).await.unwrap();
+        Ok(Self {
             circuit,
             gate_outputs,
             party_id,
-        }
+            mts,
+        })
     }
 
     #[tracing::instrument(skip_all, fields(party_id = self.party_id), ret)]
-    pub async fn execute<
-        SinkErr: Debug,
-        StreamErr: Debug,
-        C: Transport<ExecutorMsg, SinkErr, StreamErr>,
-    >(
+    pub async fn execute<C: Transport<ExecutorMsg>>(
         &mut self,
         inputs: BitVec,
         mut channel: C,
-    ) -> Result<BitVec, ExecutorError> {
+    ) -> Result<BitVec, ExecutorError>
+    where
+        C::SinkError: Debug,
+        C::StreamError: Debug,
+    {
         info!(?inputs, "Executing circuit");
         assert_eq!(
             self.circuit.input_count(),
             inputs.len(),
             "Length of inputs must be equal to circuit input size"
         );
-        let mut mts: Vec<_> = (0..self.circuit.and_count())
-            .map(|_| MultTriple::zeroes())
-            .collect();
         let mut layer_count = 0;
         for layer in CircuitLayerIter::new(self.circuit) {
             layer_count += 1;
@@ -75,20 +82,21 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
                 self.gate_outputs.set(id.as_usize(), output);
             }
 
+            let layer_mts = self.mts.split_off_last(layer.and_gates.len());
+
             // TODO ugh, the AND handling is ugly and brittle
-            let ((d, e), mts): ((BitVec, BitVec), Vec<_>) = layer
+            let (d, e): (BitVec, BitVec) = layer
                 .and_gates
                 .iter()
-                .map(|id| {
+                .zip(layer_mts.iter())
+                .map(|(id, mt)| {
                     let mut inputs = self.gate_inputs(*id);
                     let (x, y) = (inputs.next().unwrap(), inputs.next().unwrap());
                     debug_assert!(
                         inputs.next().is_none(),
                         "Currently only support AND gates with 2 inputs"
                     );
-                    let mt = mts.pop().expect("Out of mts");
-                    let msg = and::compute_shares(x, y, &mt);
-                    (msg, mt)
+                    and::compute_shares(x, y, &mt)
                 })
                 .unzip();
 
@@ -113,7 +121,7 @@ impl<'c, Idx: IndexType> Executor<'c, Idx> {
                 .zip(e)
                 .zip(resp_d)
                 .zip(resp_e)
-                .zip(mts)
+                .zip(layer_mts.iter())
                 .map(|(((((gate_id, d), e), d_resp), e_resp), mt)| {
                     let d = [d, d_resp];
                     let e = [e, e_resp];

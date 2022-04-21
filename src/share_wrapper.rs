@@ -196,7 +196,7 @@ pub fn inputs<Idx: IndexType>(
 }
 
 /// Reduce the slice of ShareWrappers with the provided operation. The operation can be a closure
-/// or simply one of the operations implemented on [`ShareWrapper`]s, like [`std::ops::bitand`].  
+/// or simply one of the operations implemented on [`ShareWrapper`]s, like [`std::ops::BitAnd`].  
 /// The circuit will be constructed such that the depth is minimal.
 ///
 /// ```rust

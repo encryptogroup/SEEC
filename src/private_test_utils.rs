@@ -1,16 +1,21 @@
 use crate::circuit::{Circuit, Gate};
 use crate::common::BitVec;
 use crate::executor::Executor;
+use crate::mul_triple::insecure_provider::InsecureMTProvider;
+
 use crate::transport::{InMemory, Tcp};
 use anyhow::Result;
+
 use bitvec::field::BitField;
 use bitvec::order::Lsb0;
 use bitvec::vec;
 use funty::Integral;
 use itertools::Itertools;
 use petgraph::graph::IndexType;
+
 use std::fmt::Debug;
 use std::path::Path;
+
 use tokio::task::spawn_blocking;
 use tokio::time::Instant;
 use tracing::info;
@@ -132,8 +137,11 @@ pub async fn execute_circuit<Idx: IndexType>(
     (input_a, input_b): (BitVec, BitVec),
     transport: TestTransport,
 ) -> Result<BitVec> {
-    let mut ex1 = Executor::new(circuit, 0);
-    let mut ex2 = Executor::new(circuit, 1);
+    let mt_provider = InsecureMTProvider::default();
+    let mut ex1 = Executor::new(circuit, 0, mt_provider.clone())
+        .await
+        .unwrap();
+    let mut ex2 = Executor::new(circuit, 1, mt_provider).await.unwrap();
     let now = Instant::now();
     let (out1, out2) = match transport {
         TestTransport::InMemory => {

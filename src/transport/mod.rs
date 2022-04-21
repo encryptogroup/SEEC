@@ -1,5 +1,4 @@
 use futures::{SinkExt, StreamExt};
-use std::fmt::Debug;
 
 pub mod in_memory;
 pub mod tcp;
@@ -10,15 +9,14 @@ pub use tcp::Tcp;
 
 // TODO I'm not sure how sensible it is to have one struct for reading and writing
 //  if this is split into two structs, reading and writing can be done concurrently
-pub trait Transport<Item, SinkErr: Debug, StreamErr: Debug>:
-    SinkExt<Item, Error = SinkErr> + StreamExt<Item = Result<Item, StreamErr>> + Unpin
+pub trait Transport<Item>:
+    SinkExt<Item, Error = Self::SinkError> + StreamExt<Item = Result<Item, Self::StreamError>> + Unpin
 {
+    type SinkError;
+    type StreamError;
 }
-impl<
-        Item,
-        SinkErr: Debug,
-        StreamErr: Debug,
-        C: SinkExt<Item, Error = SinkErr> + StreamExt<Item = Result<Item, StreamErr>> + Unpin,
-    > Transport<Item, SinkErr, StreamErr> for C
-{
+
+impl<Item, T: Transport<Item>> Transport<Item> for &mut T {
+    type SinkError = T::SinkError;
+    type StreamError = T::StreamError;
 }
