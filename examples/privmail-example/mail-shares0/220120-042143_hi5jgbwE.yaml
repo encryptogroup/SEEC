@@ -1,0 +1,12 @@
+body: ''
+mailfrom: smtp1.asd@meiliboxi.fi
+rcpttos:
+- eka
+secret_share_block: Fn01RmobdQUHDQ==
+secret_share_bucket_blocks:
+  12:
+  - Li4vNTEFIjILITQG
+secret_share_truncated_block: OQAhCRkvJDAbAA==
+sequence_number: 0
+subject: eUQPR2YmPwBpTHdpYhYuRgoM
+uid: KeBmt3BA

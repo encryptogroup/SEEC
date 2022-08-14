@@ -1,6 +1,7 @@
-use crate::circuit::{Circuit, Gate, GateId};
+use crate::circuit::{Circuit, DefaultIdx, Gate, GateId};
 use itertools::Itertools;
 use petgraph::graph::IndexType;
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::mem;
@@ -8,7 +9,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 use std::rc::Rc;
 
 #[derive(Clone)]
-pub struct ShareWrapper<Idx> {
+pub struct ShareWrapper<Idx = DefaultIdx> {
     pub(crate) circuit: Rc<RefCell<Circuit<Idx>>>,
     output_of: GateId<Idx>,
 }
@@ -35,15 +36,11 @@ impl<Idx: IndexType> ShareWrapper<Idx> {
     }
 }
 
-// TODO currently the std::ops traits are only implemented for Rhs = Self, this means that
-//  users of the Api need to explicitly clone ShareWrapper if they want to use the output of a gate
-//  multiple times. We could implement the traits also for Rhs = &Self which might make it more
-//  ergonomic
-
-impl<Idx: IndexType> BitXor for ShareWrapper<Idx> {
+impl<Idx: IndexType, Rhs: Borrow<Self>> BitXor<Rhs> for ShareWrapper<Idx> {
     type Output = Self;
 
-    fn bitxor(self, rhs: Self) -> Self::Output {
+    fn bitxor(self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
         let output_of = {
             let mut circuit = self.circuit.borrow_mut();
             circuit.add_wired_gate(Gate::Xor, &[self.output_of, rhs.output_of])
@@ -71,8 +68,9 @@ impl<Idx: IndexType> BitXor<bool> for ShareWrapper<Idx> {
     }
 }
 
-impl<Idx: IndexType> BitXorAssign for ShareWrapper<Idx> {
-    fn bitxor_assign(&mut self, rhs: Self) {
+impl<Idx: IndexType, Rhs: Borrow<Self>> BitXorAssign<Rhs> for ShareWrapper<Idx> {
+    fn bitxor_assign(&mut self, rhs: Rhs) {
+        let rhs = rhs.borrow();
         let mut circuit = self.circuit.borrow_mut();
         self.output_of = circuit.add_wired_gate(Gate::Xor, &[self.output_of, rhs.output_of]);
     }
@@ -86,10 +84,11 @@ impl<Idx: IndexType> BitXorAssign<bool> for ShareWrapper<Idx> {
     }
 }
 
-impl<Idx: IndexType> BitAnd for ShareWrapper<Idx> {
+impl<Idx: IndexType, Rhs: Borrow<Self>> BitAnd<Rhs> for ShareWrapper<Idx> {
     type Output = Self;
 
-    fn bitand(self, rhs: Self) -> Self::Output {
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
         let output_of = {
             let mut circuit = self.circuit.borrow_mut();
             circuit.add_wired_gate(Gate::And, &[self.output_of, rhs.output_of])
@@ -117,8 +116,9 @@ impl<Idx: IndexType> BitAnd<bool> for ShareWrapper<Idx> {
     }
 }
 
-impl<Idx: IndexType> BitAndAssign for ShareWrapper<Idx> {
-    fn bitand_assign(&mut self, rhs: Self) {
+impl<Idx: IndexType, Rhs: Borrow<Self>> BitAndAssign<Rhs> for ShareWrapper<Idx> {
+    fn bitand_assign(&mut self, rhs: Rhs) {
+        let rhs = rhs.borrow();
         let mut circuit = self.circuit.borrow_mut();
         self.output_of = circuit.add_wired_gate(Gate::And, &[self.output_of, rhs.output_of]);
     }
@@ -132,10 +132,11 @@ impl<Idx: IndexType> BitAndAssign<bool> for ShareWrapper<Idx> {
     }
 }
 
-impl<Idx: IndexType> BitOr for ShareWrapper<Idx> {
+impl<Idx: IndexType, Rhs: Borrow<Self>> BitOr<Rhs> for ShareWrapper<Idx> {
     type Output = Self;
 
-    fn bitor(self, rhs: Self) -> Self::Output {
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
         // a | b <=> (a ^ b) ^ (a & b)
         self.clone() ^ rhs.clone() ^ (self & rhs)
     }
@@ -151,8 +152,9 @@ impl<Idx: IndexType> BitOr<bool> for ShareWrapper<Idx> {
     }
 }
 
-impl<Idx: IndexType> BitOrAssign for ShareWrapper<Idx> {
-    fn bitor_assign(&mut self, rhs: Self) {
+impl<Idx: IndexType, Rhs: Borrow<Self>> BitOrAssign<Rhs> for ShareWrapper<Idx> {
+    fn bitor_assign(&mut self, rhs: Rhs) {
+        let rhs = rhs.borrow();
         *self ^= rhs.clone() ^ (self.clone() & rhs);
     }
 }
@@ -174,6 +176,21 @@ impl<Idx: IndexType> Not for ShareWrapper<Idx> {
         };
         Self {
             circuit: self.circuit,
+            output_of,
+        }
+    }
+}
+
+impl<'a, Idx: IndexType> Not for &'a ShareWrapper<Idx> {
+    type Output = ShareWrapper<Idx>;
+
+    fn not(self) -> Self::Output {
+        let output_of = {
+            let mut circuit = self.circuit.borrow_mut();
+            circuit.add_wired_gate(Gate::Inv, &[self.output_of])
+        };
+        ShareWrapper {
+            circuit: self.circuit.clone(),
             output_of,
         }
     }
@@ -212,13 +229,11 @@ pub fn inputs<Idx: IndexType>(
 ///     .output();
 /// ```
 ///
-pub fn low_depth_reduce<
+pub fn low_depth_reduce<Idx, F>(shares: &[ShareWrapper<Idx>], mut f: F) -> Option<ShareWrapper<Idx>>
+where
     Idx: IndexType,
     F: FnMut(ShareWrapper<Idx>, ShareWrapper<Idx>) -> ShareWrapper<Idx>,
->(
-    shares: &[ShareWrapper<Idx>],
-    mut f: F,
-) -> Option<ShareWrapper<Idx>> {
+{
     // Todo: This implementation is probably a little bit inefficient. It might be possible to use
     //  the lower level api to construct the circuit faster. This should be benchmarked however.
     let mut old_buf = Vec::with_capacity(shares.len() / 2);
