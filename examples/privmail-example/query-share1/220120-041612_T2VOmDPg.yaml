@@ -1,0 +1,17 @@
+bucket_scheme:
+- 3
+- 6
+- 12
+- 45
+keywords:
+- field: BODY
+  keyword: KQtGMHZMPhA9Xg==
+  keyword_bucket_size: 12
+  keyword_bucketed: Oh8NChQEJDUrDzw9
+  keyword_length_mask: rmHyqNqU
+  keyword_truncated: PiMDJBkXIBkJNQ==
+modifier_chain_share: jw==
+not_modifiers:
+- false
+sequence_modifiers: []
+uid: 3+a8Rp/q

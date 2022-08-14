@@ -16,9 +16,9 @@ use std::{fs, ops};
 use tracing::{debug, info};
 
 type CircuitGraph<Idx> = Graph<Gate, Wire, Directed, Idx>;
-type DefaultIdx = u32;
+pub type DefaultIdx = u32;
 
-pub struct Circuit<Idx = u32> {
+pub struct Circuit<Idx = DefaultIdx> {
     pub(crate) graph: CircuitGraph<Idx>,
     pub(crate) input_count: usize,
     pub(crate) and_count: usize,
