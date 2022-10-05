@@ -5,16 +5,16 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use mpc_channel::Tcp;
-use remoc::rch::mpsc::channel;
-use tokio::net::{TcpListener, TcpStream};
+
+
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::BaseCircuit;
 use gmw::common::BitVec;
 use gmw::executor::Executor;
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
+// use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -49,42 +49,11 @@ async fn main() -> Result<()> {
     //     illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     // };
 
-    let (mut base_sender, mut base_receiver) = match args.id {
-        0 => {
-            let listener = TcpListener::bind(args.server).await.unwrap();
-            let (socket, _) = listener.accept().await.unwrap();
-            socket.set_nodelay(true).unwrap();
-            let (socket_rx, socket_tx) = socket.into_split();
-
-            // Establish Remoc connection over TCP.
-            let (conn, tx, rx) = remoc::Connect::io::<_, _, _, _, remoc::codec::Bincode>(
-                remoc::Cfg::default(),
-                socket_rx,
-                socket_tx,
-            )
-            .await
-            .unwrap();
-            tokio::spawn(conn);
-            (tx, rx)
-        }
-        1 => {
-            let socket = TcpStream::connect(args.server).await.unwrap();
-            socket.set_nodelay(true).unwrap();
-            let (socket_rx, socket_tx) = socket.into_split();
-
-            // Establish Remoc connection over TCP.
-            let (conn, tx, rx) = remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-                .await
-                .unwrap();
-            tokio::spawn(conn);
-            (tx, rx)
-        }
-        _ => panic!("Only my-id 0 or 1 are supported"),
+    let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
+        0 => mpc_channel::tcp::listen(args.server, 2).await?,
+        1 => mpc_channel::tcp::connect(args.server, 2).await?,
+        illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
-
-    let (mut sender, remote_receiver) = channel(2);
-    base_sender.send(remote_receiver).await.unwrap();
-    let mut receiver = base_receiver.recv().await.unwrap().unwrap();
 
     let mut executor = /*if let Some(addr) = args.mt_provider*/ {
     //     let transport = Tcp::connect(addr).await?;
@@ -96,7 +65,11 @@ async fn main() -> Result<()> {
     };
     let input = BitVec::repeat(false, 768);
     let out = executor.execute(input, &mut sender, &mut receiver).await?;
-    println!("{out:?}");
+    info!(
+        bytes_written = bytes_written.get(),
+        bytes_read = bytes_read.get(),
+        ?out
+    );
     Ok(())
 }
 

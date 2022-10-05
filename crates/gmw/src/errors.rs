@@ -1,3 +1,4 @@
+use remoc::rch::mpsc::{RecvError, SendError};
 use std::io;
 
 use thiserror::Error;
@@ -24,11 +25,13 @@ pub enum BristolError {
 }
 
 #[derive(Debug, Error)]
-pub enum MTProviderError<ReadError, WriteError> {
+pub enum MTProviderError<Request> {
     #[error("Sending MT request failed")]
-    RequestFailed(#[source] WriteError),
+    RequestFailed(#[from] SendError<Request>),
     #[error("Receiving MTs failed")]
-    ReceiveFailed(#[source] Option<ReadError>),
+    ReceiveFailed(#[from] RecvError),
+    #[error("Remote unexpectedly closed")]
+    RemoteClosed,
     #[error("Received illegal message from provided")]
     IllegalMessage,
 }

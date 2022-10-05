@@ -7,5 +7,5 @@ criterion_main!(
     transpose::benches,
     ot_ext::benches,
     aes_rng::benches,
-    silent_ot::benches
+    // silent_ot::benches
 );

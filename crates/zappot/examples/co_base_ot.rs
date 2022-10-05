@@ -9,7 +9,6 @@ use std::time::Duration;
 use tokio::time::Instant;
 use zappot::base_ot::{Receiver, Sender};
 use zappot::traits::{BaseROTReceiver, BaseROTSender};
-use zappot::transport::Tcp;
 use zappot::util::Block;
 
 #[derive(Parser, Debug, Clone)]
@@ -29,12 +28,12 @@ async fn sender(args: Args) -> Vec<[Block; 2]> {
     let mut sender = Sender::new();
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
-    let mut channel = Tcp::listen(("127.0.0.1", args.port))
+    let (ch_sender, _, ch_receiver, _) = mpc_channel::tcp::listen(("127.0.0.1", args.port), 8)
         .await
         .expect("Error listening for channel connection");
     // Perform the random ots
     sender
-        .send_random(args.num_ots, &mut rng, &mut channel)
+        .send_random(args.num_ots, &mut rng, ch_sender, ch_receiver)
         .await
         .expect("Failed to generate ROTs")
 }
@@ -46,7 +45,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create the receiver. The struct holds no state
     let mut receiver = Receiver::new();
     // Connect to the sender on the listened on port
-    let mut channel = Tcp::connect(("127.0.0.1", args.port))
+    let (ch_sender, _, ch_receiver, _) = mpc_channel::tcp::connect(("127.0.0.1", args.port), 8)
         .await
         .expect("Error listening for channel connection");
     // Randomly choose one of the blocks
@@ -57,7 +56,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
 
     // Perform the random ots
     let ots = receiver
-        .receive_random(&choices, &mut rng, &mut channel)
+        .receive_random(&choices, &mut rng, ch_sender, ch_receiver)
         .await
         .expect("Failed to generate ROTs");
     (ots, choices)

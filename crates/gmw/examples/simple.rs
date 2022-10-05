@@ -9,7 +9,6 @@ use std::time::Duration;
 use anyhow::Result;
 use bitvec::bitvec;
 use bitvec::prelude::*;
-use mpc_channel::Tcp;
 use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
@@ -64,14 +63,14 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // When using the Tcp transport, one party is essentially a server and needs to `listen` for
     // new connections. The other party then `connect`s to it. If party 1 connects before party 0
     // listens, an error will be returned.
-    let tcp_transport = if party_id == 0 {
-        Tcp::listen(("127.0.0.1", 7766)).await?
-    } else {
-        Tcp::connect(("127.0.0.1", 7766)).await?
+    let (mut sender, _bytes_written, mut receiver, _bytes_read) = match party_id {
+        0 => mpc_channel::tcp::listen("127.0.0.1:7766", 2).await?,
+        1 => mpc_channel::tcp::connect("127.0.0.1:7766", 2).await?,
+        illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
     // Execute the circuit and await its result (in the form of a BitVec)
-    let output = executor.execute(inputs, tcp_transport).await?;
+    let output = executor.execute(inputs, &mut sender, &mut receiver).await?;
 
     assert_eq!(circuit.output_count(), output.len());
     // As there is only one output gate, we simply return the first element

@@ -4,14 +4,14 @@ use bytemuck::cast_slice_mut;
 use criterion::{criterion_group, BenchmarkId, Criterion};
 use rand::thread_rng;
 use rand_core::RngCore;
-use zappot::silent;
-use zappot::silent_ot::::bit_shift_xor;
+use zappot::silent_ot;
+use zappot::silent_ot::bit_shift_xor;
 
 use zappot::util::Block;
 
 fn bench_bit_shift_xor(c: &mut Criterion) {
     let mut group = c.benchmark_group("bit_shift_xor");
-    let conf = silent_ot::::configure(1 << 24, 2, 128);
+    let conf = silent_ot::configure(1 << 24, 2, 128);
 
     let n_blocks = conf.n_blocks();
     let mut dest = rand_blocks(n_blocks);

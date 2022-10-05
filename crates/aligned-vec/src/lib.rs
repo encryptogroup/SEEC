@@ -3,20 +3,24 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::ptr::NonNull;
 use std::{fmt, mem, ptr, slice};
+use typenum::{PowerOfTwo, Unsigned};
+
+pub use typenum;
 
 /// AlignedVec is an over-aligned vector where the element is aligned on a `ALIGN` byte boundary.
-pub struct AlignedVec<T, const ALIGN: usize> {
+pub struct AlignedVec<T, ALIGN: Unsigned + PowerOfTwo> {
     ptr: NonNull<T>,
     cap: usize,
     len: usize,
     _marker: PhantomData<T>,
+    _align: PhantomData<ALIGN>,
 }
 
-impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
+impl<T, ALIGN: Unsigned + PowerOfTwo> AlignedVec<T, ALIGN> {
     pub fn new() -> Self {
         assert_ne!(mem::size_of::<T>(), 0, "AlignedVec doesn't support ZSTs");
         assert!(
-            ALIGN >= mem::align_of::<T>(),
+            ALIGN::to_usize() >= mem::align_of::<T>(),
             "ALIGN is smaller than alignment of T"
         );
         Self {
@@ -24,13 +28,14 @@ impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
             cap: 0,
             len: 0,
             _marker: PhantomData,
+            _align: PhantomData,
         }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         assert_ne!(mem::size_of::<T>(), 0, "AlignedVec doesn't support ZSTs");
         assert!(
-            ALIGN >= mem::align_of::<T>(),
+            ALIGN::to_usize() >= mem::align_of::<T>(),
             "ALIGN is smaller than alignment of T"
         );
         if capacity == 0 {
@@ -40,12 +45,15 @@ impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
                 .checked_mul(mem::size_of::<T>())
                 .expect("Size overflow");
             unsafe {
-                let ptr = alloc(Layout::from_size_align(size, ALIGN).expect("Illegal layout"));
+                let ptr = alloc(
+                    Layout::from_size_align(size, ALIGN::to_usize()).expect("Illegal layout"),
+                );
                 Self {
                     ptr: NonNull::new(ptr as *mut T).expect("Allocation failed"),
                     cap: capacity,
                     len: 0,
                     _marker: PhantomData,
+                    _align: PhantomData,
                 }
             }
         }
@@ -53,6 +61,10 @@ impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.cap
     }
 
     pub fn as_ptr(&self) -> *const T {
@@ -101,7 +113,8 @@ impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
             assert_ne!(new_size, 0, "AlignedVec doesn't support ZSTs");
             if self.cap == 0 {
                 unsafe {
-                    let layout = Layout::from_size_align(new_size, ALIGN).expect("Illegal Layout");
+                    let layout = Layout::from_size_align(new_size, ALIGN::to_usize())
+                        .expect("Illegal Layout");
                     self.ptr = NonNull::new(alloc(layout) as *mut T).expect("Allocation failed");
                     self.cap = new_cap;
                 }
@@ -116,20 +129,20 @@ impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
         }
     }
 
-    pub fn push(&mut self, elem: T) {
-        unsafe {
-            self.reserve(1);
-            self.as_mut_ptr().add(self.len).write(elem);
-            self.len += 1;
-        }
-    }
-
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             None
         } else {
             self.len -= 1;
             unsafe { Some(ptr::read(self.ptr.as_ptr().add(self.len))) }
+        }
+    }
+
+    pub fn push(&mut self, elem: T) {
+        unsafe {
+            self.reserve(1);
+            self.as_mut_ptr().add(self.len).write(elem);
+            self.len += 1;
         }
     }
 
@@ -146,11 +159,11 @@ impl<T, const ALIGN: usize> AlignedVec<T, ALIGN> {
             .cap
             .checked_mul(mem::size_of::<T>())
             .expect("Size overflow");
-        Layout::from_size_align(size, ALIGN).expect("Illegal Layout")
+        Layout::from_size_align(size, ALIGN::to_usize()).expect("Illegal Layout")
     }
 }
 
-impl<T: Clone, const ALIGN: usize> AlignedVec<T, ALIGN> {
+impl<T: Clone, ALIGN: Unsigned + PowerOfTwo> AlignedVec<T, ALIGN> {
     pub fn resize(&mut self, new_len: usize, value: T) {
         let len = self.len();
 
@@ -190,7 +203,7 @@ impl<T: Clone, const ALIGN: usize> AlignedVec<T, ALIGN> {
     }
 }
 
-impl<T, const ALIGN: usize> Drop for AlignedVec<T, ALIGN> {
+impl<T, ALIGN: Unsigned + PowerOfTwo> Drop for AlignedVec<T, ALIGN> {
     #[inline]
     fn drop(&mut self) {
         let elem_size = mem::size_of::<T>();
@@ -204,7 +217,7 @@ impl<T, const ALIGN: usize> Drop for AlignedVec<T, ALIGN> {
     }
 }
 
-impl<T: Clone, const ALIGN: usize> Clone for AlignedVec<T, ALIGN> {
+impl<T: Clone, ALIGN: Unsigned + PowerOfTwo> Clone for AlignedVec<T, ALIGN> {
     #[inline]
     fn clone(&self) -> Self {
         unsafe {
@@ -216,7 +229,7 @@ impl<T: Clone, const ALIGN: usize> Clone for AlignedVec<T, ALIGN> {
     }
 }
 
-impl<T, const ALIGN: usize> Deref for AlignedVec<T, ALIGN> {
+impl<T, ALIGN: Unsigned + PowerOfTwo> Deref for AlignedVec<T, ALIGN> {
     type Target = [T];
 
     #[inline]
@@ -225,14 +238,14 @@ impl<T, const ALIGN: usize> Deref for AlignedVec<T, ALIGN> {
     }
 }
 
-impl<T, const ALIGN: usize> DerefMut for AlignedVec<T, ALIGN> {
+impl<T, ALIGN: Unsigned + PowerOfTwo> DerefMut for AlignedVec<T, ALIGN> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_slice()
     }
 }
 
-impl<T, const ALIGN: usize> From<&[T]> for AlignedVec<T, ALIGN>
+impl<T, ALIGN: Unsigned + PowerOfTwo> From<&[T]> for AlignedVec<T, ALIGN>
 where
     T: Clone,
 {
@@ -243,7 +256,7 @@ where
     }
 }
 
-impl<T, I: slice::SliceIndex<[T]>, const ALIGN: usize> Index<I> for AlignedVec<T, ALIGN> {
+impl<T, I: slice::SliceIndex<[T]>, ALIGN: Unsigned + PowerOfTwo> Index<I> for AlignedVec<T, ALIGN> {
     type Output = I::Output;
 
     #[inline]
@@ -252,21 +265,23 @@ impl<T, I: slice::SliceIndex<[T]>, const ALIGN: usize> Index<I> for AlignedVec<T
     }
 }
 
-impl<T, I: slice::SliceIndex<[T]>, const ALIGN: usize> IndexMut<I> for AlignedVec<T, ALIGN> {
+impl<T, I: slice::SliceIndex<[T]>, ALIGN: Unsigned + PowerOfTwo> IndexMut<I>
+    for AlignedVec<T, ALIGN>
+{
     #[inline]
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         IndexMut::index_mut(&mut **self, index)
     }
 }
 
-impl<T: fmt::Debug, const ALIGN: usize> fmt::Debug for AlignedVec<T, ALIGN> {
+impl<T: fmt::Debug, ALIGN: Unsigned + PowerOfTwo> fmt::Debug for AlignedVec<T, ALIGN> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.as_slice().fmt(f)
     }
 }
 
-impl<T, const ALIGN: usize> Default for AlignedVec<T, ALIGN> {
+impl<T, ALIGN: Unsigned + PowerOfTwo> Default for AlignedVec<T, ALIGN> {
     fn default() -> Self {
         Self::new()
     }
@@ -304,23 +319,24 @@ impl Drop for SetLenOnDrop<'_> {
     }
 }
 
-unsafe impl<T: Send, const ALIGN: usize> Send for AlignedVec<T, ALIGN> {}
-unsafe impl<T: Sync, const ALIGN: usize> Sync for AlignedVec<T, ALIGN> {}
+unsafe impl<T: Send, ALIGN: Unsigned + PowerOfTwo> Send for AlignedVec<T, ALIGN> {}
+unsafe impl<T: Sync, ALIGN: Unsigned + PowerOfTwo> Sync for AlignedVec<T, ALIGN> {}
 
 #[cfg(test)]
 mod tests {
     use crate::AlignedVec;
     use std::arch::x86_64::{__m128i, _mm_load_si128};
+    use typenum::U32;
 
     #[test]
     fn alignment() {
-        let av: AlignedVec<_, 32> = AlignedVec::from(&[0_64; 64][..]);
+        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_64; 64][..]);
         assert_eq!(av.as_ptr() as usize % 32, 0)
     }
 
     #[test]
     fn alignment_after_realloc() {
-        let mut av: AlignedVec<_, 32> = AlignedVec::new();
+        let mut av: AlignedVec<_, U32> = AlignedVec::new();
         for i in 0..64 {
             av.push(i);
         }
@@ -329,20 +345,20 @@ mod tests {
 
     #[test]
     fn slice_is_legal() {
-        let av: AlignedVec<_, 32> = AlignedVec::from(&[0_64; 64][..]);
+        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_64; 64][..]);
         dbg!(av[63]);
     }
 
     #[test]
     #[should_panic]
     fn index_panics() {
-        let av: AlignedVec<_, 32> = AlignedVec::from(&[0_64; 64][..]);
+        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_64; 64][..]);
         dbg!(av[64]);
     }
 
     #[test]
     fn load_si128_from_vec() {
-        let av: AlignedVec<u64, 32> = (&[42; 2][..]).into();
+        let av: AlignedVec<u64, U32> = (&[42; 2][..]).into();
         let bits = unsafe { _mm_load_si128(&av[0] as *const _ as *const __m128i) };
         dbg!(bits);
     }

@@ -1,3 +1,4 @@
+use aligned_vec::typenum::U32;
 use aligned_vec::AlignedVec;
 use bitpolymul_sys::{
     bc_to_lch_2_unit256, bc_to_mono_2_unit256, btfy_128, decode_128, encode_128_half_input_zero,
@@ -9,12 +10,12 @@ use std::cmp::max;
 pub struct FftPoly {
     n: usize,
     n_pow2: usize,
-    poly: AlignedVec<u64, 32>,
+    poly: AlignedVec<u64, U32>,
 }
 
 #[derive(Default, Clone)]
 pub struct DecodeCache {
-    temp: AlignedVec<u64, 32>,
+    temp: AlignedVec<u64, U32>,
 }
 
 impl FftPoly {
@@ -43,7 +44,7 @@ impl FftPoly {
             return;
         }
         let log_n = log2_ceil(self.n_pow2);
-        let mut temp: AlignedVec<_, 32> = AlignedVec::from(data);
+        let mut temp: AlignedVec<_, U32> = AlignedVec::from(data);
         temp.resize(self.n_pow2, 0);
         let n_pow2 = self.n_pow2.try_into().expect("n_pow2 overflows u32");
         unsafe {

@@ -20,6 +20,3 @@ pub mod mul_triple;
 pub mod private_test_utils;
 pub mod share_wrapper;
 pub(crate) mod utils;
-
-pub type Sender<T> = remoc::rch::mpsc::Sender<T, remoc::codec::Bincode>;
-pub type Receiver<T> = remoc::rch::mpsc::Receiver<T, remoc::codec::Bincode>;

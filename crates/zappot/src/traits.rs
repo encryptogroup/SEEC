@@ -2,20 +2,17 @@
 use crate::util::Block;
 use async_trait::async_trait;
 use bitvec::slice::BitSlice;
-use futures::{Sink, TryStream};
-use mpc_channel::Channel;
 use rand::{CryptoRng, RngCore};
-use std::fmt::{Debug, Formatter};
+use remoc::rch::mpsc::{RecvError, SendError};
+use std::fmt::Debug;
 use thiserror::Error;
 
-pub type ProtocolError<Msg, Ch> = Error<Msg, <Ch as Sink<Msg>>::Error, <Ch as TryStream>::Error>;
-
 #[derive(Error, Debug)]
-pub enum Error<Msg, SinkErr, StreamErr> {
+pub enum Error<Msg> {
     #[error("Error sending value")]
-    Send(SinkErr),
+    Send(#[from] SendError<Msg>),
     #[error("Error receiving value")]
-    Receive(StreamErr),
+    Receive(#[from] RecvError),
     #[error("Received out of order message")]
     WrongOrder(Msg),
     #[error("The other party terminated the protocol")]
@@ -32,15 +29,15 @@ pub trait BaseROTSender {
     type Msg;
 
     /// Send `count` number of random OTs via the provided channel.
-    async fn send_random<RNG, CH>(
+    async fn send_random<RNG>(
         &mut self,
         count: usize,
         rng: &mut RNG,
-        channel: &mut CH,
-    ) -> Result<Vec<[Block; 2]>, ProtocolError<Self::Msg, CH>>
+        sender: mpc_channel::Sender<Self::Msg>,
+        receiver: mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
-        RNG: RngCore + CryptoRng + Send,
-        CH: Channel<Self::Msg> + Unpin + Send;
+        RNG: RngCore + CryptoRng + Send;
 }
 
 /// Receiver of base random OTs.
@@ -49,15 +46,15 @@ pub trait BaseROTReceiver {
     type Msg;
 
     /// Receive `count` number of random OTs via the provided channel.
-    async fn receive_random<RNG, CH>(
+    async fn receive_random<RNG>(
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        channel: &mut CH,
-    ) -> Result<Vec<Block>, ProtocolError<Self::Msg, CH>>
+        sender: mpc_channel::Sender<Self::Msg>,
+        receiver: mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
-        RNG: RngCore + CryptoRng + Send,
-        CH: Channel<Self::Msg> + Unpin + Send;
+        RNG: RngCore + CryptoRng + Send;
 }
 
 /// OT extension sender.
@@ -65,15 +62,15 @@ pub trait BaseROTReceiver {
 pub trait ExtROTSender {
     type Msg;
 
-    async fn send_random<RNG, CH>(
+    async fn send_random<RNG>(
         &mut self,
         count: usize,
         rng: &mut RNG,
-        channel: &mut CH,
-    ) -> Result<Vec<[Block; 2]>, ProtocolError<Self::Msg, CH>>
+        sender: mpc_channel::Sender<Self::Msg>,
+        receiver: mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
-        RNG: RngCore + CryptoRng + Send,
-        CH: Channel<Self::Msg> + Unpin + Send;
+        RNG: RngCore + CryptoRng + Send;
 }
 
 /// OT extension receiver.
@@ -81,18 +78,18 @@ pub trait ExtROTSender {
 pub trait ExtROTReceiver {
     type Msg;
 
-    async fn receive_random<RNG, CH>(
+    async fn receive_random<RNG>(
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        channel: &mut CH,
-    ) -> Result<Vec<Block>, ProtocolError<Self::Msg, CH>>
+        sender: mpc_channel::Sender<Self::Msg>,
+        receiver: mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
-        RNG: RngCore + CryptoRng + Send,
-        CH: Channel<Self::Msg> + Unpin + Send;
+        RNG: RngCore + CryptoRng + Send;
 }
 
-// impl<Msg, Ch: Channel<Msg>> Debug for ProtocolError<Msg, Ch> {
+// impl<Msg, Ch: Channel<Msg>> Debug for Error<Msg, Ch> {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 //         f.debug_tuple("test").finish()
 //     }

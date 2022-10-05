@@ -1,5 +1,5 @@
 //! Chou Orlandi base OT protocol.
-use crate::traits::{BaseROTReceiver, BaseROTSender, Error, ProtocolError};
+use crate::traits::{BaseROTReceiver, BaseROTSender, Error};
 use crate::util::Block;
 use crate::{DefaultRom, Rom128};
 use async_trait::async_trait;
@@ -10,12 +10,9 @@ use blake2::Digest;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
-use futures::{SinkExt, StreamExt, TryStreamExt};
-use mpc_channel::Channel;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use thiserror::Error;
 
 #[derive(Debug, Default, Clone)]
 pub struct Sender;
@@ -47,28 +44,28 @@ impl BaseROTSender for Sender {
     type Msg = BaseOTMsg;
 
     #[allow(non_snake_case)]
-    async fn send_random<RNG, CH>(
+    async fn send_random<RNG>(
         &mut self,
         count: usize,
         rng: &mut RNG,
-        channel: &mut CH,
-    ) -> Result<Vec<[Block; 2]>, ProtocolError<Self::Msg, CH>>
+        sender: mpc_channel::Sender<Self::Msg>,
+        mut receiver: mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
-        CH: Channel<Self::Msg> + Unpin + Send,
     {
-        let (stream, sink) = channel.split_mut();
         let a = Scalar::random(rng);
         let mut A = &RISTRETTO_BASEPOINT_TABLE * &a;
         let seed: Block = rng.gen();
         // TODO: libOTE uses fixedKeyAES hash here, using Blake should be fine and not really
         //  impact performance
         let seed_comm = seed.rom_hash();
-        sink.send(BaseOTMsg::First(A, seed_comm))
+        sender
+            .send(BaseOTMsg::First(A, seed_comm))
             .await
             .map_err(Error::Send)?;
-        let msg = stream
-            .try_next()
+        let msg = receiver
+            .recv()
             .await
             .map_err(Error::Receive)?
             .ok_or(Error::UnexpectedTermination)?;
@@ -79,7 +76,8 @@ impl BaseROTSender for Sender {
         if count != points.len() {
             return Err(Error::UnexpectedTermination);
         }
-        sink.send(BaseOTMsg::Third(seed))
+        sender
+            .send(BaseOTMsg::Third(seed))
             .await
             .map_err(Error::Send)?;
         A *= a;
@@ -103,19 +101,18 @@ impl BaseROTReceiver for Receiver {
     type Msg = BaseOTMsg;
 
     #[allow(non_snake_case)]
-    async fn receive_random<RNG, CH>(
+    async fn receive_random<RNG>(
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        channel: &mut CH,
-    ) -> Result<Vec<Block>, ProtocolError<Self::Msg, CH>>
+        sender: mpc_channel::Sender<Self::Msg>,
+        mut receiver: mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
-        CH: Channel<Self::Msg> + Unpin + Send,
     {
-        let (stream, sink) = channel.split_mut();
-        let msg = stream
-            .try_next()
+        let msg = receiver
+            .recv()
             .await
             .map_err(Error::Receive)?
             .ok_or(Error::UnexpectedTermination)?;
@@ -132,11 +129,12 @@ impl BaseROTReceiver for Receiver {
                 (b, B[choice.as_usize()])
             })
             .unzip();
-        sink.send(BaseOTMsg::Second(Bs))
+        sender
+            .send(BaseOTMsg::Second(Bs))
             .await
             .map_err(Error::Send)?;
-        let msg = stream
-            .try_next()
+        let msg = receiver
+            .recv()
             .await
             .map_err(Error::Receive)?
             .ok_or(Error::UnexpectedTermination)?;
@@ -174,20 +172,19 @@ mod tests {
     use crate::base_ot::{Receiver, Sender};
     use crate::traits::{BaseROTReceiver, BaseROTSender};
     use bitvec::bitvec;
-    use mpc_channel::in_memory::InMemory;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
     #[tokio::test]
     async fn base_rot() {
-        let (mut ch1, mut ch2) = InMemory::new_pair();
+        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
         let mut rng_send = StdRng::seed_from_u64(42);
         let mut rng_recv = StdRng::seed_from_u64(42 * 42);
         let mut sender = Sender;
         let mut receiver = Receiver;
-        let send = sender.send_random(128, &mut rng_send, &mut ch1);
+        let send = sender.send_random(128, &mut rng_send, ch1.0, ch1.1);
         let choices = bitvec![0;128];
-        let receive = receiver.receive_random(&choices, &mut rng_recv, &mut ch2);
+        let receive = receiver.receive_random(&choices, &mut rng_recv, ch2.0, ch2.1);
 
         let (sender_out, receiver_out) = tokio::try_join!(send, receive).unwrap();
         for (recv, [send, _]) in receiver_out.into_iter().zip(sender_out) {

@@ -9,8 +9,7 @@ use crate::util::{log2_ceil, Block};
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
 use bitvec::vec::BitVec;
-use futures::{FutureExt, SinkExt, StreamExt};
-use mpc_channel::Channel;
+use futures::FutureExt;
 use ndarray::Array2;
 use rand::Rng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
@@ -23,7 +22,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::available_parallelism;
 use std::{cmp, mem};
 use thiserror::Error;
-use tokio::sync::mpsc;
 
 pub struct Sender {
     conf: PprfConfig,
@@ -64,17 +62,15 @@ impl Sender {
         Self { conf, base_ots }
     }
 
-    pub async fn expand<Ch, ChErr, RNG>(
+    pub async fn expand<RNG>(
         &mut self,
-        channel: &mut Ch,
+        sender: mpc_channel::Sender<Msg>,
         value: Block,
         rng: &mut RNG,
         thread_pool: Option<Arc<ThreadPool>>,
     ) -> Array2<Block>
     where
         RNG: RngCore + CryptoRng,
-        Ch: Channel<Msg, ChErr>,
-        ChErr: Debug,
     {
         let conf = self.conf;
         let num_threads = thread_pool
@@ -90,22 +86,23 @@ impl Sender {
         let aes = create_fixed_aes();
         let seed: Block = rng.gen();
 
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-        let send_task = async move {
-            while let Some(tree_grp) = receiver.recv().await {
-                channel
-                    .send(Msg::TreeGrp(tree_grp))
-                    .await
-                    .map_err(|_| {})
-                    .unwrap();
-            }
-            Result::<(), ()>::Ok(())
-        };
+        // let (sender, mut receiver) = mpsc::unbounded_channel();
+        // let send_task = async move {
+        //     while let Some(tree_grp) = receiver.recv().await {
+        //         channel
+        //             .send(Msg::TreeGrp(tree_grp))
+        //             .await
+        //             .map_err(|_| {})
+        //             .unwrap();
+        //     }
+        //     Result::<(), ()>::Ok(())
+        // };
         let base_ots = mem::take(&mut self.base_ots);
         let depth = conf.depth;
         let pnt_count = conf.pnt_count;
         let output_clone = Arc::clone(&output);
-        let routine = move |thread_idx: usize, sender: mpsc::UnboundedSender<TreeGrp>| {
+        let sender_cl = sender.clone();
+        let routine = move |thread_idx: usize| {
             let mut rng = AesRng::from_seed(seed ^ thread_idx.into());
             let dd = depth + 1;
             // tree will hold the full GGM tree. Note that there are 8
@@ -230,7 +227,9 @@ impl Sender {
                 tree_grp.sums[0].truncate(depth - 1);
                 tree_grp.sums[1].truncate(depth - 1);
 
-                sender.send(tree_grp.clone()).unwrap();
+                sender_cl
+                    .blocking_send(Msg::TreeGrp(tree_grp.clone()))
+                    .expect("Sending tree group failed");
                 let last_level = get_level(&mut tree, depth);
                 let mut output = output_clone.lock().unwrap();
                 copy_out(last_level, &mut *output, pnt_count, g);
@@ -239,20 +238,18 @@ impl Sender {
 
         let par_compute = move || {
             // TODO: this changes the meaning of num_threads. By using par_iter, it becomes the
-            // maximum number of threads
+            //  maximum number of threads
             (0..num_threads)
                 .into_par_iter()
-                .for_each(|thread_id| routine(thread_id, sender.clone()));
+                .for_each(|thread_id| routine(thread_id));
             // Needed because of race condition with Arc::try_unwrap in async task
             drop(routine);
-            Ok(())
         };
-        let compute_fut = match thread_pool {
+        match thread_pool {
             None => spawn_compute(par_compute),
             Some(pool) => pool.spawn_install_compute(par_compute),
-        };
-
-        tokio::try_join!(send_task, compute_fut).unwrap();
+        }
+        .await;
 
         let output = Arc::try_unwrap(output).unwrap();
         output.into_inner().unwrap()
@@ -271,15 +268,11 @@ impl Receiver {
         }
     }
 
-    pub async fn expand<Ch, ChErr>(
+    pub async fn expand(
         &mut self,
-        channel: &mut Ch,
+        mut receiver: mpc_channel::Receiver<Msg>,
         thread_pool: Option<Arc<ThreadPool>>,
-    ) -> Array2<Block>
-    where
-        Ch: Channel<Msg, ChErr>,
-        ChErr: Debug,
-    {
+    ) -> Array2<Block> {
         let conf = self.conf;
         let num_threads = thread_pool
             .as_ref()
@@ -303,15 +296,16 @@ impl Receiver {
         let output_clone = Arc::clone(&output);
         let expected_trees = pnt_count / 8;
 
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        let recv_task = Box::pin(
+        let (dist_sender, distributor) = crossbeam_channel::unbounded();
+        // this task distributes the tree groups to the compute tasks
+        let distribute_task = Box::pin(
             async {
                 let mut received_items = 0;
-                while let Some(msg) = channel.next().await {
+                while let Some(msg) = receiver.recv().await.transpose() {
                     match msg {
                         Ok(Msg::TreeGrp(tree_grp)) => {
                             received_items += 1;
-                            sender.try_send(tree_grp).unwrap();
+                            dist_sender.try_send(tree_grp).unwrap();
                         }
                         _ => panic!("Error receiving msg"),
                     };
@@ -320,7 +314,6 @@ impl Receiver {
                         break;
                     }
                 }
-                Result::<(), ()>::Ok(())
             }
             .fuse(),
         );
@@ -347,7 +340,7 @@ impl Receiver {
             (thread_idx * 8..pnt_count)
                 .step_by(8 * num_threads)
                 .for_each(|_| {
-                    let tree_group = receiver.recv().unwrap();
+                    let tree_group = distributor.recv().unwrap();
                     let g = tree_group.g;
 
                     let l1 = get_level(&mut tree, 1);
@@ -488,7 +481,7 @@ impl Receiver {
                     let last_level = get_level(&mut tree, depth);
                     let mut output = output_clone.lock().unwrap();
                     copy_out(last_level, &mut *output, pnt_count, g);
-                })
+                });
         };
 
         let par_compute = move || {
@@ -499,14 +492,13 @@ impl Receiver {
                 .for_each(|thread_id| routine(thread_id));
             // Needed because of race condition with Arc::try_unwrap in async task
             drop(routine);
-            Result::<(), ()>::Ok(())
         };
+
         let compute_fut = match thread_pool {
             None => spawn_compute(par_compute),
             Some(pool) => pool.spawn_install_compute(par_compute),
         };
-
-        tokio::try_join!(recv_task, compute_fut).expect("Failed to join recv_task and compute fut");
+        tokio::join!(distribute_task, compute_fut);
 
         let output = Arc::try_unwrap(output).unwrap();
         output.into_inner().unwrap()
@@ -727,7 +719,6 @@ pub(crate) mod tests {
     use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat, Receiver, Sender};
     use crate::util::transpose::transpose;
     use crate::util::Block;
-    use mpc_channel::in_memory::InMemory;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
     use rand_core::{CryptoRng, RngCore};
@@ -758,7 +749,7 @@ pub(crate) mod tests {
         let mut rng = StdRng::seed_from_u64(42);
 
         let threads = 1;
-        let (ch1, mut ch2) = InMemory::new_pair();
+        let ((sender_ch, _), (_, receiver_ch)) = mpc_channel::in_memory::new_pair(128);
         let (sender_base_ots, receiver_base_ots, base_choices) =
             fake_base(conf, conf.domain * conf.pnt_count, format, &mut rng);
         let send_pool = rayon::ThreadPoolBuilder::new()
@@ -774,14 +765,14 @@ pub(crate) mod tests {
 
         let send = tokio::spawn(async move {
             let mut sender = Sender::new(conf, sender_base_ots);
-            let mut ch1 = ch1;
             sender
-                .expand(&mut ch1, Block::all_ones(), &mut rng, Some(send_pool))
+                .expand(sender_ch, Block::all_ones(), &mut rng, Some(send_pool))
                 .await
         });
         let mut receiver = Receiver::new(conf, receiver_base_ots, base_choices);
         let points = receiver.get_points(format);
-        let receive = tokio::spawn(async move { receiver.expand(&mut ch2, Some(recv_pool)).await });
+        let receive =
+            tokio::spawn(async move { receiver.expand(receiver_ch, Some(recv_pool)).await });
         let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
         println!("Total time: {}", now.elapsed().as_secs_f32());
         let out = r_out ^ s_out;

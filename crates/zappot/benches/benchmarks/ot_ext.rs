@@ -3,10 +3,10 @@ use criterion::{criterion_group, BenchmarkId, Criterion};
 use rand::rngs::StdRng;
 
 use rand_core::SeedableRng;
+use remoc::rch::mpsc::channel;
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::UnixStream;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
-use zappot::transport::in_memory::InMemory;
 
 use zappot::{base_ot, ot_ext};
 
@@ -22,18 +22,17 @@ fn bench_ot_ext(c: &mut Criterion) {
         .unwrap();
 
     group.bench_with_input(
-        BenchmarkId::new("alsz", "2^24 OTs"),
+        BenchmarkId::new("alsz in_memory", "2^24 OTs"),
         &choices,
         |b, choices| {
             b.to_async(&runtime).iter(|| async {
-                let (ch1, mut ch2) = InMemory::new_pair();
-
-                let send = tokio::spawn(async {
+                let ((sender1, receiver1), (sender2, receiver2)) =
+                    mpc_channel::in_memory::new_pair(128);
+                let send = tokio::spawn(async move {
                     let mut sender = ot_ext::Sender::new(base_ot::Receiver {});
                     let mut rng_send = StdRng::seed_from_u64(42);
-                    let mut ch1 = ch1;
                     sender
-                        .send_random(2_usize.pow(24), &mut rng_send, &mut ch1)
+                        .send_random(2_usize.pow(24), &mut rng_send, sender1, receiver1)
                         .await
                 });
                 let choices = choices.clone();
@@ -41,7 +40,7 @@ fn bench_ot_ext(c: &mut Criterion) {
                     let mut receiver = ot_ext::Receiver::new(base_ot::Sender {});
                     let mut rng_recv = StdRng::seed_from_u64(42 * 42);
                     receiver
-                        .receive_random(&choices, &mut rng_recv, &mut ch2)
+                        .receive_random(&choices, &mut rng_recv, sender2, receiver2)
                         .await
                 });
                 futures::future::join(send, receive).await

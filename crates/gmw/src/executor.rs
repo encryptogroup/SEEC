@@ -1,11 +1,10 @@
-use futures::{Sink, SinkExt, TryStream, TryStreamExt};
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
-use std::error::Error;
 use std::fmt::Debug;
 use std::iter;
+use std::time::Instant;
 
-use mpc_channel::Channel;
+use mpc_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, trace};
 
@@ -16,7 +15,6 @@ use crate::errors::{CircuitError, ExecutorError};
 use crate::evaluate::and;
 use crate::executor::ExecutorMsg::AndLayer;
 use crate::mul_triple::{MTProvider, MulTriples};
-use crate::{Receiver, Sender};
 
 pub struct Executor<'c, Idx> {
     circuit: &'c Circuit<Idx>,
@@ -65,6 +63,7 @@ impl<'c, Idx: GateIdx> Executor<'c, Idx> {
         receiver: &mut Receiver<ExecutorMsg>,
     ) -> Result<BitVec, ExecutorError> {
         info!("Executing circuit");
+        let now = Instant::now();
         assert_eq!(
             self.circuit.input_count(),
             inputs.len(),
@@ -163,7 +162,11 @@ impl<'c, Idx: GateIdx> Executor<'c, Idx> {
                 trace!(output, gate_id = %id, "Evaluated And gate");
             }
         }
-        info!(layer_count, and_cnt);
+        info!(
+            layer_count,
+            and_cnt,
+            execution_time_s = now.elapsed().as_secs_f32()
+        );
         let output_iter = self.circuit.circuits[0].output_gates().iter().map(|id| {
             #[cfg(debug_assertions)]
             assert!(

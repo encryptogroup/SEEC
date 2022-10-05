@@ -5,7 +5,6 @@ use std::time::Instant;
 use std::{fs, ops};
 
 use clap::Parser;
-use mpc_channel::Tcp;
 use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
@@ -217,9 +216,9 @@ async fn main() -> anyhow::Result<()> {
     //     bc.save_dot("privmail.dot")?;
     // }
     // dbg!(&circuit);
-    let mut transport = match args.my_id {
-        0 => Tcp::listen(args.server).await?,
-        1 => Tcp::connect(args.server).await?,
+    let (mut sender, bytes_written, mut receiver, bytes_read) = match args.my_id {
+        0 => mpc_channel::tcp::listen(args.server, 2).await?,
+        1 => mpc_channel::tcp::connect(args.server, 2).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
@@ -228,15 +227,13 @@ async fn main() -> anyhow::Result<()> {
         Executor::new(&circuit, args.my_id, mt_provider).await?
     };
 
-    let now = Instant::now();
-    let output = executor.execute(input, &mut transport).await?;
+    let output = executor.execute(input, &mut sender, &mut receiver).await?;
     info!(
         my_id = %args.my_id,
         output = ?output,
-        bytes_written = transport.bytes_written(),
-        bytes_read = transport.bytes_read(),
+        bytes_written = bytes_written.get(),
+        bytes_read = bytes_read.get(),
         gate_count = circuit.gate_count(),
-        online_time_s = now.elapsed().as_secs_f32()
     );
     Ok(())
 }

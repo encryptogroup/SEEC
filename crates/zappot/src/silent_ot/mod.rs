@@ -1,7 +1,6 @@
 //! SilentOT extension protocol.
 #![allow(non_snake_case)]
 use crate::base_ot;
-use crate::base_ot::BaseOTMsg;
 use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat};
 use crate::traits::{BaseROTReceiver, BaseROTSender};
 use crate::util::aes_hash::FIXED_KEY_HASH;
@@ -9,13 +8,14 @@ use crate::util::aes_rng::AesRng;
 use crate::util::tokio_rayon::AsyncThreadPool;
 use crate::util::transpose::transpose_128;
 use crate::util::Block;
+use aligned_vec::typenum::U16;
 use aligned_vec::AlignedVec;
 use bitpolymul::{DecodeCache, FftPoly};
 use bitvec::order::Lsb0;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 use bytemuck::{cast, cast_slice, cast_slice_mut};
-use mpc_channel::{Channel, IsSubMsg};
+use mpc_channel::CommunicationError;
 use ndarray::Array2;
 use num_integer::Integer;
 use num_prime::nt_funcs::next_prime;
@@ -24,6 +24,7 @@ use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use rayon::{ThreadPool, ThreadPoolBuilder};
+use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
 use std::cmp::{max, min};
 use std::fmt::Debug;
@@ -80,9 +81,10 @@ pub struct QuasiCyclicConf {
 
 #[derive(Serialize, Deserialize, Debug)]
 /// Message sent during SilentOT evaluation.
-pub enum Msg<BaseOtMsg = base_ot::BaseOTMsg> {
-    BaseOT(BaseOtMsg),
-    Pprf(pprf::Msg),
+pub enum Msg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
+    #[serde(bound = "")]
+    BaseOTChannel(mpc_channel::Receiver<BaseOTMsg>),
+    Pprf(mpc_channel::Receiver<pprf::Msg>),
 }
 
 pub enum ChoiceBitPacking {
@@ -103,28 +105,28 @@ struct MultAddReducer<'a> {
 impl Sender {
     /// Create a new Sender with the provided base OT sender. This will execute the needed
     /// base OTs.
-    pub async fn new_with_base_ot_sender<BaseOT, RNG, Ch, ChErr>(
+    pub async fn new_with_base_ot_sender<BaseOT, RNG>(
         mut base_ot_sender: BaseOT,
         rng: &mut RNG,
-        channel: &mut Ch,
         num_ots: usize,
         scaler: usize,
         num_threads: usize,
+        sender: &mut mpc_channel::Sender<Msg<BaseOT::Msg>>,
+        receiver: &mut mpc_channel::Receiver<Msg<BaseOT::Msg>>,
     ) -> Self
     where
         BaseOT: BaseROTSender,
-        BaseOT::Msg: IsSubMsg<Msg> + Send,
-        <BaseOT::Msg as TryFrom<Msg>>::Error: Debug,
+        BaseOT::Msg: RemoteSend + Debug,
         RNG: RngCore + CryptoRng + Send,
-        ChErr: Debug,
-        Ch: Channel<Msg, ChErr>,
     {
         let conf = configure(num_ots, scaler, SECURITY_PARAM);
         let pprf_conf: PprfConfig = conf.into();
         let silent_base_ots = {
-            let mut channel = channel.constrict();
+            let (sender, receiver) = base_ot_channel(sender, receiver)
+                .await
+                .expect("Establishing sub channel");
             base_ot_sender
-                .send_random(pprf_conf.base_ot_count(), rng, &mut channel)
+                .send_random(pprf_conf.base_ot_count(), rng, sender, receiver)
                 .await
                 .expect("Failed to generate base ots")
         };
@@ -164,20 +166,21 @@ impl Sender {
     }
 
     /// Perform the random silent send. Returns a vector of random OTs.
-    pub async fn random_silent_send<RNG, Ch, ChErr>(
+    pub async fn random_silent_send<RNG>(
         self,
         rng: &mut RNG,
-        channel: &mut Ch,
+        sender: mpc_channel::Sender<Msg>,
+        receiver: mpc_channel::Receiver<Msg>,
     ) -> Vec<[Block; 2]>
     where
         RNG: RngCore + CryptoRng,
-        Ch: Channel<Msg, ChErr>,
-        ChErr: Debug,
     {
         let delta = rng.gen();
         let conf = self.conf;
         let thread_pool = self.thread_pool.clone();
-        let B = self.correlated_silent_send(delta, rng, channel).await;
+        let B = self
+            .correlated_silent_send(delta, rng, sender, receiver)
+            .await;
 
         thread_pool
             .spawn_install_compute(move || Sender::hash(conf, delta, &B))
@@ -185,29 +188,25 @@ impl Sender {
     }
 
     /// Performs the correlated silent send. Outputs the correlated
-    /// ot messages `b`. The outputs have the relation:  
-    /// `a[i] = b[i] + c[i] * delta`  
+    /// ot messages `b`. The outputs have the relation:
+    /// `a[i] = b[i] + c[i] * delta`
     /// where, `a` and `c` are held by the receiver.
-    pub async fn correlated_silent_send<RNG, Ch, ChErr>(
+    pub async fn correlated_silent_send<RNG>(
         mut self,
         delta: Block,
         rng: &mut RNG,
-        channel: &mut Ch,
+        mut sender: mpc_channel::Sender<Msg>,
+        mut receiver: mpc_channel::Receiver<Msg>,
     ) -> Vec<Block>
     where
         RNG: RngCore + CryptoRng,
-        Ch: Channel<Msg, ChErr>,
-        ChErr: Debug,
     {
         let rT = {
-            let mut channel = channel.constrict();
+            let (sender, _receiver) = pprf_channel(&mut sender, &mut receiver)
+                .await
+                .expect("Establishing pprf channel");
             self.gen
-                .expand(
-                    &mut channel,
-                    delta,
-                    rng,
-                    Some(Arc::clone(&self.thread_pool)),
-                )
+                .expand(sender, delta, rng, Some(Arc::clone(&self.thread_pool)))
                 .await
         };
         let conf = self.conf;
@@ -273,29 +272,29 @@ impl Sender {
 impl Receiver {
     /// Create a new Receiver with the provided base OT receiver. This will execute the needed
     /// base OTs.
-    pub async fn new_with_base_ot_receiver<BaseOT, RNG, Ch, ChErr>(
+    pub async fn new_with_base_ot_receiver<BaseOT, RNG>(
         mut base_ot_receiver: BaseOT,
         rng: &mut RNG,
-        channel: &mut Ch,
         num_ots: usize,
         scaler: usize,
         num_threads: usize,
+        sender: &mut mpc_channel::Sender<Msg<BaseOT::Msg>>,
+        receiver: &mut mpc_channel::Receiver<Msg<BaseOT::Msg>>,
     ) -> Self
     where
         BaseOT: BaseROTReceiver,
-        BaseOT::Msg: IsSubMsg<Msg> + Send,
-        <BaseOT::Msg as TryFrom<Msg>>::Error: Debug,
+        BaseOT::Msg: RemoteSend + Debug,
         RNG: RngCore + CryptoRng + Send,
-        ChErr: Debug,
-        Ch: Channel<Msg, ChErr>,
     {
         let conf = configure(num_ots, scaler, SECURITY_PARAM);
         let silent_choice_bits = Self::sample_base_choice_bits(conf, rng);
         let silent_base_ots = {
             let choices = silent_choice_bits.as_bit_vec();
-            let mut channel = channel.constrict();
+            let (sender, receiver) = base_ot_channel(sender, receiver)
+                .await
+                .expect("Establishing Base OT channel");
             base_ot_receiver
-                .receive_random(&choices, rng, &mut channel)
+                .receive_random(&choices, rng, sender, receiver)
                 .await
                 .expect("Failed to generate base ots")
         };
@@ -344,15 +343,15 @@ impl Receiver {
     ///
     /// Note that this is not the *usual* R-OT interface, as the choices are not provided by the
     /// user, but are the output.
-    pub async fn random_silent_receive<Ch, ChErr>(self, channel: &mut Ch) -> (Vec<Block>, BitVec)
-    where
-        Ch: Channel<Msg, ChErr>,
-        ChErr: Debug,
-    {
+    pub async fn random_silent_receive(
+        self,
+        sender: mpc_channel::Sender<Msg>,
+        receiver: mpc_channel::Receiver<Msg>,
+    ) -> (Vec<Block>, BitVec) {
         let conf = self.conf;
         let thread_pool = self.thread_pool.clone();
         let (A, _) = self
-            .correlated_silent_receive(channel, ChoiceBitPacking::True)
+            .correlated_silent_receive(ChoiceBitPacking::True, sender, receiver)
             .await;
 
         thread_pool
@@ -361,22 +360,21 @@ impl Receiver {
     }
 
     /// Performs the correlated silent receive. Outputs the correlated
-    /// ot messages `a` and choices `c`. The outputs have the relation:  
-    /// `a[i] = b[i] + c[i] * delta`  
+    /// ot messages `a` and choices `c`. The outputs have the relation:
+    /// `a[i] = b[i] + c[i] * delta`
     /// where, `b` and `delta` are held by the sender.
-    pub async fn correlated_silent_receive<Ch, ChErr>(
+    pub async fn correlated_silent_receive(
         mut self,
-        channel: &mut Ch,
         choice_bit_packing: ChoiceBitPacking,
-    ) -> (Vec<Block>, Option<Vec<u8>>)
-    where
-        Ch: Channel<Msg, ChErr>,
-        ChErr: Debug,
-    {
+        mut sender: mpc_channel::Sender<Msg>,
+        mut receiver: mpc_channel::Receiver<Msg>,
+    ) -> (Vec<Block>, Option<Vec<u8>>) {
         let rT = {
-            let mut channel = channel.constrict();
+            let (_sender, receiver) = pprf_channel(&mut sender, &mut receiver)
+                .await
+                .expect("Establishing pprf channel");
             self.gen
-                .expand(&mut channel, Some(Arc::clone(&self.thread_pool)))
+                .expand(receiver, Some(Arc::clone(&self.thread_pool)))
                 .await
         };
 
@@ -411,7 +409,7 @@ impl Receiver {
             ChoiceBitPacking::True => rows,
             ChoiceBitPacking::False => rows + 1,
         };
-        let mut sb: AlignedVec<u8, 16> = AlignedVec::new();
+        let mut sb: AlignedVec<u8, U16> = AlignedVec::new();
         let sb_blocks = {
             assert_eq!(conf.N2 % 8, 0);
             let n2_bytes = conf.N2 / mem::size_of::<u8>();
@@ -708,7 +706,7 @@ fn modp(dest: &mut [Block], inp: &[Block], prime: usize) {
     }
 }
 
-fn bit_shift_xor(dest: &mut [Block], inp: &[Block], bit_shift: u8) {
+pub fn bit_shift_xor(dest: &mut [Block], inp: &[Block], bit_shift: u8) {
     assert!(bit_shift <= 127, "bit_shift must be less than 127");
 
     dest.iter_mut()
@@ -725,40 +723,32 @@ fn bit_shift_xor(dest: &mut [Block], inp: &[Block], bit_shift: u8) {
     }
 }
 
-impl From<pprf::Msg> for Msg {
-    fn from(msg: pprf::Msg) -> Self {
-        Self::Pprf(msg)
-    }
+async fn base_ot_channel<BaseMsg: RemoteSend>(
+    sender: &mut mpc_channel::Sender<Msg<BaseMsg>>,
+    receiver: &mut mpc_channel::Receiver<Msg<BaseMsg>>,
+) -> Result<(mpc_channel::Sender<BaseMsg>, mpc_channel::Receiver<BaseMsg>), CommunicationError> {
+    mpc_channel::establish_sub_channel(sender, receiver, 128, Msg::BaseOTChannel, |msg| match msg {
+        Msg::BaseOTChannel(receiver) => Some(receiver),
+        _ => None,
+    })
+    .await
 }
 
-impl From<base_ot::BaseOTMsg> for Msg {
-    fn from(base_msg: BaseOTMsg) -> Self {
-        Self::BaseOT(base_msg)
-    }
-}
-
-impl TryFrom<Msg> for pprf::Msg {
-    // TODO error type
-    type Error = Msg;
-
-    fn try_from(value: Msg) -> Result<Self, Self::Error> {
-        match value {
-            Msg::Pprf(msg) => Ok(msg),
-            value => Err(value),
-        }
-    }
-}
-
-impl TryFrom<Msg<base_ot::BaseOTMsg>> for base_ot::BaseOTMsg {
-    // TODO error type
-    type Error = ();
-
-    fn try_from(value: Msg) -> Result<Self, Self::Error> {
-        match value {
-            Msg::BaseOT(base_msg) => Ok(base_msg),
-            _ => Err(()),
-        }
-    }
+async fn pprf_channel<BaseMsg: RemoteSend>(
+    sender: &mut mpc_channel::Sender<Msg<BaseMsg>>,
+    receiver: &mut mpc_channel::Receiver<Msg<BaseMsg>>,
+) -> Result<
+    (
+        mpc_channel::Sender<pprf::Msg>,
+        mpc_channel::Receiver<pprf::Msg>,
+    ),
+    CommunicationError,
+> {
+    mpc_channel::establish_sub_channel(sender, receiver, 128, Msg::Pprf, |msg| match msg {
+        Msg::Pprf(receiver) => Some(receiver),
+        _ => None,
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -771,7 +761,6 @@ mod test {
     use bitvec::order::Lsb0;
     use bitvec::slice::BitSlice;
     use bitvec::vec::BitVec;
-    use mpc_channel::in_memory::InMemory;
     use rand::rngs::StdRng;
     use rand_core::SeedableRng;
     use std::cmp::min;
@@ -873,7 +862,7 @@ mod test {
         let num_threads = 2;
         let delta = Block::all_ones();
         let conf = configure(num_ots, scaler, 128);
-        let (ch1, mut ch2) = InMemory::new_pair();
+        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
         let mut rng = StdRng::seed_from_u64(42);
         let (sender_base_ots, receiver_base_ots, base_choices) = fake_base(
             conf.into(),
@@ -885,9 +874,8 @@ mod test {
         let send = tokio::spawn(async move {
             let sender =
                 Sender::new_with_silent_base_ots(sender_base_ots, num_ots, scaler, num_threads);
-            let mut ch1 = ch1;
             sender
-                .correlated_silent_send(delta, &mut rng, &mut ch1)
+                .correlated_silent_send(delta, &mut rng, ch1.0, ch1.1)
                 .await
         });
         let receiver = Receiver::new_with_silent_base_ots(
@@ -899,7 +887,7 @@ mod test {
         );
         let receive = tokio::spawn(async move {
             receiver
-                .correlated_silent_receive(&mut ch2, ChoiceBitPacking::False)
+                .correlated_silent_receive(ChoiceBitPacking::False, ch2.0, ch2.1)
                 .await
         });
         let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
@@ -912,7 +900,7 @@ mod test {
         let scaler = 2;
         let num_threads = 2;
         let conf = configure(num_ots, scaler, 128);
-        let (ch1, mut ch2) = InMemory::new_pair();
+        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
         let mut rng = StdRng::seed_from_u64(42);
         let (sender_base_ots, receiver_base_ots, base_choices) = fake_base(
             conf.into(),
@@ -924,8 +912,7 @@ mod test {
         let send = tokio::spawn(async move {
             let sender =
                 Sender::new_with_silent_base_ots(sender_base_ots, num_ots, scaler, num_threads);
-            let mut ch1 = ch1;
-            sender.random_silent_send(&mut rng, &mut ch1).await
+            sender.random_silent_send(&mut rng, ch1.0, ch1.1).await
         });
         let receiver = Receiver::new_with_silent_base_ots(
             receiver_base_ots,
@@ -934,7 +921,8 @@ mod test {
             scaler,
             num_threads,
         );
-        let receive = tokio::spawn(async move { receiver.random_silent_receive(&mut ch2).await });
+        let receive =
+            tokio::spawn(async move { receiver.random_silent_receive(ch2.0, ch2.1).await });
         let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
         check_random(&s_out, &r_out.0, &r_out.1);
     }

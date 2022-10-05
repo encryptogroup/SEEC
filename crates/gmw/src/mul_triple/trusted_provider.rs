@@ -7,13 +7,12 @@
 //! [`MulTriples::random_pair`] and returns one [`MulTriples`] struct to each party.
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Debug;
 use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{Sink, StreamExt, TryStream};
+use futures::{StreamExt};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::net::ToSocketAddrs;
@@ -22,76 +21,75 @@ use tracing::error;
 
 use crate::errors::MTProviderError;
 use crate::mul_triple::{MTProvider, MulTriples};
-use mpc_channel::{Channel, Tcp};
+use mpc_channel::{Receiver, Sender};
 
-pub struct TrustedMTProviderClient<T> {
+pub struct TrustedMTProviderClient {
     id: String,
-    channel: T,
+    sender: Sender<Message>,
+    receiver: Receiver<Message>,
 }
 
-#[derive(Clone)]
-pub struct TrustedMTProviderServer<T> {
-    channel: T,
+pub struct TrustedMTProviderServer {
+    sender: Sender<Message>,
+    receiver: Receiver<Message>,
     mts: Arc<Mutex<HashMap<String, MulTriples>>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     RequestTriples { id: String, amount: usize },
     MulTriples(MulTriples),
 }
 
-impl<T> TrustedMTProviderClient<T> {
-    pub fn new(id: String, channel: T) -> Self {
-        Self { id, channel }
-    }
-}
-
-#[async_trait]
-impl<C: Channel<Message> + Send> MTProvider for TrustedMTProviderClient<C> {
-    type Error = MTProviderError<<C as TryStream>::Error, <C as Sink<Message>>::Error>;
-    async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
-        self.channel
-            .send(Message::RequestTriples {
-                id: self.id.clone(),
-                amount,
-            })
-            .await
-            .map_err(Self::Error::RequestFailed)?;
-        let msg: Message = self
-            .channel
-            .try_next()
-            .await
-            .map_err(|err| Self::Error::ReceiveFailed(Some(err)))?
-            .ok_or(Self::Error::ReceiveFailed(None))?;
-        match msg {
-            Message::MulTriples(mts) => Ok(mts),
-            _ => Err(Self::Error::IllegalMessage),
+impl TrustedMTProviderClient {
+    pub fn new(id: String, sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+        Self {
+            id,
+            sender,
+            receiver,
         }
     }
 }
 
-impl<C> TrustedMTProviderServer<C> {
-    pub fn new(channel: C) -> Self {
+#[async_trait]
+impl MTProvider for TrustedMTProviderClient {
+    type Error = MTProviderError<Message>;
+    async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
+        self.sender
+            .send(Message::RequestTriples {
+                id: self.id.clone(),
+                amount,
+            })
+            .await?;
+        let msg: Message = self
+            .receiver
+            .recv()
+            .await?
+            .ok_or(MTProviderError::RemoteClosed)?;
+        match msg {
+            Message::MulTriples(mts) => Ok(mts),
+            _ => Err(MTProviderError::IllegalMessage),
+        }
+    }
+}
+
+impl TrustedMTProviderServer {
+    pub fn new(sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
         Self {
-            channel,
+            sender,
+            receiver,
             mts: Default::default(),
         }
     }
 }
 
-impl<C> TrustedMTProviderServer<C>
-where
-    C: Channel<Message> + Send,
-    <C as Sink<Message>>::Error: Error,
-    <C as TryStream>::Error: Error,
-{
+impl TrustedMTProviderServer {
     #[tracing::instrument(skip(self), err(Debug))]
     async fn handle_request(
         &mut self,
         id: String,
         amount: usize,
-    ) -> Result<(), <C as Sink<Message>>::Error> {
+    ) -> Result<(), MTProviderError<Message>> {
         let mut mts = self.mts.lock().await;
         let mt = match mts.entry(id) {
             Entry::Vacant(vacant) => {
@@ -104,16 +102,18 @@ where
             }
             Entry::Occupied(occupied) => occupied.remove(),
         };
-        self.channel.send(Message::MulTriples(mt)).await?;
+        self.sender.send(Message::MulTriples(mt)).await?;
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
     async fn handle_conn(mut self) {
         loop {
-            match self.channel.try_next().await {
+            match self.receiver.recv().await {
                 Ok(Some(Message::RequestTriples { id, amount })) => {
-                    let _ = self.handle_request(id, amount).await;
+                    if let Err(err) = self.handle_request(id, amount).await {
+                        error!(%err, "Error handling request");
+                    }
                 }
                 Ok(None) => break,
                 Ok(_other) => error!("Server received illegal msg"),
@@ -123,18 +123,25 @@ where
             }
         }
     }
-}
-
-impl TrustedMTProviderServer<Tcp<Message>> {
+    #[tracing::instrument]
     pub async fn start(addr: impl ToSocketAddrs + Debug) -> Result<(), io::Error> {
         let data = Default::default();
-        Tcp::server(addr)
+
+        mpc_channel::tcp::server(addr, 10)
             .await?
-            .for_each(|conn| async {
+            .for_each(|channel| async {
+                let (sender, receiver) = match channel {
+                    Err(err) => {
+                        error!(%err, "Encountered error when establishing connection");
+                        return;
+                    }
+                    Ok((sender, _, receiver, _)) => (sender, receiver),
+                };
                 let data = Arc::clone(&data);
                 let mt_server = Self {
                     mts: data,
-                    channel: conn,
+                    sender,
+                    receiver,
                 };
                 tokio::spawn(async {
                     mt_server.handle_conn().await;

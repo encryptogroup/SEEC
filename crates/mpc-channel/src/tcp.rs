@@ -1,203 +1,170 @@
-//! TCP implementation of a channel.
+// //! TCP implementation of a channel.
+
 use super::util::{TrackingReader, TrackingWriter};
-use super::Channel;
+use crate::util::Counter;
+use crate::{channel, Channel, CommunicationError, Receiver, Sender};
 use async_stream::stream;
-use futures::{Sink, Stream};
-use pin_project::pin_project;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use futures::Stream;
+use remoc::{ConnectError, RemoteSend};
+
 use std::fmt::Debug;
 use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use std::net::Ipv4Addr;
+
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
-use tokio_serde::formats::SymmetricalBincode;
-use tokio_serde::SymmetricallyFramed;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::info;
 
-type SinkPart<Item> = SymmetricallyFramed<
-    FramedWrite<TrackingWriter<OwnedWriteHalf>, LengthDelimitedCodec>,
-    Item,
-    SymmetricalBincode<Item>,
->;
-
-type StreamPart<Item> = SymmetricallyFramed<
-    FramedRead<TrackingReader<OwnedReadHalf>, LengthDelimitedCodec>,
-    Item,
-    SymmetricalBincode<Item>,
->;
-
-/// A [`Channel`](`Channel`) which sends [bincode](https://docs.rs/bincode/1.3.1/bincode/)
-/// serialized values over a TCP connection, tracking the number of bytes sent and received.
-#[pin_project]
-pub struct Tcp<Item> {
-    #[pin]
-    sender: SinkPart<Item>,
-    #[pin]
-    receiver: StreamPart<Item>,
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Encountered io error when establishing TCP connection")]
+    Io(#[from] io::Error),
+    #[error("Error in establishing remoc connection")]
+    RemocConnect(#[from] ConnectError<io::Error, io::Error>),
+    #[error("Error exchanging initial Receiver")]
+    ExchangeReceiver(#[from] CommunicationError),
 }
 
-impl<Item: DeserializeOwned> Stream for Tcp<Item> {
-    type Item = Result<Item, io::Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        this.receiver.poll_next(cx)
-    }
+#[tracing::instrument(err)]
+pub async fn listen<T: RemoteSend>(
+    addr: impl ToSocketAddrs + Debug,
+    local_buffer: usize,
+) -> Result<Channel<T>, Error> {
+    info!("Listening for connections");
+    let listener = TcpListener::bind(addr).await?;
+    let (socket, remote_addr) = listener.accept().await?;
+    info!(?remote_addr, "Established connection to remote");
+    establish_remoc_connection(socket, local_buffer).await
 }
 
-impl<Item: Serialize> Sink<Item> for Tcp<Item> {
-    type Error = io::Error;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.sender.poll_ready(cx)
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: Item) -> Result<(), Self::Error> {
-        let this = self.project();
-        this.sender.start_send(item)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.sender.poll_flush(cx)
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.sender.poll_close(cx)
-    }
+#[tracing::instrument(err)]
+pub async fn connect<T: RemoteSend>(
+    remote_addr: impl ToSocketAddrs + Debug,
+    local_buffer: usize,
+) -> Result<Channel<T>, Error> {
+    info!("Connecting to remote");
+    let stream = TcpStream::connect(remote_addr).await?;
+    info!("Established connection to remote");
+    establish_remoc_connection(stream, local_buffer).await
 }
 
-impl<Item> Channel<Item> for Tcp<Item>
-where
-    Item: Serialize + DeserializeOwned + Unpin + Send,
-{
-    type StreamPart = StreamPart<Item>;
-    type SinkPart = SinkPart<Item>;
-
-    fn split_mut(&mut self) -> (&mut Self::StreamPart, &mut Self::SinkPart) {
-        (&mut self.receiver, &mut self.sender)
-    }
-}
-
-impl<Item> Tcp<Item> {
-    #[tracing::instrument(err)]
-    pub async fn listen(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
-        info!("Listening for connections");
-        let listener = TcpListener::bind(addr).await?;
-        let (socket, _) = listener.accept().await?;
-        // send data ASAP
-        socket.set_nodelay(true)?;
-        Ok(Self::from_tcp_stream(socket))
-    }
-
-    #[tracing::instrument(err)]
-    pub async fn connect(addr: impl ToSocketAddrs + Debug) -> Result<Self, io::Error> {
-        info!("Connecting to remote");
-        let socket = TcpStream::connect(addr).await?;
-        // send data ASAP
-        socket.set_nodelay(true)?;
-        Ok(Self::from_tcp_stream(socket))
-    }
-
-    #[tracing::instrument(err)]
-    pub async fn server(
-        addr: impl ToSocketAddrs + Debug,
-    ) -> Result<impl Stream<Item = Self>, io::Error> {
-        info!("Starting Tcp Server");
-        let listener = TcpListener::bind(addr).await?;
-        let s = stream! {
-            loop {
-                let (socket, _) = listener.accept().await.unwrap();
-                // send data ASAP
-                socket.set_nodelay(true).unwrap();
-                yield Self::from_tcp_stream(socket);
-
-            }
-        };
-        Ok(s)
-    }
-
-    /// For testing purposes. Create two parties communicating via TcpStreams on localhost:port
-    /// If None is supplied, a random available port is selected
-    pub async fn new_local_pair(port: Option<u16>) -> Result<(Self, Self), io::Error> {
-        // use port 0 to bind to available random one
-        let mut port = port.unwrap_or(0);
-        let addr = ("127.0.0.1", port);
-        let listener = TcpListener::bind(addr).await?;
-        if port == 0 {
-            // get the actual port bound to
-            port = listener.local_addr()?.port();
-        }
-        let addr = ("127.0.0.1", port);
-        let accept = async {
+#[tracing::instrument(err)]
+pub async fn server<T: RemoteSend>(
+    addr: impl ToSocketAddrs + Debug,
+    local_buffer: usize,
+) -> Result<impl Stream<Item = Result<Channel<T>, Error>>, io::Error> {
+    info!("Starting Tcp Server");
+    let listener = TcpListener::bind(addr).await?;
+    let s = stream! {
+        loop {
             let (socket, _) = listener.accept().await?;
-            Ok(Self::from_tcp_stream(socket))
-        };
-        let (server, client) = tokio::try_join!(accept, Self::connect(addr))?;
-        Ok((server, client))
-    }
+            yield establish_remoc_connection(socket, local_buffer).await;
 
-    fn from_tcp_stream(socket: TcpStream) -> Self {
-        let (read_half, write_half) = socket.into_split();
-        let framed_read =
-            FramedRead::new(TrackingReader::new(read_half), LengthDelimitedCodec::new());
-        let framed_write =
-            FramedWrite::new(TrackingWriter::new(write_half), LengthDelimitedCodec::new());
-        // Deserialize frames
-        let receiver = tokio_serde::SymmetricallyFramed::new(
-            framed_read,
-            SymmetricalBincode::<Item>::default(),
-        );
-        let sender = tokio_serde::SymmetricallyFramed::new(
-            framed_write,
-            SymmetricalBincode::<Item>::default(),
-        );
-        Self { sender, receiver }
-    }
+        }
+    };
+    Ok(s)
+}
 
-    /// Return the number of bytes written since creation.
-    pub fn bytes_written(&self) -> usize {
-        self.sender.get_ref().get_ref().bytes_written()
+/// For testing purposes. Create two parties communicating via TcpStreams on localhost:port
+/// If None is supplied, a random available port is selected
+pub async fn new_local_pair<T: RemoteSend>(
+    port: Option<u16>,
+    local_buffer: usize,
+) -> Result<(Channel<T>, Channel<T>), Error> {
+    // use port 0 to bind to available random one
+    let mut port = port.unwrap_or(0);
+    let addr = (Ipv4Addr::LOCALHOST, port);
+    let listener = TcpListener::bind(addr).await?;
+    if port == 0 {
+        // get the actual port bound to
+        port = listener.local_addr()?.port();
     }
+    let addr = (Ipv4Addr::LOCALHOST, port);
+    let accept = async {
+        let (socket, _) = listener.accept().await?;
+        Ok(socket)
+    };
+    let (server, client) = tokio::try_join!(accept, TcpStream::connect(addr))?;
 
-    /// Return the number of bytes read since creation.
-    pub fn bytes_read(&self) -> usize {
-        self.receiver.get_ref().get_ref().bytes_read()
-    }
+    let (ch1, ch2) = tokio::try_join!(
+        establish_remoc_connection(server, local_buffer),
+        establish_remoc_connection(client, local_buffer),
+    )?;
 
-    /// Returns the total number of bytes read and written.
-    pub fn bytes_total(&self) -> usize {
-        self.bytes_read() + self.bytes_written()
-    }
+    Ok((ch1, ch2))
+}
 
-    pub fn reset_bytes_total(&mut self) {
-        self.sender.get_mut().get_mut().reset();
-        self.receiver.get_mut().get_mut().reset();
-    }
+// TODO provide way of passing remoc::Cfg to method
+async fn establish_remoc_connection<T: RemoteSend>(
+    socket: TcpStream,
+    local_buffer: usize,
+) -> Result<(Sender<T>, Counter, Receiver<T>, Counter), Error> {
+    // send data ASAP
+    socket.set_nodelay(true)?;
+    let (socket_rx, socket_tx) = socket.into_split();
+    let tracking_rx = TrackingReader::new(socket_rx);
+    let tracking_tx = TrackingWriter::new(socket_tx);
+    let bytes_read = tracking_rx.bytes_read();
+    let bytes_written = tracking_tx.bytes_written();
+
+    let mut cfg = remoc::Cfg::balanced();
+    cfg.receive_buffer = 16 * 1024 * 1024;
+    cfg.chunk_size = 1024 * 1024;
+
+    // Establish Remoc connection over TCP.
+    let (conn, mut tx, mut rx) =
+        remoc::Connect::io::<_, _, _, _, remoc::codec::Bincode>(cfg, tracking_rx, tracking_tx)
+            .await?;
+    tokio::spawn(conn);
+
+    let (sender, remote_receiver) = channel(local_buffer);
+    tx.send(remote_receiver)
+        .await
+        .map_err(|err| CommunicationError::BaseSend(err.kind))?;
+    let receiver = rx
+        .recv()
+        .await
+        .map_err(CommunicationError::BaseRecv)?
+        .ok_or(CommunicationError::RemoteClosed)?;
+
+    Ok((sender, bytes_written, receiver, bytes_read))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Tcp;
-    use futures::{SinkExt, StreamExt};
-    use serde::{Deserialize, Serialize};
+    use crate::tcp::new_local_pair;
+    use remoc::codec;
+    use remoc::rch::mpsc::channel;
 
     #[tokio::test]
-    async fn tcp_transport() {
-        #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-        struct Dummy([u8; 32]);
+    async fn establish_connection() {
+        let (ch1, ch2) = new_local_pair::<()>(None, 2).await.unwrap();
 
-        let (mut t1, mut t2) = Tcp::new_local_pair(None).await.unwrap();
+        let (_tx1, bytes_written1, _rx1, bytes_read1) = ch1;
+        let (_tx2, bytes_written2, _rx2, bytes_read2) = ch2;
+        assert_eq!(bytes_written1.get(), bytes_read2.get());
+        assert_eq!(bytes_written2.get(), bytes_read1.get());
+    }
 
-        t1.send(Dummy::default()).await.unwrap();
-        assert_eq!(t2.next().await.unwrap().unwrap(), Dummy::default());
-        // + 4 bytes because the value is prefixed by its size, see FramedWrite/Read
-        assert_eq!(t1.bytes_written(), 32 + 4);
-        assert_eq!(t2.bytes_read(), 32 + 4);
+    #[tokio::test]
+    async fn send_channel_via_channel() {
+        let (ch1, ch2) = new_local_pair(None, 2).await.unwrap();
+
+        let (tx1, _, _rx1, _) = ch1;
+        let (_tx2, _, mut rx2, _) = ch2;
+
+        let (new_tx, remote_new_rx) = channel::<_, codec::Bincode>(10);
+        tx1.send(remote_new_rx).await.unwrap();
+        let mut new_rx = rx2.recv().await.unwrap().unwrap();
+        new_tx.send(42).await.unwrap();
+        new_tx.send(42).await.unwrap();
+        new_tx.send(42).await.unwrap();
+        drop(new_tx);
+        let mut items_received = 0;
+        while let Some(item) = new_rx.recv().await.transpose() {
+            let item = item.unwrap();
+            assert_eq!(item, 42);
+            items_received += 1;
+        }
+        assert_eq!(items_received, 3);
     }
 }

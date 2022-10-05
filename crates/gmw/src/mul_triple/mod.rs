@@ -23,7 +23,7 @@ pub trait MTProvider {
 /// are efficiently stored in [`BitVec`]s. For a large amount, a single multiplication triple
 /// will only take up 3 bits of storage, compared to the 3 bytes needed for a single
 /// [`MulTriple`]. Prefer this type over `Vec<MulTriple>`.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MulTriples {
     a: BitVec,
     b: BitVec,

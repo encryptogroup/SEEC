@@ -19,13 +19,13 @@ pub mod silent_ot;
 pub mod traits;
 pub mod util;
 
-/// The default random oracle. Blake2b with an output of 160 bits.
-pub type DefaultRom = Blake2b<U20>;
-/// Blake2b random oracle with an output of 128 bits.
-pub type Rom128 = Blake2b<U16>;
-
 pub mod bitvec {
     pub use bitvec::order::Lsb0;
     pub use bitvec::slice::BitSlice;
     pub use bitvec::vec::BitVec;
 }
+
+/// The default random oracle. Blake2b with an output of 160 bits.
+pub type DefaultRom = Blake2b<U20>;
+/// Blake2b random oracle with an output of 128 bits.
+pub type Rom128 = Blake2b<U16>;

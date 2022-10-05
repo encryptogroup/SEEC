@@ -1,13 +1,10 @@
 use std::fs::File;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{SocketAddr};
 use std::path::PathBuf;
 use std::{fs, ops};
 
 use clap::Parser;
-use mpc_channel::Tcp;
-use remoc::rch::mpsc::channel;
 use serde::Deserialize;
-use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
@@ -211,8 +208,6 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let builder = CircuitBuilder::new();
-    builder.install();
     let (input, _) = priv_mail_search(
         &search_query.keywords,
         &search_query.modifier_chain_share,
@@ -225,42 +220,11 @@ async fn main() -> anyhow::Result<()> {
     //     circuit.save_dot("privmail.dot")?;
     // }
 
-    let (mut base_sender, mut base_receiver) = match args.my_id {
-        0 => {
-            let listener = TcpListener::bind(args.server).await.unwrap();
-            let (socket, _) = listener.accept().await.unwrap();
-            socket.set_nodelay(true).unwrap();
-            let (socket_rx, socket_tx) = socket.into_split();
-
-            // Establish Remoc connection over TCP.
-            let (conn, tx, rx) = remoc::Connect::io::<_, _, _, _, remoc::codec::Bincode>(
-                remoc::Cfg::default(),
-                socket_rx,
-                socket_tx,
-            )
-            .await
-            .unwrap();
-            tokio::spawn(conn);
-            (tx, rx)
-        }
-        1 => {
-            let socket = TcpStream::connect(args.server).await.unwrap();
-            socket.set_nodelay(true).unwrap();
-            let (socket_rx, socket_tx) = socket.into_split();
-
-            // Establish Remoc connection over TCP.
-            let (conn, tx, rx) = remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-                .await
-                .unwrap();
-            tokio::spawn(conn);
-            (tx, rx)
-        }
-        _ => panic!("Only my-id 0 or 1 are supported"),
+    let (mut sender, bytes_written, mut receiver, bytes_read) = match args.my_id {
+        0 => mpc_channel::tcp::listen(args.server, 2).await?,
+        1 => mpc_channel::tcp::connect(args.server, 2).await?,
+        illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
-
-    let (mut sender, remote_receiver) = channel(2);
-    base_sender.send(remote_receiver).await.unwrap();
-    let mut receiver = base_receiver.recv().await.unwrap().unwrap();
 
     let mut executor = {
         let mt_provider = InsecureMTProvider::default();
@@ -271,8 +235,8 @@ async fn main() -> anyhow::Result<()> {
     info!(
         my_id = %args.my_id,
         output = ?output,
-        // bytes_written = transport.bytes_written(),
-        // bytes_read = transport.bytes_read(),
+        bytes_written = bytes_written.get(),
+        bytes_read = bytes_read.get(),
         gate_count = circuit.gate_count()
     );
     Ok(())
