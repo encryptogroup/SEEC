@@ -169,8 +169,8 @@ impl BaseROTReceiver for Receiver {
 fn rom_hash_point(point: &RistrettoPoint, counter: usize, seed: Block) -> Block {
     let mut rom = Rom128::new();
     rom.update(point.compress().as_bytes());
-    rom.update(&counter.to_le_bytes());
-    rom.update(&seed.to_le_bytes());
+    rom.update(counter.to_le_bytes());
+    rom.update(seed.to_le_bytes());
     let out = rom.finalize();
     Block::from_le_bytes(out.into())
 }

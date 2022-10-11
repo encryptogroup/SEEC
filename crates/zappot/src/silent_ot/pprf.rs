@@ -18,6 +18,7 @@ use rayon::ThreadPool;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::thread::available_parallelism;
 use std::{cmp, mem};
@@ -78,7 +79,7 @@ impl Sender {
             .map(|pool| pool.current_num_threads())
             .unwrap_or_else(|| {
                 available_parallelism()
-                    .unwrap_or(1.try_into().unwrap())
+                    .unwrap_or(NonZeroUsize::new(1).unwrap())
                     .into()
             });
         let cols = (conf.pnt_count * conf.domain + 127) / 128;
@@ -112,8 +113,10 @@ impl Sender {
             let mut tree = vec![[Block::zero(); 8]; 2_usize.pow(dd as u32)];
 
             for g in (thread_idx * 8..pnt_count).step_by(8 * num_threads) {
-                let mut tree_grp = TreeGrp::default();
-                tree_grp.g = g;
+                let mut tree_grp = TreeGrp {
+                    g,
+                    ..Default::default()
+                };
                 // The number of real trees for this iteration.
                 let min = 8.min(pnt_count - g);
                 let level = bytemuck::cast_slice_mut(get_level(&mut tree, 0));
@@ -154,12 +157,12 @@ impl Sender {
                                 .expect("Unequal block length is impossible");
 
                             child.iter_mut().zip(&mut *parent).for_each(|(c, p)| {
-                                *c = *c ^ *p;
+                                *c ^= *p;
                             });
                             // Update the running sums for this level. We keep
                             // a left and right totals for each level.
                             sum.iter_mut().zip(child).for_each(|(s, c)| {
-                                *s = *s ^ *c;
+                                *s ^= *c;
                             });
                             keep += 1;
                             child_idx += 1;
@@ -179,7 +182,7 @@ impl Sender {
                             sums.iter_mut()
                                 .enumerate()
                                 .take(min as usize)
-                                .for_each(|(j, sum)| *sum = *sum ^ base_ots[[g + j, d]][idx])
+                                .for_each(|(j, sum)| *sum ^= base_ots[[g + j, d]][idx])
                         });
                 };
                 mask_sums(0);
@@ -219,7 +222,7 @@ impl Sender {
                         .iter_mut()
                         .zip(masks)
                         .for_each(|(ot, mask)| {
-                            *ot = *ot ^ mask;
+                            *ot ^= mask;
                         });
                 }
                 // Resize the sums to that they dont include
@@ -232,18 +235,14 @@ impl Sender {
                     .expect("Sending tree group failed");
                 let last_level = get_level(&mut tree, depth);
                 let mut output = output_clone.lock().unwrap();
-                copy_out(last_level, &mut *output, pnt_count, g);
+                copy_out(last_level, &mut output, pnt_count, g);
             }
         };
 
         let par_compute = move || {
             // TODO: this changes the meaning of num_threads. By using par_iter, it becomes the
             //  maximum number of threads
-            (0..num_threads)
-                .into_par_iter()
-                .for_each(|thread_id| routine(thread_id));
-            // Needed because of race condition with Arc::try_unwrap in async task
-            drop(routine);
+            (0..num_threads).into_par_iter().for_each(routine);
         };
         match thread_pool {
             None => spawn_compute(par_compute),
@@ -279,7 +278,7 @@ impl Receiver {
             .map(|pool| pool.current_num_threads())
             .unwrap_or_else(|| {
                 available_parallelism()
-                    .unwrap_or(1.try_into().unwrap())
+                    .unwrap_or(NonZeroUsize::new(1).unwrap())
                     .into()
             });
 
@@ -393,7 +392,7 @@ impl Receiver {
                                     .expect("Unequal block length is impossible");
 
                                 child.iter_mut().zip(&mut *parent).for_each(|(c, p)| {
-                                    *c = *c ^ *p;
+                                    *c ^= *p;
                                 });
 
                                 let sum = &mut my_sums[keep];
@@ -401,7 +400,7 @@ impl Receiver {
                                 // Update the running sums for this level. We keep
                                 // a left and right totals for each level.
                                 sum.iter_mut().zip(child).for_each(|(s, c)| {
-                                    *s = *s ^ *c;
+                                    *s ^= *c;
                                 });
                                 keep += 1;
                                 child_idx += 1;
@@ -480,18 +479,14 @@ impl Receiver {
                     // where the tranpose is performed.
                     let last_level = get_level(&mut tree, depth);
                     let mut output = output_clone.lock().unwrap();
-                    copy_out(last_level, &mut *output, pnt_count, g);
+                    copy_out(last_level, &mut output, pnt_count, g);
                 });
         };
 
         let par_compute = move || {
             // TODO: this changes the meaning of num_threads. By using par_iter, it becomes the
             // maximum number of threads
-            (0..num_threads)
-                .into_par_iter()
-                .for_each(|thread_id| routine(thread_id));
-            // Needed because of race condition with Arc::try_unwrap in async task
-            drop(routine);
+            (0..num_threads).into_par_iter().for_each(routine);
         };
 
         let compute_fut = match thread_pool {
@@ -647,7 +642,7 @@ fn interleave_point(point: usize, tree_idx: usize, total_trees: usize) -> usize 
     let sub_offset = sub_idx + 8 * pos_idx;
     let sec_offset = section_idx * num_sets * 128;
 
-    return set_offset + sub_offset + sec_offset;
+    set_offset + sub_offset + sec_offset
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -698,7 +693,7 @@ fn copy_out(lvl: &[[Block; 8]], output: &mut Array2<Block>, total_trees: usize, 
     while i < end {
         // get 128 blocks
         let input_128: &[u8] = bytemuck::cast_slice(&lvl[k * 16..(k + 1) * 16]);
-        let transposed = transpose(&input_128, 128, 128);
+        let transposed = transpose(input_128, 128, 128);
         let transposed_blocks = transposed
             .chunks_exact(16)
             .map(|chunk| Block::try_from(chunk).expect("Blocks are 16 bytes"));

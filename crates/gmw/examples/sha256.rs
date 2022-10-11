@@ -6,14 +6,15 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 
-
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::BaseCircuit;
 use gmw::common::BitVec;
-use gmw::executor::Executor;
+use gmw::executor::{Executor, ExecutorMsg};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
+use mpc_channel::sub_channels_for;
 // use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 
 #[derive(Parser, Debug)]
@@ -50,16 +51,19 @@ async fn main() -> Result<()> {
     // };
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
-        0 => mpc_channel::tcp::listen(args.server, 2).await?,
-        1 => mpc_channel::tcp::connect(args.server, 2).await?,
+        0 => mpc_channel::tcp::listen(args.server).await?,
+        1 => mpc_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
-    let mut executor = /*if let Some(addr) = args.mt_provider*/ {
-    //     let transport = Tcp::connect(addr).await?;
-    //     let mt_provider = TrustedMTProviderClient::new("unique-id".into(), transport);
-    //     Executor::new(&circuit, args.id, mt_provider).await?
-    // } else {
+    let (mut sender, mut receiver) =
+        sub_channels_for!(&mut sender, &mut receiver, 8, ExecutorMsg).await?;
+
+    let mut executor = if let Some(addr) = args.mt_provider {
+        let (mt_sender, _, mt_receiver, _) = mpc_channel::tcp::connect(addr).await?;
+        let mt_provider = TrustedMTProviderClient::new("unique-id".into(), mt_sender, mt_receiver);
+        Executor::new(&circuit, args.id, mt_provider).await?
+    } else {
         let mt_provider = InsecureMTProvider::default();
         Executor::new(&circuit, args.id, mt_provider).await?
     };

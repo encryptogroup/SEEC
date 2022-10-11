@@ -25,7 +25,7 @@ impl FftPoly {
 
     pub fn resize(&mut self, n: usize) {
         if self.n == n {
-            return;
+            // do nothing
         } else if n == 0 {
             self.n = 0;
             self.n_pow2 = 0;

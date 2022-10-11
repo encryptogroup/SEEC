@@ -1,7 +1,7 @@
 // //! TCP implementation of a channel.
 
 use super::util::{TrackingReader, TrackingWriter};
-use crate::Channel;
+use crate::TrackingChannel;
 use async_stream::stream;
 use futures::Stream;
 use remoc::{ConnectError, RemoteSend};
@@ -22,7 +22,9 @@ pub enum Error {
 }
 
 #[tracing::instrument(err)]
-pub async fn listen<T: RemoteSend>(addr: impl ToSocketAddrs + Debug) -> Result<Channel<T>, Error> {
+pub async fn listen<T: RemoteSend>(
+    addr: impl ToSocketAddrs + Debug,
+) -> Result<TrackingChannel<T>, Error> {
     info!("Listening for connections");
     let listener = TcpListener::bind(addr).await?;
     let (socket, remote_addr) = listener.accept().await?;
@@ -33,7 +35,7 @@ pub async fn listen<T: RemoteSend>(addr: impl ToSocketAddrs + Debug) -> Result<C
 #[tracing::instrument(err)]
 pub async fn connect<T: RemoteSend>(
     remote_addr: impl ToSocketAddrs + Debug,
-) -> Result<Channel<T>, Error> {
+) -> Result<TrackingChannel<T>, Error> {
     info!("Connecting to remote");
     let stream = TcpStream::connect(remote_addr).await?;
     info!("Established connection to remote");
@@ -43,7 +45,7 @@ pub async fn connect<T: RemoteSend>(
 #[tracing::instrument(err)]
 pub async fn server<T: RemoteSend>(
     addr: impl ToSocketAddrs + Debug,
-) -> Result<impl Stream<Item = Result<Channel<T>, Error>>, io::Error> {
+) -> Result<impl Stream<Item = Result<TrackingChannel<T>, Error>>, io::Error> {
     info!("Starting Tcp Server");
     let listener = TcpListener::bind(addr).await?;
     let s = stream! {
@@ -60,7 +62,7 @@ pub async fn server<T: RemoteSend>(
 /// If None is supplied, a random available port is selected
 pub async fn new_local_pair<T: RemoteSend>(
     port: Option<u16>,
-) -> Result<(Channel<T>, Channel<T>), Error> {
+) -> Result<(TrackingChannel<T>, TrackingChannel<T>), Error> {
     // use port 0 to bind to available random one
     let mut port = port.unwrap_or(0);
     let addr = (Ipv4Addr::LOCALHOST, port);
@@ -85,7 +87,9 @@ pub async fn new_local_pair<T: RemoteSend>(
 }
 
 // TODO provide way of passing remoc::Cfg to method
-async fn establish_remoc_connection<T: RemoteSend>(socket: TcpStream) -> Result<Channel<T>, Error> {
+async fn establish_remoc_connection<T: RemoteSend>(
+    socket: TcpStream,
+) -> Result<TrackingChannel<T>, Error> {
     // send data ASAP
     socket.set_nodelay(true)?;
     let (socket_rx, socket_tx) = socket.into_split();
@@ -115,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn establish_connection() {
-        let (ch1, ch2) = new_local_pair::<()>(None, 2).await.unwrap();
+        let (ch1, ch2) = new_local_pair::<()>(None).await.unwrap();
 
         let (_tx1, bytes_written1, _rx1, bytes_read1) = ch1;
         let (_tx2, bytes_written2, _rx2, bytes_read2) = ch2;

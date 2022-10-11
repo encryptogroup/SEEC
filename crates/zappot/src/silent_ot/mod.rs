@@ -586,9 +586,9 @@ impl<'a> MultAddReducer<'a> {
             let _now = Instant::now();
             self.b_poly.encode(b64);
             if s == 1 {
-                c_poly.mult(&a_poly, &self.b_poly);
+                c_poly.mult(a_poly, &self.b_poly);
             } else {
-                self.b_poly.mult_eq(&a_poly);
+                self.b_poly.mult_eq(a_poly);
                 c_poly.add_eq(&self.b_poly);
             }
         }

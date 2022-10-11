@@ -114,7 +114,7 @@ impl BlockRngCore for AesRngCore {
         // for an extensive argument see:
         // https://users.rust-lang.org/t/unsafe-code-review-casting-mut-u32-32-to-mut-genericarray-u8-u16-8/76893/4
         let blocks = unsafe { &mut *(results as *mut _ as *mut [crypto_common::Block<Aes128>; 8]) };
-        blocks.into_iter().for_each(|blk| {
+        blocks.iter_mut().for_each(|blk| {
             *blk = self.state.to_le_bytes().into();
             self.state += 1;
         });

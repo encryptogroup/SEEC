@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::{format_ident, quote};
 
 use syn::parse::{Parse, ParseStream};
-use syn::token::Token;
 use syn::{parse_macro_input, parse_quote, Expr, ExprReference, Token, Type, Variant};
 
 struct Args {
@@ -31,9 +31,12 @@ pub fn sub_channels_for(input: TokenStream) -> TokenStream {
                 #variant_ident(::mpc_channel::Receiver<#ty>)
             )
         });
+    let call_site = format!("{:?}", Span::call_site()).into_bytes();
+    let call_site_hash = format!("{:x}", md5::compute(call_site));
+    let enum_name = format_ident!("Receivers_{}", call_site_hash);
     let receivers_enum = quote! {
         #[derive(::serde::Serialize, ::serde::Deserialize)]
-        enum __Receivers {
+        enum #enum_name {
             #(#receivers_variants),*
         }
     };
@@ -57,12 +60,12 @@ pub fn sub_channels_for(input: TokenStream) -> TokenStream {
                 let (#sub_sender_idents, #remote_sub_receiver_idents) = ::mpc_channel::channel(#local_buffer);
                 )*
                 #(
-                #sender.send(__Receivers::#variant_idents(#remote_sub_receiver_idents)).await?;
+                #sender.send(#enum_name::#variant_idents(#remote_sub_receiver_idents)).await?;
                 )*
                 #(
                 let msg = #receiver.recv().await?.ok_or(::mpc_channel::CommunicationError::RemoteClosed)?;
                 let #sub_receiver_idents = match msg {
-                    __Receivers::#variant_idents(recv) => recv,
+                    #enum_name::#variant_idents(recv) => recv,
                     _ => Err(::mpc_channel::CommunicationError::UnexpectedMessage)?,
                 };
                 )*

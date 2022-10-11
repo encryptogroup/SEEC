@@ -63,6 +63,10 @@ impl<T, ALIGN: Unsigned + PowerOfTwo> AlignedVec<T, ALIGN> {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn capacity(&self) -> usize {
         self.cap
     }
@@ -209,7 +213,8 @@ impl<T, ALIGN: Unsigned + PowerOfTwo> Drop for AlignedVec<T, ALIGN> {
         let elem_size = mem::size_of::<T>();
 
         if self.cap != 0 && elem_size != 0 {
-            while let Some(_) = self.pop() {}
+            // drop all elements by popping them
+            while self.pop().is_some() {}
             unsafe {
                 dealloc(self.ptr.as_ptr() as *mut u8, self.layout());
             }

@@ -12,7 +12,7 @@ use gmw::private_test_utils::{execute_bristol, init_tracing, TestChannel};
 #[tokio::test]
 async fn eval_8_bit_adder() -> Result<()> {
     let _guard = init_tracing();
-    let exp_output = BitVec::from_element(42);
+    let exp_output = BitVec::from_element(42_u8);
 
     let out = execute_bristol(
         "test_resources/bristol-circuits/int_add8_depth.bristol",

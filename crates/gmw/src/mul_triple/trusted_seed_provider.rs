@@ -23,12 +23,12 @@ use tracing::error;
 use crate::common::BitVec;
 use crate::errors::MTProviderError;
 use crate::mul_triple::{compute_c_owned, rand_bitvecs, MTProvider, MulTriples};
-use mpc_channel::{sub_channel, Receiver, Sender};
+use mpc_channel::{BaseReceiver, BaseSender};
 
 pub struct TrustedMTProviderClient {
     id: String,
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    sender: BaseSender<Message>,
+    receiver: BaseReceiver<Message>,
 }
 
 // TODO: Which prng to choose? Context: https://github.com/rust-random/rand/issues/932
@@ -38,8 +38,8 @@ type MtRng = ChaCha12Rng;
 pub type MtRngSeed = <MtRng as SeedableRng>::Seed;
 
 pub struct TrustedMTProviderServer {
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    sender: BaseSender<Message>,
+    receiver: BaseReceiver<Message>,
     seeds: Arc<Mutex<HashMap<String, MtRngSeed>>>,
 }
 
@@ -51,7 +51,7 @@ pub enum Message {
 }
 
 impl TrustedMTProviderClient {
-    pub fn new(id: String, sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+    pub fn new(id: String, sender: BaseSender<Message>, receiver: BaseReceiver<Message>) -> Self {
         Self {
             id,
             sender,
@@ -91,7 +91,7 @@ impl MTProvider for TrustedMTProviderClient {
 }
 
 impl TrustedMTProviderServer {
-    pub fn new(sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+    pub fn new(sender: BaseSender<Message>, receiver: BaseReceiver<Message>) -> Self {
         Self {
             sender,
             receiver,
@@ -150,25 +150,16 @@ impl TrustedMTProviderServer {
     #[tracing::instrument]
     pub async fn start(addr: impl ToSocketAddrs + Debug) -> Result<(), io::Error> {
         let data = Default::default();
-        mpc_channel::tcp::server::<Receiver<_>>(addr)
+        mpc_channel::tcp::server(addr)
             .await?
             .for_each(|channel| async {
-                let (mut base_sender, mut base_receiver) = match channel {
+                let (sender, receiver) = match channel {
                     Err(err) => {
                         error!(%err, "Encountered error when establishing connection");
                         return;
                     }
                     Ok((sender, _, receiver, _)) => (sender, receiver),
                 };
-
-                let (sender, receiver) =
-                    match sub_channel(&mut base_sender, &mut base_receiver, 16).await {
-                        Err(err) => {
-                            error!(%err, "Encountered error when establishing sub channel");
-                            return;
-                        }
-                        Ok(channel) => channel,
-                    };
 
                 let data = Arc::clone(&data);
                 let mt_server = Self {

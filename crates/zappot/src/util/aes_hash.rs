@@ -39,7 +39,7 @@ impl AesHash {
 
         let mut blocks = blocks.map(|enc_blk| enc_blk.into());
         for (enc_x, x) in blocks.iter_mut().zip(x) {
-            *enc_x = *enc_x ^ *x;
+            *enc_x ^= *x;
         }
         blocks
     }

@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, Pat, ReturnType};
+use syn::{FnArg, ItemFn, Pat, ReturnType};
 
 pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
     let mut inner = input.clone();

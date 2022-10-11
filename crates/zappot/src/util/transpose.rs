@@ -73,7 +73,7 @@ pub fn transpose_rs_sse(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
             cc = 0;
             while cc < ncols {
                 v = _mm_setr_epi8(
-                    *input.get_unchecked(inp(rr + 0, cc)) as i8,
+                    *input.get_unchecked(inp(rr, cc)) as i8,
                     *input.get_unchecked(inp(rr + 1, cc)) as i8,
                     *input.get_unchecked(inp(rr + 2, cc)) as i8,
                     *input.get_unchecked(inp(rr + 3, cc)) as i8,
@@ -119,7 +119,7 @@ pub fn transpose_rs_sse(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
                 *input.get_unchecked(((rr + 3) * ncols / 8 + cc / 8) / 2) as i16,
                 *input.get_unchecked(((rr + 2) * ncols / 8 + cc / 8) / 2) as i16,
                 *input.get_unchecked(((rr + 1) * ncols / 8 + cc / 8) / 2) as i16,
-                *input.get_unchecked(((rr + 0) * ncols / 8 + cc / 8) / 2) as i16,
+                *input.get_unchecked((rr * ncols / 8 + cc / 8) / 2) as i16,
             );
             for i in (0..8).rev() {
                 h = (_mm_movemask_epi8(v) as i16).to_le_bytes();
@@ -134,7 +134,7 @@ pub fn transpose_rs_sse(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
         }
         let mut tmp = __U128 {
             bytes: [
-                *input.get_unchecked((rr + 0) * ncols / 8 + cc / 8),
+                *input.get_unchecked(rr * ncols / 8 + cc / 8),
                 *input.get_unchecked((rr + 1) * ncols / 8 + cc / 8),
                 *input.get_unchecked((rr + 2) * ncols / 8 + cc / 8),
                 *input.get_unchecked((rr + 3) * ncols / 8 + cc / 8),

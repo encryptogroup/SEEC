@@ -47,7 +47,7 @@ impl Block {
 
     /// Compute a hash of the Block using the [`DefaultRom`](`DefaultRom`) random oracle.
     pub fn rom_hash(&self) -> Output<DefaultRom> {
-        DefaultRom::digest(&self.data.to_le_bytes())
+        DefaultRom::digest(self.data.to_le_bytes())
     }
 
     /// Convert the block to bytes in little-endian order.
@@ -123,7 +123,7 @@ impl<'a, T: BitStore + Pod> TryFrom<&'a BitVec<T, Lsb0>> for Block {
     }
 }
 
-impl<'a> TryFrom<&[u8]> for Block {
+impl TryFrom<&[u8]> for Block {
     type Error = array::TryFromSliceError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {

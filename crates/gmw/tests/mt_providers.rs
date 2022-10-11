@@ -10,7 +10,7 @@ use gmw::executor::Executor;
 use gmw::mul_triple::trusted_provider::{TrustedMTProviderClient, TrustedMTProviderServer};
 use gmw::mul_triple::trusted_seed_provider;
 use gmw::private_test_utils::init_tracing;
-use mpc_channel::tcp;
+use mpc_channel::{sub_channel, tcp};
 
 // Test the TrustedMTProvider by executing the aes circuit with the provided mts
 #[tokio::test]
@@ -24,17 +24,21 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
     })
     .await??
     .into();
-    let (sender, _, receiver, _) = tcp::connect(tp_addr, 10).await?;
+    let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
     let mt_provider_1 = TrustedMTProviderClient::new("some_id".into(), sender, receiver);
-    let (sender, _, receiver, _) = tcp::connect(tp_addr, 10).await?;
+    let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
     let mt_provider_2 = TrustedMTProviderClient::new("some_id".into(), sender, receiver);
     let mut ex1 = Executor::new(&circuit, 0, mt_provider_1).await?;
     let mut ex2 = Executor::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);
     let input_b = BitVec::repeat(false, 256);
-    let (mut t1, mut t2) = tcp::new_local_pair(None, 10).await?;
-    let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.2);
-    let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.2);
+    let (mut t1, mut t2) = tcp::new_local_pair::<mpc_channel::Receiver<_>>(None).await?;
+    let (mut t1, mut t2) = tokio::try_join!(
+        sub_channel(&mut t1.0, &mut t1.2, 8),
+        sub_channel(&mut t2.0, &mut t2.2, 8)
+    )?;
+    let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.1);
+    let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.1);
     let out = futures::try_join!(h1, h2)?;
 
     let exp_output: bitvec::vec::BitVec<u8, Msb0> = {
@@ -66,19 +70,23 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
     })
     .await??
     .into();
-    let (sender, _, receiver, _) = tcp::connect(tp_addr, 10).await?;
+    let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
     let mt_provider_1 =
         trusted_seed_provider::TrustedMTProviderClient::new("some_id".into(), sender, receiver);
-    let (sender, _, receiver, _) = tcp::connect(tp_addr, 10).await?;
+    let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
     let mt_provider_2 =
         trusted_seed_provider::TrustedMTProviderClient::new("some_id".into(), sender, receiver);
     let mut ex1 = Executor::new(&circuit, 0, mt_provider_1).await?;
     let mut ex2 = Executor::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);
     let input_b = BitVec::repeat(false, 256);
-    let (mut t1, mut t2) = tcp::new_local_pair(None, 10).await?;
-    let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.2);
-    let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.2);
+    let (mut t1, mut t2) = tcp::new_local_pair::<mpc_channel::Receiver<_>>(None).await?;
+    let (mut t1, mut t2) = tokio::try_join!(
+        sub_channel(&mut t1.0, &mut t1.2, 8),
+        sub_channel(&mut t2.0, &mut t2.2, 8)
+    )?;
+    let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.1);
+    let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.1);
     let out = futures::try_join!(h1, h2)?;
 
     let exp_output: bitvec::vec::BitVec<u8, Msb0> = {

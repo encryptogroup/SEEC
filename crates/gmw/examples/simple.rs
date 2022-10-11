@@ -13,10 +13,11 @@ use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::Circuit;
-use gmw::executor::Executor;
+use gmw::executor::{Executor, ExecutorMsg};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::share_wrapper::inputs;
 use gmw::CircuitBuilder;
+use mpc_channel::sub_channels_for;
 
 fn build_circuit() {
     // The `inputs` method is a convenience method to create n input gates for the circuit.
@@ -64,11 +65,13 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // new connections. The other party then `connect`s to it. If party 1 connects before party 0
     // listens, an error will be returned.
     let (mut sender, _bytes_written, mut receiver, _bytes_read) = match party_id {
-        0 => mpc_channel::tcp::listen("127.0.0.1:7766", 2).await?,
-        1 => mpc_channel::tcp::connect("127.0.0.1:7766", 2).await?,
+        0 => mpc_channel::tcp::listen("127.0.0.1:7766").await?,
+        1 => mpc_channel::tcp::connect("127.0.0.1:7766").await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
+    let (mut sender, mut receiver) =
+        sub_channels_for!(&mut sender, &mut receiver, 8, ExecutorMsg).await?;
     // Execute the circuit and await its result (in the form of a BitVec)
     let output = executor.execute(inputs, &mut sender, &mut receiver).await?;
 

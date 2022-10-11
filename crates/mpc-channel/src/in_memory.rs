@@ -1,9 +1,7 @@
-use crate::{channel, Receiver, Sender};
+use crate::{channel, Channel};
 use remoc::RemoteSend;
 
-pub fn new_pair<T: RemoteSend>(
-    local_buffer: usize,
-) -> ((Sender<T>, Receiver<T>), (Sender<T>, Receiver<T>)) {
+pub fn new_pair<T: RemoteSend>(local_buffer: usize) -> (Channel<T>, Channel<T>) {
     let (sender1, receiver1) = channel(local_buffer);
     let (sender2, receiver2) = channel(local_buffer);
 

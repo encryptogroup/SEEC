@@ -21,17 +21,17 @@ use tracing::error;
 
 use crate::errors::MTProviderError;
 use crate::mul_triple::{MTProvider, MulTriples};
-use mpc_channel::{sub_channel, Receiver, Sender};
+use mpc_channel::{BaseReceiver, BaseSender};
 
 pub struct TrustedMTProviderClient {
     id: String,
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    sender: BaseSender<Message>,
+    receiver: BaseReceiver<Message>,
 }
 
 pub struct TrustedMTProviderServer {
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    sender: BaseSender<Message>,
+    receiver: BaseReceiver<Message>,
     mts: Arc<Mutex<HashMap<String, MulTriples>>>,
 }
 
@@ -42,7 +42,7 @@ pub enum Message {
 }
 
 impl TrustedMTProviderClient {
-    pub fn new(id: String, sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+    pub fn new(id: String, sender: BaseSender<Message>, receiver: BaseReceiver<Message>) -> Self {
         Self {
             id,
             sender,
@@ -74,7 +74,7 @@ impl MTProvider for TrustedMTProviderClient {
 }
 
 impl TrustedMTProviderServer {
-    pub fn new(sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+    pub fn new(sender: BaseSender<Message>, receiver: BaseReceiver<Message>) -> Self {
         Self {
             sender,
             receiver,
@@ -127,24 +127,16 @@ impl TrustedMTProviderServer {
     pub async fn start(addr: impl ToSocketAddrs + Debug) -> Result<(), io::Error> {
         let data = Default::default();
 
-        mpc_channel::tcp::server::<Receiver<_>>(addr)
+        mpc_channel::tcp::server(addr)
             .await?
             .for_each(|channel| async {
-                let (mut base_sender, mut base_receiver) = match channel {
+                let (sender, receiver) = match channel {
                     Err(err) => {
                         error!(%err, "Encountered error when establishing connection");
                         return;
                     }
                     Ok((sender, _, receiver, _)) => (sender, receiver),
                 };
-                let (sender, receiver) =
-                    match sub_channel(&mut base_sender, &mut base_receiver, 16).await {
-                        Err(err) => {
-                            error!(%err, "Encountered error when establishing sub channel");
-                            return;
-                        }
-                        Ok(channel) => channel,
-                    };
                 let data = Arc::clone(&data);
                 let mt_server = Self {
                     mts: data,

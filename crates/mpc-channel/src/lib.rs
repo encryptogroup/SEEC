@@ -10,13 +10,14 @@ pub mod in_memory;
 pub mod tcp;
 pub mod util;
 
-pub type Channel<T> = (BaseSender<T>, Counter, BaseReceiver<T>, Counter);
+pub type BaseSender<T> = base::Sender<T, codec::Bincode>;
+pub type BaseReceiver<T> = base::Receiver<T, codec::Bincode>;
 
-pub type BaseSender<T> = base::Sender<T, remoc::codec::Bincode>;
-pub type BaseReceiver<T> = base::Receiver<T, remoc::codec::Bincode>;
+pub type Sender<T> = mpsc::Sender<T, codec::Bincode, 128>;
+pub type Receiver<T> = mpsc::Receiver<T, codec::Bincode, 128>;
 
-pub type Sender<T> = mpsc::Sender<T, remoc::codec::Bincode, 128>;
-pub type Receiver<T> = mpsc::Receiver<T, remoc::codec::Bincode, 128>;
+pub type TrackingChannel<T> = (BaseSender<T>, Counter, BaseReceiver<T>, Counter);
+pub type Channel<T> = (Sender<T>, Receiver<T>);
 
 #[async_trait]
 pub trait SenderT<T, E> {
@@ -55,27 +56,6 @@ pub fn channel<T: RemoteSend, const BUFFER: usize>(
     let receiver = receiver.set_buffer::<BUFFER>();
     (sender, receiver)
 }
-
-// #[macro_export]
-// macro_rules! sub_channels_for {
-//     ($sender:expr, $receiver:expr, $local_buffer:expr, $name:ident:$for_type:ty) => {{
-//         #[derive(serde::Serialize, serde::Deserialize)]
-//         enum Receivers {
-//             $name($for_type),
-//         }
-//
-//         async {
-//             let (sub_sender, remote_sub_receiver) = mpc_channel::channel($local_buffer);
-//             $sender.send(Receivers::$name(remote_sub_receiver)).await?;
-//             let msg = $receiver
-//                 .recv()
-//                 .await?
-//                 .ok_or(mpc_channel::CommunicationError::RemoteClosed)?;
-//             let Receivers::$name(sub_receiver) = msg;
-//             Ok::<_, mpc_channel::CommunicationError>((sub_sender, sub_receiver))
-//         }
-//     }};
-// }
 
 #[tracing::instrument(skip_all)]
 pub async fn sub_channel<Msg, SubMsg, SendErr, RecvErr>(
