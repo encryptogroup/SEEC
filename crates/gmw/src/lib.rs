@@ -1,4 +1,4 @@
-pub use sub_circuit_impl::sub_circuit;
+pub use gmw_macros::sub_circuit;
 
 pub use circuit::builder::{
     CircuitBuilder, SharedCircuit, SubCircuitGate, SubCircuitInput, SubCircuitOutput,

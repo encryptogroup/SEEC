@@ -1,11 +1,11 @@
 //! ALSZ13 OT extension protocol.
-use crate::base_ot;
 use crate::traits::{BaseROTReceiver, BaseROTSender, Error, ExtROTReceiver, ExtROTSender};
 use crate::util::aes_hash::FIXED_KEY_HASH;
 use crate::util::aes_rng::AesRng;
 use crate::util::tokio_rayon::spawn_compute;
 use crate::util::transpose::transpose;
 use crate::util::Block;
+use crate::{base_ot, BASE_OT_COUNT};
 use async_trait::async_trait;
 use bitvec::bitvec;
 use bitvec::slice::BitSlice;
@@ -18,8 +18,6 @@ use rayon::prelude::*;
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-
-const BASE_OT_COUNT: usize = 128;
 
 pub struct Sender<BaseOT> {
     base_ot: BaseOT,

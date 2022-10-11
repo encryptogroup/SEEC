@@ -1,8 +1,7 @@
 // //! TCP implementation of a channel.
 
 use super::util::{TrackingReader, TrackingWriter};
-use crate::util::Counter;
-use crate::{channel, Channel, CommunicationError, Receiver, Sender};
+use crate::Channel;
 use async_stream::stream;
 use futures::Stream;
 use remoc::{ConnectError, RemoteSend};
@@ -20,44 +19,37 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Error in establishing remoc connection")]
     RemocConnect(#[from] ConnectError<io::Error, io::Error>),
-    #[error("Error exchanging initial Receiver")]
-    ExchangeReceiver(#[from] CommunicationError),
 }
 
 #[tracing::instrument(err)]
-pub async fn listen<T: RemoteSend>(
-    addr: impl ToSocketAddrs + Debug,
-    local_buffer: usize,
-) -> Result<Channel<T>, Error> {
+pub async fn listen<T: RemoteSend>(addr: impl ToSocketAddrs + Debug) -> Result<Channel<T>, Error> {
     info!("Listening for connections");
     let listener = TcpListener::bind(addr).await?;
     let (socket, remote_addr) = listener.accept().await?;
     info!(?remote_addr, "Established connection to remote");
-    establish_remoc_connection(socket, local_buffer).await
+    establish_remoc_connection(socket).await
 }
 
 #[tracing::instrument(err)]
 pub async fn connect<T: RemoteSend>(
     remote_addr: impl ToSocketAddrs + Debug,
-    local_buffer: usize,
 ) -> Result<Channel<T>, Error> {
     info!("Connecting to remote");
     let stream = TcpStream::connect(remote_addr).await?;
     info!("Established connection to remote");
-    establish_remoc_connection(stream, local_buffer).await
+    establish_remoc_connection(stream).await
 }
 
 #[tracing::instrument(err)]
 pub async fn server<T: RemoteSend>(
     addr: impl ToSocketAddrs + Debug,
-    local_buffer: usize,
 ) -> Result<impl Stream<Item = Result<Channel<T>, Error>>, io::Error> {
     info!("Starting Tcp Server");
     let listener = TcpListener::bind(addr).await?;
     let s = stream! {
         loop {
             let (socket, _) = listener.accept().await?;
-            yield establish_remoc_connection(socket, local_buffer).await;
+            yield establish_remoc_connection(socket).await;
 
         }
     };
@@ -68,7 +60,6 @@ pub async fn server<T: RemoteSend>(
 /// If None is supplied, a random available port is selected
 pub async fn new_local_pair<T: RemoteSend>(
     port: Option<u16>,
-    local_buffer: usize,
 ) -> Result<(Channel<T>, Channel<T>), Error> {
     // use port 0 to bind to available random one
     let mut port = port.unwrap_or(0);
@@ -86,18 +77,15 @@ pub async fn new_local_pair<T: RemoteSend>(
     let (server, client) = tokio::try_join!(accept, TcpStream::connect(addr))?;
 
     let (ch1, ch2) = tokio::try_join!(
-        establish_remoc_connection(server, local_buffer),
-        establish_remoc_connection(client, local_buffer),
+        establish_remoc_connection(server),
+        establish_remoc_connection(client),
     )?;
 
     Ok((ch1, ch2))
 }
 
 // TODO provide way of passing remoc::Cfg to method
-async fn establish_remoc_connection<T: RemoteSend>(
-    socket: TcpStream,
-    local_buffer: usize,
-) -> Result<(Sender<T>, Counter, Receiver<T>, Counter), Error> {
+async fn establish_remoc_connection<T: RemoteSend>(socket: TcpStream) -> Result<Channel<T>, Error> {
     // send data ASAP
     socket.set_nodelay(true)?;
     let (socket_rx, socket_tx) = socket.into_split();
@@ -111,22 +99,12 @@ async fn establish_remoc_connection<T: RemoteSend>(
     cfg.chunk_size = 1024 * 1024;
 
     // Establish Remoc connection over TCP.
-    let (conn, mut tx, mut rx) =
+    let (conn, tx, rx) =
         remoc::Connect::io::<_, _, _, _, remoc::codec::Bincode>(cfg, tracking_rx, tracking_tx)
             .await?;
     tokio::spawn(conn);
 
-    let (sender, remote_receiver) = channel(local_buffer);
-    tx.send(remote_receiver)
-        .await
-        .map_err(|err| CommunicationError::BaseSend(err.kind))?;
-    let receiver = rx
-        .recv()
-        .await
-        .map_err(CommunicationError::BaseRecv)?
-        .ok_or(CommunicationError::RemoteClosed)?;
-
-    Ok((sender, bytes_written, receiver, bytes_read))
+    Ok((tx, bytes_written, rx, bytes_read))
 }
 
 #[cfg(test)]
@@ -147,9 +125,9 @@ mod tests {
 
     #[tokio::test]
     async fn send_channel_via_channel() {
-        let (ch1, ch2) = new_local_pair(None, 2).await.unwrap();
+        let (ch1, ch2) = new_local_pair(None).await.unwrap();
 
-        let (tx1, _, _rx1, _) = ch1;
+        let (mut tx1, _, _rx1, _) = ch1;
         let (_tx2, _, mut rx2, _) = ch2;
 
         let (new_tx, remote_new_rx) = channel::<_, codec::Bincode>(10);

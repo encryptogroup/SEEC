@@ -44,6 +44,7 @@ impl BaseROTSender for Sender {
     type Msg = BaseOTMsg;
 
     #[allow(non_snake_case)]
+    #[tracing::instrument(level = "debug", skip(self, rng, sender, receiver))]
     async fn send_random<RNG>(
         &mut self,
         count: usize,
@@ -64,11 +65,13 @@ impl BaseROTSender for Sender {
             .send(BaseOTMsg::First(A, seed_comm))
             .await
             .map_err(Error::Send)?;
+        tracing::trace!("Send first msg");
         let msg = receiver
             .recv()
             .await
             .map_err(Error::Receive)?
             .ok_or(Error::UnexpectedTermination)?;
+        tracing::trace!("Received second msg");
         let points = match msg {
             BaseOTMsg::Second(points) => points,
             msg => return Err(Error::WrongOrder(msg)),
@@ -80,6 +83,7 @@ impl BaseROTSender for Sender {
             .send(BaseOTMsg::Third(seed))
             .await
             .map_err(Error::Send)?;
+        tracing::trace!("Send third msg");
         A *= a;
         let ots = points
             .into_iter()
@@ -101,6 +105,7 @@ impl BaseROTReceiver for Receiver {
     type Msg = BaseOTMsg;
 
     #[allow(non_snake_case)]
+    #[tracing::instrument(level = "debug", skip(self, rng, sender, receiver))]
     async fn receive_random<RNG>(
         &mut self,
         choices: &BitSlice,
@@ -116,6 +121,7 @@ impl BaseROTReceiver for Receiver {
             .await
             .map_err(Error::Receive)?
             .ok_or(Error::UnexpectedTermination)?;
+        tracing::trace!("Received first msg");
         let (A, comm) = match msg {
             BaseOTMsg::First(A, comm) => (A, comm),
             msg => return Err(Error::WrongOrder(msg)),
@@ -133,6 +139,7 @@ impl BaseROTReceiver for Receiver {
             .send(BaseOTMsg::Second(Bs))
             .await
             .map_err(Error::Send)?;
+        tracing::trace!("Sent second msg");
         let msg = receiver
             .recv()
             .await
@@ -142,6 +149,7 @@ impl BaseROTReceiver for Receiver {
             BaseOTMsg::Third(seed) => seed,
             msg => return Err(Error::WrongOrder(msg)),
         };
+        tracing::trace!("Received third msg");
         if comm != seed.rom_hash() {
             return Err(Error::ProtocolDeviation);
         }

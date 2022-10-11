@@ -5,9 +5,11 @@
 use bitvec::vec::BitVec;
 use bitvec::{bitvec, order::Lsb0};
 use clap::Parser;
+use mpc_channel::sub_channel;
 use rand::Rng;
 use rand_core::OsRng;
 use std::time::{Duration, Instant};
+use tracing_subscriber::EnvFilter;
 use zappot::base_ot;
 use zappot::ot_ext::{Receiver, Sender};
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
@@ -32,10 +34,14 @@ async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
     let mut sender = Sender::new(base_ot::Receiver);
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
-    let (ch_sender, send_cnt, ch_receiver, recv_cnt) =
-        mpc_channel::tcp::listen(("127.0.0.1", args.port), 128)
+    let (mut base_sender, send_cnt, mut base_receiver, recv_cnt) =
+        mpc_channel::tcp::listen::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
+    let (ch_sender, ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 128)
+        .await
+        .expect("Establishing sub channel");
+
     // Perform the random ots
     let ots = sender
         .send_random(args.num_ots, &mut rng, ch_sender, ch_receiver)
@@ -51,9 +57,14 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create the ot extension receiver. A base OT **sender** is passed as an argument and used
     // to create the base_ots
     let mut receiver = Receiver::new(base_ot::Sender);
-    let (ch_sender, _, ch_receiver, _) = mpc_channel::tcp::connect(("127.0.0.1", args.port), 128)
+    let (mut base_sender, _, mut base_receiver, _) =
+        mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+            .await
+            .expect("Error listening for channel connection");
+    let (ch_sender, ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 128)
         .await
-        .expect("Error listening for channel connection");
+        .expect("Establishing sub channel");
+
     // Randomly choose one of the blocks
     let choices: BitVec = {
         let mut bv = bitvec![usize, Lsb0; 0; args.num_ots];
@@ -71,6 +82,10 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let args: Args = Args::parse();
     let now = Instant::now();
     // Spawn the sender future

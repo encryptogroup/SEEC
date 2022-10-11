@@ -1,12 +1,15 @@
 //! Multiplication triples.
 use async_trait::async_trait;
+use bitvec::store::BitStore;
 use num_integer::div_ceil;
-use rand::{CryptoRng, Rng};
+use rand::{CryptoRng, Fill, Rng};
 use serde::{Deserialize, Serialize};
+use std::mem;
 
 use crate::common::BitVec;
 
 pub mod insecure_provider;
+pub mod ot_ext;
 pub mod trusted_provider;
 pub mod trusted_seed_provider;
 
@@ -25,9 +28,9 @@ pub trait MTProvider {
 /// [`MulTriple`]. Prefer this type over `Vec<MulTriple>`.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MulTriples {
-    a: BitVec,
-    b: BitVec,
-    c: BitVec,
+    a: BitVec<usize>,
+    b: BitVec<usize>,
+    c: BitVec<usize>,
 }
 
 impl MulTriples {
@@ -59,7 +62,7 @@ impl MulTriples {
     }
 
     /// Create multiplication triples with the provided `c` values and random `a,b` values.
-    pub fn random_with_fixed_c<R: Rng + CryptoRng>(c: BitVec, rng: &mut R) -> Self {
+    pub fn random_with_fixed_c<R: Rng + CryptoRng>(c: BitVec<usize>, rng: &mut R) -> Self {
         let [a, b] = rand_bitvecs(c.len(), rng);
         Self::from_raw(a, b, c)
     }
@@ -68,7 +71,7 @@ impl MulTriples {
     ///
     /// # Panics
     /// Panics if the provided bitvectors don't have an equal length.
-    pub fn from_raw(a: BitVec, b: BitVec, c: BitVec) -> Self {
+    pub fn from_raw(a: BitVec<usize>, b: BitVec<usize>, c: BitVec<usize>) -> Self {
         assert_eq!(a.len(), b.len());
         assert_eq!(b.len(), c.len());
         Self { a, b, c }
@@ -116,24 +119,35 @@ impl MulTriples {
     // }
 }
 
-fn compute_c(mts: &MulTriples, a: &BitVec, b: &BitVec) -> BitVec {
+fn compute_c(mts: &MulTriples, a: &BitVec<usize>, b: &BitVec<usize>) -> BitVec<usize> {
     (a.clone() ^ &mts.a) & (b.clone() ^ &mts.b) ^ &mts.c
 }
 
-fn compute_c_owned(mts: MulTriples, a: BitVec, b: BitVec) -> BitVec {
+fn compute_c_owned(mts: MulTriples, a: BitVec<usize>, b: BitVec<usize>) -> BitVec<usize> {
     (a ^ mts.a) & (b ^ mts.b) ^ mts.c
 }
 
-/// Helper method to quickly create an array of random BitVecs. The BitVecs have a len() of
-/// **at least** size. If size is not divisible by 8, their len() will be higher.
-fn rand_bitvecs<R: CryptoRng + Rng, const N: usize>(size: usize, rng: &mut R) -> [BitVec; N] {
-    let bytes = div_ceil(size, 8);
+/// Helper method to quickly create an array of random BitVecs.
+fn rand_bitvecs<R: CryptoRng + Rng, const N: usize>(
+    size: usize,
+    rng: &mut R,
+) -> [BitVec<usize>; N] {
     // Workaround until array::from_fn https://github.com/rust-lang/rust/issues/89379 is stabilized
-    let mut bufs = [(); N].map(|_| vec![0_u8; bytes]);
-    for buf in &mut bufs {
-        rng.fill_bytes(buf);
-    }
-    bufs.map(BitVec::from_vec)
+    [(); N].map(|_| rand_bitvec(size, rng))
+}
+
+fn rand_bitvec<T, R>(size: usize, rng: &mut R) -> BitVec<T>
+where
+    T: BitStore + Copy,
+    [T]: Fill,
+    R: CryptoRng + Rng,
+{
+    let bitstore_items = div_ceil(size, mem::size_of::<T>());
+    let mut buf = vec![T::ZERO; bitstore_items];
+    rng.fill(&mut buf[..]);
+    let mut bv = BitVec::from_vec(buf);
+    bv.truncate(size);
+    bv
 }
 
 #[derive(Debug, Default)]

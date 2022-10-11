@@ -1,12 +1,8 @@
-use proc_macro::TokenStream;
-
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, FnArg, ItemFn, Pat, ReturnType};
 
-#[proc_macro_attribute]
-pub fn sub_circuit(_attr: TokenStream, input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as ItemFn);
+pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
     let mut inner = input.clone();
     let vis = input.vis;
     let sig = input.sig;
@@ -120,5 +116,5 @@ pub fn sub_circuit(_attr: TokenStream, input: TokenStream) -> TokenStream {
             ::gmw::SubCircuitOutput::connect_to_main(ret, sc_id)
         }
     };
-    output.into()
+    output
 }

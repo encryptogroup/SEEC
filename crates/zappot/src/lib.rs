@@ -29,3 +29,5 @@ pub mod bitvec {
 pub type DefaultRom = Blake2b<U20>;
 /// Blake2b random oracle with an output of 128 bits.
 pub type Rom128 = Blake2b<U16>;
+
+pub const BASE_OT_COUNT: usize = 128;

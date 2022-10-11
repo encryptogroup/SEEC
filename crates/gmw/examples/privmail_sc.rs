@@ -5,6 +5,7 @@ use std::time::Instant;
 use std::{fs, ops};
 
 use clap::Parser;
+use rand::rngs::OsRng;
 use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
@@ -13,9 +14,11 @@ use gmw::circuit::builder::CircuitBuilder;
 use gmw::circuit::GateId;
 use gmw::common::BitVec;
 use gmw::executor::Executor;
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::ot_ext::OtMTProvider;
 use gmw::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
-use gmw::sub_circuit;
+use gmw::{executor, sub_circuit};
+use mpc_channel::sub_channels_for;
+use zappot::ot_ext;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -217,17 +220,32 @@ async fn main() -> anyhow::Result<()> {
     // }
     // dbg!(&circuit);
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.my_id {
-        0 => mpc_channel::tcp::listen(args.server, 2).await?,
-        1 => mpc_channel::tcp::connect(args.server, 2).await?,
+        0 => mpc_channel::tcp::listen(args.server).await?,
+        1 => mpc_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
+    let (ch1, mut ch2) = sub_channels_for!(
+        &mut sender,
+        &mut receiver,
+        64,
+        mpc_channel::Receiver<ot_ext::ExtOTMsg>,
+        executor::ExecutorMsg
+    )
+    .await?;
+
     let mut executor = {
-        let mt_provider = InsecureMTProvider::default();
+        let mt_provider = OtMTProvider::new(
+            OsRng,
+            ot_ext::Sender::default(),
+            ot_ext::Receiver::default(),
+            ch1.0,
+            ch1.1,
+        );
         Executor::new(&circuit, args.my_id, mt_provider).await?
     };
 
-    let output = executor.execute(input, &mut sender, &mut receiver).await?;
+    let output = executor.execute(input, &mut ch2.0, &mut ch2.1).await?;
     info!(
         my_id = %args.my_id,
         output = ?output,

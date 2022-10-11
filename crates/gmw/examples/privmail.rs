@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::{fs, ops};
 
@@ -14,7 +14,8 @@ use gmw::common::BitVec;
 use gmw::executor::Executor;
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
-use gmw::CircuitBuilder;
+use gmw::{executor, CircuitBuilder};
+use mpc_channel::sub_channels_for;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -221,8 +222,8 @@ async fn main() -> anyhow::Result<()> {
     // }
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.my_id {
-        0 => mpc_channel::tcp::listen(args.server, 2).await?,
-        1 => mpc_channel::tcp::connect(args.server, 2).await?,
+        0 => mpc_channel::tcp::listen(args.server).await?,
+        1 => mpc_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
@@ -230,6 +231,9 @@ async fn main() -> anyhow::Result<()> {
         let mt_provider = InsecureMTProvider::default();
         Executor::new(&circuit, args.my_id, mt_provider).await?
     };
+
+    let (mut sender, mut receiver) =
+        sub_channels_for!(&mut sender, &mut receiver, 16, executor::ExecutorMsg).await?;
 
     let output = executor.execute(input, &mut sender, &mut receiver).await?;
     info!(

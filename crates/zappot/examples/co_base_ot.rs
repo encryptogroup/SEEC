@@ -3,6 +3,7 @@
 //! This example shows how to use the zappot crate to execute the Chou Orlandi base OT protocol.
 use bitvec::vec::BitVec;
 use clap::Parser;
+use mpc_channel::sub_channel;
 use rand::{distributions, Rng};
 use rand_core::OsRng;
 use std::time::Duration;
@@ -28,9 +29,13 @@ async fn sender(args: Args) -> Vec<[Block; 2]> {
     let mut sender = Sender::new();
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
-    let (ch_sender, _, ch_receiver, _) = mpc_channel::tcp::listen(("127.0.0.1", args.port), 8)
+    let (mut base_sender, _, mut base_receiver, _) =
+        mpc_channel::tcp::listen::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+            .await
+            .expect("Error listening for channel connection");
+    let (ch_sender, ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
         .await
-        .expect("Error listening for channel connection");
+        .expect("Establishing sub channel");
     // Perform the random ots
     sender
         .send_random(args.num_ots, &mut rng, ch_sender, ch_receiver)
@@ -45,9 +50,14 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create the receiver. The struct holds no state
     let mut receiver = Receiver::new();
     // Connect to the sender on the listened on port
-    let (ch_sender, _, ch_receiver, _) = mpc_channel::tcp::connect(("127.0.0.1", args.port), 8)
+    let (mut base_sender, _, mut base_receiver, _) =
+        mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+            .await
+            .expect("Error listening for channel connection");
+    let (ch_sender, ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
         .await
-        .expect("Error listening for channel connection");
+        .expect("Establishing sub channel");
+
     // Randomly choose one of the blocks
     let choices: BitVec = rng
         .sample_iter::<bool, _>(distributions::Standard)

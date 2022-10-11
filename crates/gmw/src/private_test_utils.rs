@@ -7,6 +7,7 @@ use bitvec::order::Lsb0;
 use bitvec::vec;
 use funty::Integral;
 use itertools::Itertools;
+use mpc_channel::sub_channel;
 use tokio::task::spawn_blocking;
 use tokio::time::Instant;
 use tracing::info;
@@ -148,9 +149,12 @@ pub async fn execute_circuit<Idx: GateIdx>(
             futures::try_join!(h1, h2)?
         }
         TestChannel::Tcp => {
-            let (mut t1, mut t2) = mpc_channel::tcp::new_local_pair(None, 2).await?;
-            let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.2);
-            let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.2);
+            let (mut t1, mut t2) =
+                mpc_channel::tcp::new_local_pair::<mpc_channel::Receiver<_>>(None).await?;
+            let mut sub_t1 = sub_channel(&mut t1.0, &mut t1.2, 2).await?;
+            let mut sub_t2 = sub_channel(&mut t2.0, &mut t2.2, 2).await?;
+            let h1 = ex1.execute(input_a, &mut sub_t1.0, &mut sub_t1.1);
+            let h2 = ex2.execute(input_b, &mut sub_t2.0, &mut sub_t2.1);
             let out = futures::try_join!(h1, h2)?;
             info!(
                 bytes_sent = t1.1.get(),

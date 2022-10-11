@@ -64,6 +64,7 @@ impl Block {
 
     /// Cast a mutable slice of Blocks into a mutable slice of `GenericArray<u8, U16>`.
     /// Intended to pass Blocks directly to the [aes](https://docs.rs/aes/) encryption methods.
+    #[cfg(feature = "silent_ot")]
     pub(crate) fn cast_slice_mut(slice: &mut [Block]) -> &mut [GenericArray<u8, U16>] {
         // Safety: GenericArray<u8, U16> works like a [u8; 16]. Since Block is a repr(transparent)
         // struct with a u128 field, with an alignment greater than [u8; 16], the cast is legal.
@@ -72,6 +73,7 @@ impl Block {
 
     /// Cast a slice of Blocks into a slice of `GenericArray<u8, U16>`. Intended to pass Blocks
     /// directly to the [aes](https://docs.rs/aes/) encryption methods.
+    #[cfg(feature = "silent_ot")]
     pub(crate) fn cast_slice(slice: &[Block]) -> &[GenericArray<u8, U16>] {
         // See cast_slice_mut
         unsafe { &*(slice as *const _ as *const [GenericArray<u8, U16>]) }

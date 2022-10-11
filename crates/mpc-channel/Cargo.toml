@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1.57"
 async-stream = "0.3.3"
 bytes = "1.2.1"
 futures = "0.3.24"
@@ -17,6 +18,7 @@ tokio-serde = { version = "0.8.0", features = ["bincode"]}
 tokio-util = { version = "0.7.3", features = ["codec"]}
 tracing = "0.1.36"
 remoc = { version = "0.10.0", default-features = false, features = ["rch", "codec-bincode"]}
+mpc-channel-macros = {path = "../mpc-channel-macros"}
 
 [dev-dependencies]
 serde = { version = "1.0.145", features = ["derive"]}

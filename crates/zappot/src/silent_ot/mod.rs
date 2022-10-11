@@ -1,6 +1,5 @@
 //! SilentOT extension protocol.
 #![allow(non_snake_case)]
-use crate::base_ot;
 use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat};
 use crate::traits::{BaseROTReceiver, BaseROTSender};
 use crate::util::aes_hash::FIXED_KEY_HASH;
@@ -8,6 +7,7 @@ use crate::util::aes_rng::AesRng;
 use crate::util::tokio_rayon::AsyncThreadPool;
 use crate::util::transpose::transpose_128;
 use crate::util::Block;
+use crate::{base_ot, BASE_OT_COUNT};
 use aligned_vec::typenum::U16;
 use aligned_vec::AlignedVec;
 use bitpolymul::{DecodeCache, FftPoly};
@@ -105,6 +105,7 @@ struct MultAddReducer<'a> {
 impl Sender {
     /// Create a new Sender with the provided base OT sender. This will execute the needed
     /// base OTs.
+    #[tracing::instrument(skip(base_ot_sender, rng, sender, receiver))]
     pub async fn new_with_base_ot_sender<BaseOT, RNG>(
         mut base_ot_sender: BaseOT,
         rng: &mut RNG,
@@ -272,6 +273,7 @@ impl Sender {
 impl Receiver {
     /// Create a new Receiver with the provided base OT receiver. This will execute the needed
     /// base OTs.
+    #[tracing::instrument(skip(base_ot_receiver, rng, sender, receiver))]
     pub async fn new_with_base_ot_receiver<BaseOT, RNG>(
         mut base_ot_receiver: BaseOT,
         rng: &mut RNG,
@@ -727,9 +729,11 @@ async fn base_ot_channel<BaseMsg: RemoteSend>(
     sender: &mut mpc_channel::Sender<Msg<BaseMsg>>,
     receiver: &mut mpc_channel::Receiver<Msg<BaseMsg>>,
 ) -> Result<(mpc_channel::Sender<BaseMsg>, mpc_channel::Receiver<BaseMsg>), CommunicationError> {
-    mpc_channel::establish_sub_channel(sender, receiver, 128, Msg::BaseOTChannel, |msg| match msg {
-        Msg::BaseOTChannel(receiver) => Some(receiver),
-        _ => None,
+    mpc_channel::sub_channel_with(sender, receiver, BASE_OT_COUNT, Msg::BaseOTChannel, |msg| {
+        match msg {
+            Msg::BaseOTChannel(receiver) => Some(receiver),
+            _ => None,
+        }
     })
     .await
 }
@@ -744,7 +748,7 @@ async fn pprf_channel<BaseMsg: RemoteSend>(
     ),
     CommunicationError,
 > {
-    mpc_channel::establish_sub_channel(sender, receiver, 128, Msg::Pprf, |msg| match msg {
+    mpc_channel::sub_channel_with(sender, receiver, 128, Msg::Pprf, |msg| match msg {
         Msg::Pprf(receiver) => Some(receiver),
         _ => None,
     })
