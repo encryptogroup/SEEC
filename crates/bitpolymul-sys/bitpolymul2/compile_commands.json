@@ -1,0 +1,52 @@
+[
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include bc.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/bc.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include bitpolymul.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/bitpolymul.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include encode.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/encode.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include butterfly_net.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/butterfly_net.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include gf2128_cantor_iso.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/gf2128_cantor_iso.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include btfy.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/btfy.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include trunc_btfy_tab.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/trunc_btfy_tab.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include gf264_cantor_iso.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/gf264_cantor_iso.c"
+    },
+    {
+        "command": "cc -c -O3 -funroll-loops -mavx2 -mpclmul -std=gnu99 -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include trunc_btfy_tab_64.c",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/trunc_btfy_tab_64.c"
+    },
+    {
+        "command": "c++ -c -O3 -mavx2 -mpclmul -fno-exceptions -fno-rtti -nostdinc++ -Wextra -Wall -I/usr/local/include -I/opt/local/include -I/usr/include bitpolymul-test.cpp",
+        "directory": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2",
+        "file": "/home/robin/code/zappot/bitpolymul-sys/bitpolymul2/bitpolymul-test.cpp"
+    }
+]
