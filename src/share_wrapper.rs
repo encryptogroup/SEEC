@@ -1,214 +1,308 @@
-use crate::circuit::{Circuit, DefaultIdx, Gate, GateId};
-use itertools::Itertools;
-use petgraph::graph::IndexType;
 use std::borrow::Borrow;
-use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
 use std::mem;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
-use std::rc::Rc;
 
+use itertools::Itertools;
+
+use crate::circuit::builder::SharedCircuit;
+use crate::circuit::{CircuitId, DefaultIdx, Gate, GateId};
+use crate::CircuitBuilder;
+
+// TODO ShareWrappe can now implement Clone, but should it?
 #[derive(Clone)]
-pub struct ShareWrapper<Idx = DefaultIdx> {
-    pub(crate) circuit: Rc<RefCell<Circuit<Idx>>>,
-    output_of: GateId<Idx>,
+pub struct ShareWrapper {
+    pub(crate) circuit_id: CircuitId,
+    pub(crate) output_of: GateId<DefaultIdx>,
+    // The current ShareWrapper API has some significant limitations when used in a multi-threaded
+    // context. Better to forbid it for now so that we can maybe change to non-thread safe
+    // primitives
+    not_thread_safe: PhantomData<*const ()>,
 }
 
-impl<Idx: IndexType> ShareWrapper<Idx> {
+impl ShareWrapper {
     /// Note: Do not use while holding mutable borrow of self.circuit as it will panic!
-    pub fn from_const(circuit: Rc<RefCell<Circuit<Idx>>>, constant: bool) -> Self {
+    pub fn from_const(circuit_id: CircuitId, constant: bool) -> Self {
+        let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
+            panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
+        });
         let output_of = {
-            let mut circuit = circuit.borrow_mut();
+            let mut circuit = circuit.lock();
             circuit.add_gate(Gate::Constant(constant))
         };
-        Self { circuit, output_of }
+        Self {
+            circuit_id,
+            output_of,
+            not_thread_safe: PhantomData,
+        }
     }
 
-    pub fn input(circuit: Rc<RefCell<Circuit<Idx>>>) -> Self {
-        let output_of = circuit.borrow_mut().add_gate(Gate::Input);
-        Self { circuit, output_of }
+    pub fn input(circuit_id: CircuitId) -> Self {
+        let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
+            panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
+        });
+        let output_of = circuit.lock().add_gate(Gate::Input);
+        Self {
+            circuit_id,
+            output_of,
+            not_thread_safe: PhantomData,
+        }
+    }
+
+    pub fn sub_circuit_input(circuit_id: CircuitId, gate: Gate) -> Self {
+        let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
+            panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
+        });
+        let output_of = {
+            let mut circ = circuit.lock();
+            circ.add_sc_input_gate(gate)
+        };
+        Self {
+            circuit_id,
+            output_of,
+            not_thread_safe: PhantomData,
+        }
+    }
+
+    pub fn sub_circuit_output(&self) -> ShareWrapper {
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
+        let output_of = circuit.add_wired_gate(Gate::SubCircuitOutput, &[self.output_of]);
+        Self {
+            circuit_id: self.circuit_id,
+            output_of,
+            not_thread_safe: PhantomData,
+        }
     }
 
     /// Consumes this ShareWrapper and constructs a `Gate::Output` in the circuit with its value
-    pub fn output(self) -> GateId<Idx> {
-        let mut circuit = self.circuit.borrow_mut();
+    pub fn output(self) -> GateId {
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
         circuit.add_wired_gate(Gate::Output, &[self.output_of])
     }
-}
 
-impl<Idx: IndexType, Rhs: Borrow<Self>> BitXor<Rhs> for ShareWrapper<Idx> {
-    type Output = Self;
+    pub fn connect_to_main_circuit(self) -> ShareWrapper {
+        assert_ne!(
+            self.circuit_id, 0,
+            "Can't connect ShareWrapper of main circuit to main circuit"
+        );
+        let out = self.sub_circuit_output();
+        CircuitBuilder::with_global(|builder| {
+            let input_to_main = ShareWrapper::sub_circuit_input(0, Gate::SubCircuitInput);
+            builder.connect_circuits([(out, input_to_main.clone())]);
+            input_to_main
+        })
+    }
 
-    fn bitxor(self, rhs: Rhs) -> Self::Output {
-        let rhs = rhs.borrow();
-        let output_of = {
-            let mut circuit = self.circuit.borrow_mut();
-            circuit.add_wired_gate(Gate::Xor, &[self.output_of, rhs.output_of])
-        };
-        Self {
-            circuit: self.circuit,
-            output_of,
-        }
+    pub fn gate_id(&self) -> GateId {
+        self.output_of
+    }
+
+    pub fn get_circuit(&self) -> SharedCircuit {
+        CircuitBuilder::get_global_circuit(self.circuit_id)
+            .expect("circuit_id is not stored in global CircuitBuilder")
     }
 }
 
-impl<Idx: IndexType> BitXor<bool> for ShareWrapper<Idx> {
+impl<Rhs: Borrow<Self>> BitXor<Rhs> for ShareWrapper {
     type Output = Self;
 
-    fn bitxor(self, rhs: bool) -> Self::Output {
-        let output_of = {
-            let mut circuit = self.circuit.borrow_mut();
+    fn bitxor(mut self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
+        assert_eq!(
+            self.circuit_id, rhs.circuit_id,
+            "ShareWrapper operations are only defined on Wrappers for the same circuit"
+        );
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
+            circuit.add_wired_gate(Gate::Xor, &[self.output_of, rhs.output_of])
+        };
+        self
+    }
+}
+
+impl BitXor<bool> for ShareWrapper {
+    type Output = Self;
+
+    fn bitxor(mut self, rhs: bool) -> Self::Output {
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
             let const_gate = circuit.add_gate(Gate::Constant(rhs));
             circuit.add_wired_gate(Gate::Xor, &[self.output_of, const_gate])
         };
-        Self {
-            circuit: self.circuit,
-            output_of,
-        }
+        self
     }
 }
 
-impl<Idx: IndexType, Rhs: Borrow<Self>> BitXorAssign<Rhs> for ShareWrapper<Idx> {
+impl<Rhs: Borrow<Self>> BitXorAssign<Rhs> for ShareWrapper {
     fn bitxor_assign(&mut self, rhs: Rhs) {
         let rhs = rhs.borrow();
-        let mut circuit = self.circuit.borrow_mut();
+        assert_eq!(
+            self.circuit_id, rhs.circuit_id,
+            "ShareWrapper operations are only defined on Wrappers for the same circuit"
+        );
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
         self.output_of = circuit.add_wired_gate(Gate::Xor, &[self.output_of, rhs.output_of]);
     }
 }
 
-impl<Idx: IndexType> BitXorAssign<bool> for ShareWrapper<Idx> {
+impl BitXorAssign<bool> for ShareWrapper {
     fn bitxor_assign(&mut self, rhs: bool) {
-        let mut circuit = self.circuit.borrow_mut();
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
         let const_gate = circuit.add_gate(Gate::Constant(rhs));
         self.output_of = circuit.add_wired_gate(Gate::Xor, &[self.output_of, const_gate]);
     }
 }
 
-impl<Idx: IndexType, Rhs: Borrow<Self>> BitAnd<Rhs> for ShareWrapper<Idx> {
+impl<Rhs: Borrow<Self>> BitAnd<Rhs> for ShareWrapper {
     type Output = Self;
 
-    fn bitand(self, rhs: Rhs) -> Self::Output {
+    fn bitand(mut self, rhs: Rhs) -> Self::Output {
         let rhs = rhs.borrow();
-        let output_of = {
-            let mut circuit = self.circuit.borrow_mut();
+        assert_eq!(
+            self.circuit_id, rhs.circuit_id,
+            "ShareWrapper operations are only defined on Wrappers for the same circuit"
+        );
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
             circuit.add_wired_gate(Gate::And, &[self.output_of, rhs.output_of])
         };
-        Self {
-            circuit: self.circuit,
-            output_of,
-        }
+        self
     }
 }
 
-impl<Idx: IndexType> BitAnd<bool> for ShareWrapper<Idx> {
+impl BitAnd<bool> for ShareWrapper {
     type Output = Self;
 
-    fn bitand(self, rhs: bool) -> Self::Output {
-        let output_of = {
-            let mut circuit = self.circuit.borrow_mut();
+    fn bitand(mut self, rhs: bool) -> Self::Output {
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
             let const_gate = circuit.add_gate(Gate::Constant(rhs));
             circuit.add_wired_gate(Gate::And, &[self.output_of, const_gate])
         };
-        Self {
-            circuit: self.circuit,
-            output_of,
-        }
+        self
     }
 }
 
-impl<Idx: IndexType, Rhs: Borrow<Self>> BitAndAssign<Rhs> for ShareWrapper<Idx> {
+impl<Rhs: Borrow<Self>> BitAndAssign<Rhs> for ShareWrapper {
     fn bitand_assign(&mut self, rhs: Rhs) {
         let rhs = rhs.borrow();
-        let mut circuit = self.circuit.borrow_mut();
+        assert_eq!(
+            self.circuit_id, rhs.circuit_id,
+            "ShareWrapper operations are only defined on Wrappers for the same circuit"
+        );
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
         self.output_of = circuit.add_wired_gate(Gate::And, &[self.output_of, rhs.output_of]);
     }
 }
 
-impl<Idx: IndexType> BitAndAssign<bool> for ShareWrapper<Idx> {
+impl BitAndAssign<bool> for ShareWrapper {
     fn bitand_assign(&mut self, rhs: bool) {
-        let mut circuit = self.circuit.borrow_mut();
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
         let const_gate = circuit.add_gate(Gate::Constant(rhs));
         self.output_of = circuit.add_wired_gate(Gate::And, &[self.output_of, const_gate]);
     }
 }
 
-impl<Idx: IndexType, Rhs: Borrow<Self>> BitOr<Rhs> for ShareWrapper<Idx> {
+impl<Rhs: Borrow<Self>> BitOr<Rhs> for ShareWrapper {
     type Output = Self;
 
     fn bitor(self, rhs: Rhs) -> Self::Output {
         let rhs = rhs.borrow();
+        assert_eq!(
+            self.circuit_id, rhs.circuit_id,
+            "ShareWrapper operations are only defined on Wrappers for the same circuit"
+        );
         // a | b <=> (a ^ b) ^ (a & b)
         self.clone() ^ rhs.clone() ^ (self & rhs)
     }
 }
 
-impl<Idx: IndexType> BitOr<bool> for ShareWrapper<Idx> {
+impl BitOr<bool> for ShareWrapper {
     type Output = Self;
 
     fn bitor(self, rhs: bool) -> Self::Output {
-        let rhs = ShareWrapper::from_const(Rc::clone(&self.circuit), rhs);
+        let rhs = ShareWrapper::from_const(self.circuit_id, rhs);
         // a | b <=> (a ^ b) ^ (a & b)
         self.clone() ^ rhs.clone() ^ (self & rhs)
     }
 }
 
-impl<Idx: IndexType, Rhs: Borrow<Self>> BitOrAssign<Rhs> for ShareWrapper<Idx> {
+impl<Rhs: Borrow<Self>> BitOrAssign<Rhs> for ShareWrapper {
     fn bitor_assign(&mut self, rhs: Rhs) {
         let rhs = rhs.borrow();
         *self ^= rhs.clone() ^ (self.clone() & rhs);
     }
 }
 
-impl<Idx: IndexType> BitOrAssign<bool> for ShareWrapper<Idx> {
+impl BitOrAssign<bool> for ShareWrapper {
     fn bitor_assign(&mut self, rhs: bool) {
-        let rhs = ShareWrapper::from_const(Rc::clone(&self.circuit), rhs);
+        let rhs = ShareWrapper::from_const(self.circuit_id, rhs);
         *self ^= rhs.clone() ^ (self.clone() & rhs);
     }
 }
 
-impl<Idx: IndexType> Not for ShareWrapper<Idx> {
+impl Not for ShareWrapper {
     type Output = Self;
 
-    fn not(self) -> Self::Output {
-        let output_of = {
-            let mut circuit = self.circuit.borrow_mut();
+    fn not(mut self) -> Self::Output {
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
             circuit.add_wired_gate(Gate::Inv, &[self.output_of])
         };
-        Self {
-            circuit: self.circuit,
-            output_of,
-        }
+        self
     }
 }
 
-impl<'a, Idx: IndexType> Not for &'a ShareWrapper<Idx> {
-    type Output = ShareWrapper<Idx>;
+impl<'a> Not for &'a ShareWrapper {
+    type Output = ShareWrapper;
 
     fn not(self) -> Self::Output {
         let output_of = {
-            let mut circuit = self.circuit.borrow_mut();
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
             circuit.add_wired_gate(Gate::Inv, &[self.output_of])
         };
         ShareWrapper {
-            circuit: self.circuit.clone(),
+            circuit_id: self.circuit_id,
             output_of,
+            not_thread_safe: PhantomData,
         }
     }
 }
 
-impl<Idx: Debug> Debug for ShareWrapper<Idx> {
+impl Debug for ShareWrapper {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "ShareWrapper for output of gate {:?}", self.output_of)
     }
 }
 
 // TODO placeholder function until I can think of a nice place to put this
-pub fn inputs<Idx: IndexType>(
-    circuit: Rc<RefCell<Circuit<Idx>>>,
+// Creates inputs for the main circuit (id = 0)
+pub fn inputs(inputs: usize) -> Vec<ShareWrapper> {
+    (0..inputs).map(|_| ShareWrapper::input(0)).collect()
+}
+
+// TODO placeholder function until I can think of a nice place to put this
+// TODO this needs to have a generic return type to support more complex sub circuit input functions
+pub(crate) fn sub_circuit_inputs(
+    circuit_id: CircuitId,
     inputs: usize,
-) -> Vec<ShareWrapper<Idx>> {
+    gate: Gate,
+) -> Vec<ShareWrapper> {
     (0..inputs)
-        .map(|_| ShareWrapper::input(circuit.clone()))
+        .map(|_| ShareWrapper::sub_circuit_input(circuit_id, gate))
         .collect()
 }
 
@@ -217,27 +311,31 @@ pub fn inputs<Idx: IndexType>(
 /// The circuit will be constructed such that the depth is minimal.
 ///
 /// ```rust
-///# use std::cell::RefCell;
-///# use std::rc::Rc;
-///# use gmw_rs::circuit::Circuit;
+///# use std::sync::Arc;
+///# use gmw_rs::circuit::BaseCircuit;
 ///# use gmw_rs::share_wrapper::{inputs, low_depth_reduce};
+///# use parking_lot::Mutex;
+///# use gmw_rs::CircuitBuilder;
 ///#
-/// let and_tree = Rc::new(RefCell::new(Circuit::<u16>::new()));
-/// let inputs = inputs(and_tree.clone(), 23);
-/// low_depth_reduce(&inputs, std::ops::BitAnd::bitand)
+/// let inputs = inputs(23);
+/// low_depth_reduce(inputs, std::ops::BitAnd::bitand)
 ///     .unwrap()
 ///     .output();
+/// let and_tree = CircuitBuilder::global_into_circuit();
+/// assert_eq!(and_tree.and_count(), 22)
 /// ```
 ///
-pub fn low_depth_reduce<Idx, F>(shares: &[ShareWrapper<Idx>], mut f: F) -> Option<ShareWrapper<Idx>>
+pub fn low_depth_reduce<F>(
+    shares: impl IntoIterator<Item = ShareWrapper>,
+    mut f: F,
+) -> Option<ShareWrapper>
 where
-    Idx: IndexType,
-    F: FnMut(ShareWrapper<Idx>, ShareWrapper<Idx>) -> ShareWrapper<Idx>,
+    F: FnMut(ShareWrapper, ShareWrapper) -> ShareWrapper,
 {
     // Todo: This implementation is probably a little bit inefficient. It might be possible to use
     //  the lower level api to construct the circuit faster. This should be benchmarked however.
-    let mut old_buf = Vec::with_capacity(shares.len() / 2);
-    let mut buf = shares.to_owned();
+    let mut buf: Vec<_> = shares.into_iter().collect();
+    let mut old_buf = Vec::with_capacity(buf.len() / 2);
     while buf.len() > 1 {
         mem::swap(&mut buf, &mut old_buf);
         let mut iter = old_buf.drain(..).tuples();

@@ -1,11 +1,13 @@
-use crate::transport::Transport;
+use std::convert::Infallible;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use futures::channel::mpsc;
 use futures::channel::mpsc::{unbounded, SendError};
 use futures::{Sink, Stream};
 use pin_project::pin_project;
-use std::convert::Infallible;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+
+use crate::transport::Transport;
 
 #[pin_project]
 pub struct InMemory<Item> {

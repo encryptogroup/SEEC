@@ -1,4 +1,6 @@
-use crate::errors::BristolError;
+use std::fs;
+use std::path::Path;
+
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{digit1, multispace0};
@@ -8,8 +10,8 @@ use nom::multi::{count, fill};
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
 use smallvec::SmallVec;
-use std::fs;
-use std::path::Path;
+
+use crate::errors::BristolError;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
@@ -130,8 +132,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::bristol::{circuit, gate, header, Gate, GateData, Header};
     use std::fs;
+
+    use crate::bristol::{circuit, gate, header, Gate, GateData, Header};
 
     #[test]
     fn parse_header() {

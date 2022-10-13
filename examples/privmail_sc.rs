@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Instant;
 use std::{fs, ops};
 
 use clap::Parser;
@@ -8,14 +9,14 @@ use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
-use gmw_rs::circuit::Circuit;
+use gmw_rs::circuit::builder::CircuitBuilder;
 use gmw_rs::circuit::GateId;
 use gmw_rs::common::BitVec;
 use gmw_rs::executor::Executor;
 use gmw_rs::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw_rs::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
+use gmw_rs::sub_circuit;
 use gmw_rs::transport::Tcp;
-use gmw_rs::CircuitBuilder;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -130,40 +131,44 @@ fn create_search_circuit(
      * ^^^       ^^^       ^^^       ^^^
      * key       key       key       key
      */
-    let num_positions = target_text.len() - keyword.len() + 1;
-    let search_results_per_position: Vec<_> = (0..num_positions)
-        .map(|k| create_comparison_circuit(keyword, target_text, k))
+    let result_bits: Vec<_> = target_text
+        .windows(keyword.len())
+        .map(|target| comparison_circuit(keyword, target))
         .collect();
-
-    let result_bits = search_results_per_position.into_iter().map(|result| {
-        debug!("AND reduce for {} bits", result.len());
-        low_depth_reduce(result, ops::BitAnd::bitand).expect("Reduce returned None")
-    });
     // Finally, use OR tree to get the final answer of whether any of the comparisons was a match
-    low_depth_reduce(result_bits, ops::BitOr::bitor).expect("Reduce returned None")
+    debug!("OR reduce for {} bits", result_bits.len());
+    or_sc(&result_bits)
 }
 
-fn create_comparison_circuit(
+#[sub_circuit]
+fn comparison_circuit(
     keyword: &[[ShareWrapper; 8]],
     target_text: &[[ShareWrapper; 8]],
-    text_position: usize,
-) -> Vec<ShareWrapper> {
+) -> ShareWrapper {
     const CHARACTER_BIT_LEN: usize = 6; // Follows from the special PrivMail encoding
     let splitted_keyword: Vec<_> = keyword
         .iter()
         .map(|c| c.iter().cloned().take(CHARACTER_BIT_LEN))
         .flatten()
         .collect();
-    let splitted_text: Vec<_> = target_text[text_position..text_position + keyword.len()]
+    let splitted_text: Vec<_> = target_text
         .iter()
         .map(|c| c.iter().cloned().take(CHARACTER_BIT_LEN))
         .flatten()
         .collect();
 
-    let mut res = splitted_keyword;
-    xor_inplace(&mut res, &splitted_text);
-    res.iter_mut().for_each(|c| *c = !&*c);
-    res
+    let res: Vec<_> = splitted_keyword
+        .into_iter()
+        .zip(splitted_text)
+        .map(|(k, t)| !(k.clone() ^ t))
+        .collect();
+
+    low_depth_reduce(res, ops::BitAnd::bitand).expect("Empty input")
+}
+
+#[sub_circuit]
+fn or_sc(input: &[ShareWrapper]) -> ShareWrapper {
+    low_depth_reduce(input.to_owned(), ops::BitOr::bitor).expect("Empty input")
 }
 
 fn base64_string_to_input(
@@ -177,17 +182,6 @@ fn base64_string_to_input(
         .collect();
     let input = BitVec::from_vec(duplicated);
     (input, shares)
-}
-
-fn xor_inplace(dst: &mut [ShareWrapper], other: &[ShareWrapper]) {
-    assert_eq!(
-        dst.len(),
-        other.len(),
-        "xor_inplace must be called with slices of equal length"
-    );
-    dst.iter_mut().zip(other).for_each(|(a, b)| {
-        *a ^= b;
-    })
 }
 
 #[tokio::main]
@@ -209,20 +203,20 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let builder = CircuitBuilder::new();
-    builder.install();
+    let now = Instant::now();
     let (input, _) = priv_mail_search(
         &search_query.keywords,
         &search_query.modifier_chain_share,
         &mails,
         args.duplication_factor,
     );
-
-    let circuit: Circuit<_> = CircuitBuilder::global_into_circuit();
+    let circuit = CircuitBuilder::global_into_circuit();
+    info!("Building circuit took: {}", now.elapsed().as_secs_f32());
+    // circuit = circuit.clone().into_base_circuit().into();
     // if args.save_circuit {
-    //     circuit.save_dot("privmail.dot")?;
+    //     bc.save_dot("privmail.dot")?;
     // }
-
+    // dbg!(&circuit);
     let mut transport = match args.my_id {
         0 => Tcp::listen(args.server).await?,
         1 => Tcp::connect(args.server).await?,
@@ -234,13 +228,15 @@ async fn main() -> anyhow::Result<()> {
         Executor::new(&circuit, args.my_id, mt_provider).await?
     };
 
+    let now = Instant::now();
     let output = executor.execute(input, &mut transport).await?;
     info!(
         my_id = %args.my_id,
         output = ?output,
         bytes_written = transport.bytes_written(),
         bytes_read = transport.bytes_read(),
-        gate_count = circuit.gate_count()
+        gate_count = circuit.gate_count(),
+        online_time_s = now.elapsed().as_secs_f32()
     );
     Ok(())
 }

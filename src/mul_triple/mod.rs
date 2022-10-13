@@ -1,9 +1,10 @@
 //! Multiplication triples.
-use crate::common::BitVec;
 use async_trait::async_trait;
 use num_integer::div_ceil;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
+
+use crate::common::BitVec;
 
 pub mod insecure_provider;
 pub mod trusted_provider;
@@ -103,6 +104,16 @@ impl MulTriples {
             .zip(self.c.iter().by_vals())
             .map(|((a, b), c)| MulTriple { a, b, c })
     }
+
+    // pub fn drain_mts(
+    //     &mut self,
+    // ) -> impl Iterator<Item = MulTriple> + ExactSizeIterator<Item = MulTriple> + '_ {
+    //     self.a
+    //         .drain(..)
+    //         .rev()
+    //         .zip(self.b.drain(..).rev().self.c.drain(..).rev())
+    //         .map(|((a, b), c)| MulTriple { a, b, c })
+    // }
 }
 
 fn compute_c(mts: &MulTriples, a: &BitVec, b: &BitVec) -> BitVec {
@@ -155,8 +166,9 @@ impl MulTriple {
 
 #[cfg(test)]
 mod tests {
-    use crate::mul_triple::MulTriples;
     use rand::thread_rng;
+
+    use crate::mul_triple::MulTriples;
 
     #[test]
     fn random_triple() {

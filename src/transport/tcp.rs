@@ -1,20 +1,23 @@
-use super::util::{TrackingReader, TrackingWriter};
-use crate::transport::Transport;
+use std::fmt::Debug;
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use async_stream::stream;
 use futures::{Sink, Stream};
 use pin_project::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::fmt::Debug;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_serde::formats::SymmetricalBincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::info;
+
+use crate::transport::Transport;
+
+use super::util::{TrackingReader, TrackingWriter};
 
 #[pin_project]
 pub struct Tcp<Item> {
@@ -157,9 +160,10 @@ impl<Item> Tcp<Item> {
 
 #[cfg(test)]
 mod tests {
-    use crate::transport::Tcp;
     use futures::{SinkExt, StreamExt};
     use serde::{Deserialize, Serialize};
+
+    use crate::transport::Tcp;
 
     #[tokio::test]
     async fn tcp_transport() {

@@ -2,14 +2,15 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
 use bitvec::order::Msb0;
-use gmw_rs::circuit::Circuit;
+use tokio::task::spawn_blocking;
+
+use gmw_rs::circuit::BaseCircuit;
 use gmw_rs::common::BitVec;
 use gmw_rs::executor::Executor;
 use gmw_rs::mul_triple::trusted_provider::{TrustedMTProviderClient, TrustedMTProviderServer};
 use gmw_rs::mul_triple::trusted_seed_provider;
 use gmw_rs::private_test_utils::init_tracing;
 use gmw_rs::transport::Tcp;
-use tokio::task::spawn_blocking;
 
 // Test the TrustedMTProvider by executing the aes circuit with the provided mts
 #[tokio::test]
@@ -19,9 +20,10 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
     let _mt_server =
         tokio::spawn(async move { TrustedMTProviderServer::start(tp_addr).await.unwrap() });
     let circuit = spawn_blocking(move || {
-        Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
+        BaseCircuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
     })
-    .await??;
+    .await??
+    .into();
     let mt_provider_1 =
         TrustedMTProviderClient::new("some_id".into(), Tcp::connect(tp_addr).await?);
     let mt_provider_2 =
@@ -60,9 +62,10 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
             .unwrap()
     });
     let circuit = spawn_blocking(move || {
-        Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
+        BaseCircuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
     })
-    .await??;
+    .await??
+    .into();
     let mt_provider_1 = trusted_seed_provider::TrustedMTProviderClient::new(
         "some_id".into(),
         Tcp::connect(tp_addr).await?,

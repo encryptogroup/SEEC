@@ -1,31 +1,29 @@
-use crate::circuit::{Circuit, Gate};
-use crate::common::BitVec;
-use crate::executor::Executor;
-use crate::mul_triple::insecure_provider::InsecureMTProvider;
+use std::fmt::Debug;
+use std::path::Path;
 
-use crate::transport::{InMemory, Tcp};
 use anyhow::Result;
-
 use bitvec::field::BitField;
 use bitvec::order::Lsb0;
 use bitvec::vec;
 use funty::Integral;
 use itertools::Itertools;
-use petgraph::graph::IndexType;
-
-use std::fmt::Debug;
-use std::path::Path;
-
 use tokio::task::spawn_blocking;
 use tokio::time::Instant;
 use tracing::info;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-pub fn create_and_tree(depth: u32) -> Circuit {
+use crate::circuit::Circuit;
+use crate::circuit::{BaseCircuit, Gate, GateIdx};
+use crate::common::BitVec;
+use crate::executor::Executor;
+use crate::mul_triple::insecure_provider::InsecureMTProvider;
+use crate::transport::{InMemory, Tcp};
+
+pub fn create_and_tree(depth: u32) -> BaseCircuit {
     let total_nodes = 2_u32.pow(depth);
     let mut layer_count = total_nodes / 2;
-    let mut circuit = Circuit::new();
+    let mut circuit = BaseCircuit::new();
 
     let mut previous_layer: Vec<_> = (0..layer_count)
         .map(|_| circuit.add_gate(Gate::Input))
@@ -44,7 +42,7 @@ pub fn create_and_tree(depth: u32) -> Circuit {
 }
 
 /// Initializes tracing subscriber with EnvFilter for usage in tests. This should be the first call
-/// in each test, with the returned value being assigned to a variable to prevent dropping.  
+/// in each test, with the returned value being assigned to a variable to prevent dropping.
 /// Output can be configured via RUST_LOG env variable as explained
 /// [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/struct.EnvFilter.html)
 ///
@@ -122,17 +120,17 @@ pub async fn execute_bristol<I: IntoInput>(
 ) -> Result<BitVec> {
     let path = bristol_file.as_ref().to_path_buf();
     let now = Instant::now();
-    let circuit = spawn_blocking(move || Circuit::load_bristol(path)).await??;
+    let circuit = spawn_blocking(move || BaseCircuit::load_bristol(path)).await??;
     info!(
         parsing_time = %now.elapsed().as_millis(),
         "Parsing bristol time (ms)"
     );
     let inputs = inputs.into_input();
-    execute_circuit(&circuit, inputs, transport).await
+    execute_circuit(&circuit.into(), inputs, transport).await
 }
 
 #[tracing::instrument(skip(circuit, input_a, input_b))]
-pub async fn execute_circuit<Idx: IndexType>(
+pub async fn execute_circuit<Idx: GateIdx>(
     circuit: &Circuit<Idx>,
     (input_a, input_b): (BitVec, BitVec),
     transport: TestTransport,

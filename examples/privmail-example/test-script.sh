@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PATH_TO_BIN="../../target/release/examples/privmail"
+PATH_TO_BIN="../../target/release/examples/privmail_sc"
 
 # Run different tests
 TEST_SETS=("mail-shares" "mail-shares-19-" "mail-shares-29-" "mail-shares-1000-")

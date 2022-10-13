@@ -4,26 +4,26 @@
 //!
 //! To view the logging output, set the environment variable `RUST_LOG` as specified
 //! [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/struct.EnvFilter.html).
-use anyhow::Result;
-use bitvec::prelude::*;
-
-use bitvec::bitvec;
-use gmw_rs::circuit::Circuit;
-use gmw_rs::executor::Executor;
-use gmw_rs::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw_rs::share_wrapper::{inputs, ShareWrapper};
-use gmw_rs::transport::Tcp;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
+
+use anyhow::Result;
+use bitvec::bitvec;
+use bitvec::prelude::*;
 use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
-fn build_circuit(circuit: Rc<RefCell<Circuit>>) {
+use gmw_rs::circuit::Circuit;
+use gmw_rs::executor::Executor;
+use gmw_rs::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw_rs::share_wrapper::inputs;
+use gmw_rs::transport::Tcp;
+use gmw_rs::CircuitBuilder;
+
+fn build_circuit() {
     // The `inputs` method is a convenience method to create n input gates for the circuit.
     // It returns a Vec<ShareWrapper>. In the following, we use try_into() to convert it into
     // an array to destructure it
-    let [a, b, c, d]: [ShareWrapper<_>; 4] = inputs(circuit, 4).try_into().unwrap();
+    let [a, b, c, d]: [_; 4] = inputs(4).try_into().unwrap();
     // a,b,c,d are `ShareWrapper`s representing the output share of a gate. They support
     // the standard std::ops traits like BitAnd and BitXor (and their Assign variants) which
     // are used to implicitly build the circuit.
@@ -32,8 +32,8 @@ fn build_circuit(circuit: Rc<RefCell<Circuit>>) {
     // representing the output of the new gate.
     let xor = a ^ b;
     // To use a ShareWrapper multiple times (connect to gate represented by it to multiple
-    // different ones), it must be cloned.
-    let and = c & d.clone();
+    // different ones), simply use a reference to it (only possibile on the rhs).
+    let and = c & &d;
     // we can still use d but not c
     let mut tmp = and ^ d;
     // BitAnd and BitXor are also supported, as is Not. See the ShareWrapper documentation for
@@ -85,20 +85,17 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let circuit = Circuit::new();
-    // Currently you need to explicitly place the Circuit in a Rc<RefCell<>> to use the
-    // ShareWrappers. This will likely change in the future.
-    let circuit = Rc::new(RefCell::new(circuit));
-    // Use the build_circuit method to construct the circuit. Note that because of the usage of
-    // Rc, a reference counted smart pointer to express shared ownership, the operations on the
-    // ShareWrappers in the build_circuit method change the circuit defined above
-    build_circuit(Rc::clone(&circuit));
+    // Create the Circuit. The operations on the ShareWrapper will use a lazily initialized
+    // global CircuitBuilder from which we can get the constructed Circuit
+    build_circuit();
     // Save the circuit in .dot format for easy inspection and debugging
-    circuit.borrow().save_dot("examples/simple-circuit.dot")?;
+    // circuit.lock().save_dot("examples/simple-circuit.dot")?;
     // In an actual setting, we would have two parties on different hosts, each constructing the
     // same circuit and evaluating it. To simulate that, we convert the shared Circuit into
-    // an owned Circuit and clone it. Each party has their own but identical circuit.
-    let circuit_party_0 = Rc::try_unwrap(circuit).unwrap().into_inner();
+    // an owned Circuit and clone it. The conversion will fail if there are any outstanding clones
+    // of the SharedCircuit, e.g. when there are ShareWrappers still alive.
+    // Each party has their own but identical circuit.
+    let circuit_party_0: Circuit = CircuitBuilder::global_into_circuit();
     let circuit_party_1 = circuit_party_0.clone();
     // Spawn separate tasks for each party
     let party0 = tokio::spawn(async { party(circuit_party_0, 0).await.unwrap() });
