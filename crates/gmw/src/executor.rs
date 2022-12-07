@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use mpc_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::circuit::builder::SubCircuitGate;
 use crate::circuit::{Circuit, CircuitLayerIter, Gate, GateIdx};
@@ -31,6 +31,7 @@ pub struct Executor<'c, Idx> {
 pub enum ExecutorMsg {
     // TODO ser/de the BitVecs or Vecs? Or maybe a single Vec? e and d have the same length
     AndLayer { e: Vec<u8>, d: Vec<u8> },
+    Sync,
 }
 
 impl<'c, Idx: GateIdx> Executor<'c, Idx> {
@@ -142,7 +143,9 @@ impl<'c, Idx: GateIdx> Executor<'c, Idx> {
             let AndLayer {
                 d: resp_d,
                 e: resp_e,
-            } = response;
+            } = response else {
+                return Err(ExecutorError::OutOfOrderMessage);
+            };
 
             let and_outputs = layer
                 .and_iter()
@@ -167,6 +170,14 @@ impl<'c, Idx: GateIdx> Executor<'c, Idx> {
             and_cnt,
             execution_time_s = now.elapsed().as_secs_f32()
         );
+        sender
+            .send(ExecutorMsg::Sync)
+            .await
+            .expect("Sending sync msg");
+        match receiver.recv().await {
+            Ok(Some(ExecutorMsg::Sync)) => (),
+            _other => warn!("Missing sync msg in execution. This is likely benign."),
+        };
         let output_iter = self.circuit.circuits[0].output_gates().iter().map(|id| {
             #[cfg(debug_assertions)]
             assert!(

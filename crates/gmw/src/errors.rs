@@ -4,7 +4,10 @@ use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ExecutorError {}
+pub enum ExecutorError {
+    #[error("Received out of order message during execution")]
+    OutOfOrderMessage,
+}
 
 #[derive(Error, Debug)]
 pub enum CircuitError {
