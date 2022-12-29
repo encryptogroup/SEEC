@@ -1,12 +1,16 @@
+//! This example shows how to load a Bristol circuit (sha256) and execute it, optionally generating
+//! the multiplication triples via a third trusted party (see the `trusted_party_mts.rs` example).
+//!
+//! It also demonstrates how to use the [`CommStatistics`] API to track the communication of
+//! different phases and write it to a file.
+
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{stdout, BufWriter, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-
-use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::BaseCircuit;
@@ -15,7 +19,7 @@ use gmw::executor::{Executor, ExecutorMsg};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 use mpc_channel::sub_channels_for;
-// use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
+use mpc_channel::util::{CommStatistics, Communication};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -37,6 +41,9 @@ struct Args {
         default_value = "test_resources/bristol-circuits/sha-256-low_depth.txt"
     )]
     circuit: PathBuf,
+    /// File path for the communication statistics. Will overwrite existing files.
+    #[clap(long)]
+    stats: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -44,11 +51,6 @@ async fn main() -> Result<()> {
     let _guard = init_tracing()?;
     let args = Args::parse();
     let circuit = BaseCircuit::load_bristol(args.circuit)?.into();
-    // let mut transport = match args.id {
-    //     0 => Tcp::listen(args.server).await?,
-    //     1 => Tcp::connect(args.server).await?,
-    //     illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
-    // };
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
         0 => mpc_channel::tcp::listen(args.server).await?,
@@ -56,24 +58,54 @@ async fn main() -> Result<()> {
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
+    // Initialize the communication statistics tracker with the counters for the main channel
+    let mut comm_stats = CommStatistics::new(bytes_written, bytes_read);
+
     let (mut sender, mut receiver) =
         sub_channels_for!(&mut sender, &mut receiver, 8, ExecutorMsg).await?;
 
     let mut executor = if let Some(addr) = args.mt_provider {
-        let (mt_sender, _, mt_receiver, _) = mpc_channel::tcp::connect(addr).await?;
+        let (mt_sender, bytes_written, mt_receiver, bytes_read) =
+            mpc_channel::tcp::connect(addr).await?;
+        // Set the counters for the helper channel
+        comm_stats.set_helper(bytes_written, bytes_read);
         let mt_provider = TrustedMTProviderClient::new("unique-id".into(), mt_sender, mt_receiver);
-        Executor::new(&circuit, args.id, mt_provider).await?
+        // As the MTs are generated when the Executor is created, we record the communication
+        // with the `record_helper` method and a custom category
+        comm_stats
+            .record_helper(
+                Communication::Custom("helper-mts"),
+                Executor::new(&circuit, args.id, mt_provider),
+            )
+            .await?
     } else {
         let mt_provider = InsecureMTProvider::default();
-        Executor::new(&circuit, args.id, mt_provider).await?
+        comm_stats
+            .record(
+                Communication::FunctionDependentSetup,
+                Executor::new(&circuit, args.id, mt_provider),
+            )
+            .await?
     };
     let input = BitVec::repeat(false, 768);
-    let out = executor.execute(input, &mut sender, &mut receiver).await?;
-    info!(
-        bytes_written = bytes_written.get(),
-        bytes_read = bytes_read.get(),
-        ?out
-    );
+    let out = comm_stats
+        .record(
+            Communication::Online,
+            executor.execute(input, &mut sender, &mut receiver),
+        )
+        .await?;
+
+    // Depending on whether a --stats file is set, create a file writer or stdout
+    let writer: Box<dyn Write> = match args.stats {
+        Some(path) => {
+            let mut file = File::create(path)?;
+            Box::new(file)
+        }
+        None => Box::new(stdout()),
+    };
+    serde_json::to_writer_pretty(writer, &comm_stats)?;
+    write!(writer, "\n")?;
+
     Ok(())
 }
 

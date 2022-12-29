@@ -2,11 +2,15 @@
 use bytes::Bytes;
 use futures::{Sink, Stream};
 use pin_project::pin_project;
+use serde::ser::SerializeMap;
+use serde::{Serialize, Serializer};
+use std::collections::HashMap;
+use std::future::Future;
 use std::io::{Error, IoSlice};
 use std::ops::AddAssign;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::{io, mem};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -28,7 +32,52 @@ pub struct TrackingReader<AsyncReader> {
 }
 
 #[derive(Clone, Default, Debug)]
+/// A counter that tracks communication in bytes sent or received. Can be used with the
+/// [`CommStatistics`] struct to track communication in different phases.
 pub struct Counter(Arc<AtomicUsize>);
+
+/// A utility struct which is used to track communication on a **best-effort basis**. When created, it is initialized with
+/// the [`Counter`]s of the main channel. Optionally, a counter pair for a helper channel can be
+/// set.
+///
+/// # Caveat
+/// As the actual sending of values transmitted via channels is done in an asynchronous background
+/// task, `CommStatistics` can only record the communication on a best-effort basis. It is possible
+/// for values that are sent to a channel within a [`CommStatistics::record`] call to not be
+/// tracked as the specified [`Communication`], but rather as `Unaccounted`. If the amount of
+/// unaccounted communication is higher than desired, adding a [`tokio::time::sleep`] at the end
+/// of the `record` call might reduce it.
+#[derive(Default)]
+pub struct CommStatistics {
+    main: CounterPair,
+    helper: Option<CounterPair>,
+    recorded: Mutex<HashMap<Communication, CountPair>>,
+}
+
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Serialize)]
+/// Categories for recorded communication. The `Custom` variant can be used to label the
+/// communication with a user chosen string.
+pub enum Communication {
+    FunctionIndependentSetup,
+    FunctionDependentSetup,
+    Ots,
+    Mts,
+    Online,
+    Unaccounted,
+    Custom(&'static str),
+}
+
+#[derive(Default, Debug, Clone)]
+struct CounterPair {
+    send: Counter,
+    recv: Counter,
+}
+
+#[derive(Default, Debug, Clone, Serialize)]
+struct CountPair {
+    sent: usize,
+    recv: usize,
+}
 
 impl<AsyncWriter> TrackingWriter<AsyncWriter> {
     pub fn new(writer: AsyncWriter) -> Self {
@@ -173,13 +222,134 @@ impl Counter {
         self.0.load(Ordering::SeqCst)
     }
 
-    pub fn reset(&self) {
-        self.0.store(0, Ordering::SeqCst)
+    pub fn reset(&self) -> usize {
+        self.0.swap(0, Ordering::SeqCst)
     }
 }
 
 impl AddAssign<usize> for Counter {
     fn add_assign(&mut self, rhs: usize) {
         self.0.fetch_add(rhs, Ordering::SeqCst);
+    }
+}
+
+impl CommStatistics {
+    /// Create a new [`CommStatistics`] with the counters for the main channel.
+    pub fn new(send_counter: Counter, recv_counter: Counter) -> Self {
+        Self {
+            main: CounterPair {
+                send: send_counter,
+                recv: recv_counter,
+            },
+            helper: None,
+            recorded: Default::default(),
+        }
+    }
+
+    /// Add the helper counters. This might be used to track the communication with a trusted third
+    /// party.
+    pub fn with_helper(
+        mut self,
+        helper_send_counter: Counter,
+        helper_recv_counter: Counter,
+    ) -> Self {
+        self.set_helper(helper_send_counter, helper_recv_counter);
+        self
+    }
+
+    /// Set the helper counters. This might be used to track the communication with a trusted third
+    /// party.
+    pub fn set_helper(&mut self, helper_send_counter: Counter, helper_recv_counter: Counter) {
+        self.helper = Some(CounterPair {
+            send: helper_send_counter,
+            recv: helper_recv_counter,
+        });
+    }
+
+    /// Record the main channel communication that happens within the future `f` on a
+    /// best-effort basis.
+    pub async fn record<F, R>(&mut self, comm: Communication, f: F) -> R
+    where
+        F: Future<Output = R>,
+    {
+        self.record_for(self.main.clone(), comm, f).await
+    }
+
+    /// Record the helper channel communication that happens within the future `f` on a
+    /// best-effort basis.
+    pub async fn record_helper<F, R>(&mut self, comm: Communication, f: F) -> R
+    where
+        F: Future<Output = R>,
+    {
+        let helper = self
+            .helper
+            .clone()
+            .expect("Helper counter must be set to record helper communication");
+        self.record_for(helper, comm, f).await
+    }
+
+    async fn record_for<F, R>(&mut self, cnt_pair: CounterPair, comm: Communication, f: F) -> R
+    where
+        F: Future<Output = R>,
+    {
+        self.record_unaccounted();
+        let ret = f.await;
+        let accounted = cnt_pair.reset();
+        let mut recorded = self.recorded.lock().unwrap();
+        let entry = recorded.entry(comm).or_default();
+        *entry += accounted;
+
+        ret
+    }
+
+    fn record_unaccounted(&self) {
+        let mut unaccounted = self.main.reset();
+        if let Some(helper) = &self.helper {
+            unaccounted += helper.reset();
+        }
+        let mut recorded = self.recorded.lock().unwrap();
+        let unaccounted_entry = recorded.entry(Communication::Unaccounted).or_default();
+        *unaccounted_entry += unaccounted;
+    }
+}
+
+impl CounterPair {
+    fn reset(&self) -> CountPair {
+        CountPair {
+            sent: self.send.reset(),
+            recv: self.recv.reset(),
+        }
+    }
+}
+
+impl AddAssign for CountPair {
+    fn add_assign(&mut self, rhs: Self) {
+        self.sent += rhs.sent;
+        self.recv += rhs.recv;
+    }
+}
+
+// Custom serialization implementation which records the unaccounted communication before
+// serialization. The Communication::Custom variant is serialized as the internal string.
+impl Serialize for CommStatistics {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.record_unaccounted();
+        let recorded = self.recorded.lock().unwrap();
+
+        let mut map = serializer.serialize_map(Some(recorded.len()))?;
+        for (k, v) in recorded.iter() {
+            match k {
+                Communication::Custom(custom) => {
+                    map.serialize_entry(custom, v)?;
+                }
+                k => {
+                    map.serialize_entry(k, v)?;
+                }
+            }
+        }
+        map.end()
     }
 }
