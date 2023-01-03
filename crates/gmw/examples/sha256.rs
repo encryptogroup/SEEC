@@ -1,7 +1,7 @@
 //! This example shows how to load a Bristol circuit (sha256) and execute it, optionally generating
 //! the multiplication triples via a third trusted party (see the `trusted_party_mts.rs` example).
 //!
-//! It also demonstrates how to use the [`CommStatistics`] API to track the communication of
+//! It also demonstrates how to use the [`Statistics`] API to track the communication of
 //! different phases and write it to a file.
 
 use std::fs::File;
@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::BaseCircuit;
@@ -19,7 +20,7 @@ use gmw::executor::{Executor, ExecutorMsg};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 use mpc_channel::sub_channels_for;
-use mpc_channel::util::{CommStatistics, Communication};
+use mpc_channel::util::{Phase, Statistics};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -59,7 +60,7 @@ async fn main() -> Result<()> {
     };
 
     // Initialize the communication statistics tracker with the counters for the main channel
-    let mut comm_stats = CommStatistics::new(bytes_written, bytes_read);
+    let mut comm_stats = Statistics::new(bytes_written, bytes_read).without_unaccounted(true);
 
     let (mut sender, mut receiver) =
         sub_channels_for!(&mut sender, &mut receiver, 8, ExecutorMsg).await?;
@@ -74,7 +75,7 @@ async fn main() -> Result<()> {
         // with the `record_helper` method and a custom category
         comm_stats
             .record_helper(
-                Communication::Custom("helper-mts"),
+                Phase::Custom("helper-mts"),
                 Executor::new(&circuit, args.id, mt_provider),
             )
             .await?
@@ -82,28 +83,31 @@ async fn main() -> Result<()> {
         let mt_provider = InsecureMTProvider::default();
         comm_stats
             .record(
-                Communication::FunctionDependentSetup,
+                Phase::FunctionDependentSetup,
                 Executor::new(&circuit, args.id, mt_provider),
             )
             .await?
     };
     let input = BitVec::repeat(false, 768);
-    let out = comm_stats
+    let _out = comm_stats
         .record(
-            Communication::Online,
+            Phase::Online,
             executor.execute(input, &mut sender, &mut receiver),
         )
         .await?;
 
     // Depending on whether a --stats file is set, create a file writer or stdout
-    let writer: Box<dyn Write> = match args.stats {
+    let mut writer: Box<dyn Write> = match args.stats {
         Some(path) => {
-            let mut file = File::create(path)?;
+            let file = File::create(path)?;
             Box::new(file)
         }
         None => Box::new(stdout()),
     };
-    serde_json::to_writer_pretty(writer, &comm_stats)?;
+    // serde_json is used to write the statistics in json format. Alternatively, the
+    // [csv](https://docs.rs/csv) library with serde support (or any other
+    // [serde supported library](https://serde.rs/#data-formats)) can be used to write the results.
+    serde_json::to_writer_pretty(&mut writer, &comm_stats)?;
     write!(writer, "\n")?;
 
     Ok(())
