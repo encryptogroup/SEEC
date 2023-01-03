@@ -19,7 +19,9 @@ tokio-util = { version = "0.7.3", features = ["codec"]}
 tracing = "0.1.36"
 remoc = { version = "0.10.0", default-features = false, features = ["rch", "codec-bincode"]}
 mpc-channel-macros = {path = "../mpc-channel-macros"}
+once_cell = "1.16.0"
+indexmap = "1.9.2"
 
 [dev-dependencies]
 serde = { version = "1.0.145", features = ["derive"]}
-tokio = { version = "1.21.1", features = ["rt-multi-thread"]}
+tokio = { version = "1.21.1", features = ["rt-multi-thread", "time"]}
