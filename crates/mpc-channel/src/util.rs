@@ -5,7 +5,6 @@ use indexmap::IndexMap;
 use pin_project::pin_project;
 use serde::ser::{Impossible, SerializeMap};
 use serde::{Serialize, Serializer};
-use std::collections::HashMap;
 use std::future::Future;
 use std::io::{Error, IoSlice};
 use std::ops::AddAssign;
