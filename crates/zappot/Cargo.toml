@@ -18,7 +18,7 @@ bitvec = "1.0.0"
 byte-slice-cast = "1.2.1"
 bytemuck = { version = "1.9.1", features = ["derive"]}
 crossbeam-channel = "0.5.4"
-curve25519-dalek = { version = "4.0.0-pre.5", features = ["serde", "rand_core"]}
+curve25519-dalek = { version = "4.0.0-rc.0", features = ["serde", "rand_core", "precomputed-tables"]}
 futures = { version = "0.3.21", features = ["executor"]}
 rand = "0.8.5"
 rand_core = "0.6.3"
