@@ -104,10 +104,11 @@ async fn main() -> Result<()> {
         }
         None => Box::new(stdout()),
     };
-    // serde_json is used to write the statistics in json format. Alternatively, the
-    // [csv](https://docs.rs/csv) library with serde support (or any other
-    // [serde supported library](https://serde.rs/#data-formats)) can be used to write the results.
-    serde_json::to_writer_pretty(&mut writer, &comm_stats)?;
+    // serde_json is used to write the statistics in json format. `.csv` is currently not
+    // supported.
+    let mut res = comm_stats.into_run_result();
+    res.add_metadata("circuit", "sha256.rs");
+    serde_json::to_writer_pretty(&mut writer, &res)?;
     write!(writer, "\n")?;
 
     Ok(())
