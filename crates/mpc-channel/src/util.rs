@@ -3,9 +3,10 @@ use bytes::Bytes;
 use futures::{Sink, Stream};
 use indexmap::IndexMap;
 use pin_project::pin_project;
-use serde::ser::{Impossible, SerializeMap};
-use serde::{Serialize, Serializer};
+use serde::Serialize;
+use std::fmt::Debug;
 use std::future::Future;
+use std::hash::Hash;
 use std::io::{Error, IoSlice};
 use std::ops::AddAssign;
 use std::pin::Pin;
@@ -43,21 +44,38 @@ pub struct Counter(Arc<AtomicUsize>);
 /// Optionally, a counter pair for a helper channel can be set.
 ///
 /// # Serialization
-/// The `Statistics` struct can be serialized into a variety of formats via
-/// [serde](https://serde.rs/#data-formats).
+/// The `Statistics` struct can be serialized into a serializable form via the [`Statistics::into_run_result`]
+/// method. The result can be serialized into a variety of formats via
+/// [serde](https://serde.rs/#data-formats) (Note: `.csv` output is currently not supported, `json`
+/// is recommended).
 ///
 /// Example json output:
 /// ```json
 ///{
-///   "helper-mts_comm_bytes_sent": 94,
-///   "helper-mts_comm_bytes_recvd": 94,
-///   "helper-mts_time_ms": 0,
-///   "Unaccounted_comm_bytes_sent": 194,
-///   "Unaccounted_comm_bytes_recvd": 194,
-///   "Unaccounted_time_ms": 0,
-///   "Online_comm_bytes_sent": 68938,
-///   "Online_comm_bytes_recvd": 68938,
-///   "Online_time_ms": 243
+///   "meta": {
+///     "custom": {
+///       "circuit": "sha256.rs"
+///     }
+///   },
+///   "communication": {
+///     "Unaccounted": {
+///       "sent": 58,
+///       "rcvd": 120
+///     },
+///     "FunctionDependentSetup": {
+///       "sent": 75,
+///       "rcvd": 13
+///     },
+///     "Online": {
+///       "sent": 36776,
+///       "rcvd": 36776
+///     }
+///   },
+///   "time": {
+///     "Unaccounted": 0,
+///     "FunctionDependentSetup": 0,
+///     "Online": 291
+///   }
 /// }
 /// ```
 ///
@@ -79,6 +97,23 @@ pub struct Statistics {
     unaccounted_as_previous: bool,
     // sleep duration after every `record`. Can reduce unaccounted comm
     sleep_after_phase: Duration,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct RunResult {
+    meta: Metadata,
+    communication: IndexMap<Phase, CountPair>,
+    time: IndexMap<Phase, u128>,
+}
+
+trait SerializableMetadata: erased_serde::Serialize + Debug {}
+impl<T: ?Sized + erased_serde::Serialize + Debug> SerializableMetadata for T {}
+
+erased_serde::serialize_trait_object!(SerializableMetadata);
+
+#[derive(Debug, Default, Serialize)]
+pub struct Metadata {
+    custom: IndexMap<String, Box<dyn SerializableMetadata>>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize)]
@@ -376,6 +411,38 @@ impl Statistics {
         self.record_unaccounted();
         self.recorded.lock().unwrap().get(phase).copied()
     }
+
+    /// Convert into a [`RunResult`] which can be serialized via [serde](serde.rs/).
+    pub fn into_run_result(self) -> RunResult {
+        self.record_unaccounted();
+        let recorded = self.recorded.into_inner().unwrap();
+        let (communication, time) = recorded
+            .into_iter()
+            .map(|(phase, (comm, time))| ((phase, comm), (phase, time.as_millis())))
+            .unzip();
+        RunResult {
+            meta: Default::default(),
+            communication,
+            time,
+        }
+    }
+}
+
+impl RunResult {
+    /// Add any metadata to the `{ "meta": { "custom": { .. }, .. } }` map inside the result.
+    /// The value can be of any type that implements [`Serialize`], [`Debug`] and is `'static'.
+    ///
+    /// ## Example
+    /// ```
+    ///# use mpc_channel::util::Statistics;
+    /// let statistics = Statistics::default();
+    /// let mut run_res = statistics.into_run_result();
+    /// run_res.add_metadata("Description", "Lorem Ipsum");
+    /// run_res.add_metadata("other-data", vec![1, 2, 3]);
+    /// ```
+    pub fn add_metadata<V: Serialize + Debug + 'static>(&mut self, key: &str, value: V) {
+        self.meta.custom.insert(key.to_string(), Box::new(value));
+    }
 }
 
 impl CounterPair {
@@ -391,239 +458,5 @@ impl AddAssign for CountPair {
     fn add_assign(&mut self, rhs: Self) {
         self.sent += rhs.sent;
         self.rcvd += rhs.rcvd;
-    }
-}
-
-// Custom serialization implementation which records the unaccounted communication before
-// serialization. The Communication::Custom variant is serialized as the internal string.
-impl Serialize for Statistics {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.record_unaccounted();
-        let recorded = self.recorded.lock().unwrap();
-
-        let mut map = serializer.serialize_map(Some(recorded.len()))?;
-        for (k, v) in recorded.iter() {
-            map.serialize_entry(
-                &WithPostfix {
-                    delegate: k,
-                    postfix: "_comm_bytes_sent",
-                },
-                &v.0.sent,
-            )?;
-
-            map.serialize_entry(
-                &WithPostfix {
-                    delegate: k,
-                    postfix: "_comm_bytes_rcvd",
-                },
-                &v.0.rcvd,
-            )?;
-
-            map.serialize_entry(
-                &WithPostfix {
-                    delegate: k,
-                    postfix: "_time_ms",
-                },
-                &v.1.as_millis(),
-            )?;
-        }
-        map.end()
-    }
-}
-
-// The below is a fairly verbose implementation of a helper struct which is used to
-// deserialize the Phase variants with a chosen postfix. The majority of the Serializer methods
-// are not needed and can be ignored. The important implementations are at the top.
-
-struct WithPostfix<T> {
-    delegate: T,
-    postfix: &'static str,
-}
-
-impl<T: Serialize> Serialize for WithPostfix<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.delegate.serialize(WithPostfix {
-            delegate: serializer,
-            postfix: self.postfix,
-        })
-    }
-}
-
-#[allow(unused_variables)]
-impl<S: Serializer> Serializer for WithPostfix<S> {
-    type Ok = S::Ok;
-    type Error = S::Error;
-    type SerializeSeq = Impossible<S::Ok, S::Error>;
-    type SerializeTuple = Impossible<S::Ok, S::Error>;
-    type SerializeTupleStruct = Impossible<S::Ok, S::Error>;
-    type SerializeTupleVariant = Impossible<S::Ok, S::Error>;
-    type SerializeMap = Impossible<S::Ok, S::Error>;
-    type SerializeStruct = Impossible<S::Ok, S::Error>;
-    type SerializeStructVariant = Impossible<S::Ok, S::Error>;
-
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        self.delegate
-            .collect_str(&format_args!("{}{}", v, self.postfix))
-    }
-
-    fn serialize_newtype_variant<T: ?Sized>(
-        self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        value.serialize(WithPostfix {
-            delegate: self.delegate,
-            postfix: self.postfix,
-        })
-    }
-
-    fn serialize_unit_variant(
-        self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-    ) -> Result<Self::Ok, Self::Error> {
-        self.serialize_str(variant)
-    }
-
-    fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_newtype_struct<T: ?Sized>(
-        self,
-        name: &'static str,
-        value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_tuple_struct(
-        self,
-        name: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_tuple_variant(
-        self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_struct(
-        self,
-        name: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_struct_variant(
-        self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        todo!()
     }
 }
