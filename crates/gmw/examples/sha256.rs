@@ -11,7 +11,6 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::BaseCircuit;
@@ -75,7 +74,7 @@ async fn main() -> Result<()> {
         // with the `record_helper` method and a custom category
         comm_stats
             .record_helper(
-                Phase::Custom("helper-mts"),
+                Phase::Custom("Helper-Mts"),
                 Executor::new(&circuit, args.id, mt_provider),
             )
             .await?

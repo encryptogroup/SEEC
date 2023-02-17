@@ -3,7 +3,7 @@ use bytes::Bytes;
 use futures::{Sink, Stream};
 use indexmap::IndexMap;
 use pin_project::pin_project;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
@@ -116,7 +116,7 @@ pub struct Metadata {
     custom: IndexMap<String, Box<dyn SerializableMetadata>>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
 /// Categories for recorded communication. The `Custom` variant can be used to label the
 /// communication with a user chosen string.
 pub enum Phase {
@@ -458,5 +458,51 @@ impl AddAssign for CountPair {
     fn add_assign(&mut self, rhs: Self) {
         self.sent += rhs.sent;
         self.rcvd += rhs.rcvd;
+    }
+}
+
+// custom Serialize implementation which uses the value of Custom(inner) as the variant name
+impl Serialize for Phase {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match *self {
+            Phase::FunctionIndependentSetup => Serializer::serialize_unit_variant(
+                serializer,
+                "Phase",
+                0u32,
+                "FunctionIndependentSetup",
+            ),
+            Phase::FunctionDependentSetup => Serializer::serialize_unit_variant(
+                serializer,
+                "Phase",
+                1u32,
+                "FunctionDependentSetup",
+            ),
+            Phase::Ots => Serializer::serialize_unit_variant(serializer, "Phase", 2u32, "Ots"),
+            Phase::Mts => Serializer::serialize_unit_variant(serializer, "Phase", 3u32, "Mts"),
+            Phase::Online => {
+                Serializer::serialize_unit_variant(serializer, "Phase", 4u32, "Online")
+            }
+            Phase::Unaccounted => {
+                Serializer::serialize_unit_variant(serializer, "Phase", 5u32, "Unaccounted")
+            }
+            Phase::Custom(ref inner) => {
+                Serializer::serialize_unit_variant(serializer, "Phase", 6u32, inner)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::util::Phase;
+
+    #[test]
+    fn phase_serialization() {
+        let phase = Phase::Custom("something");
+        let serialized = serde_json::to_string(&phase).unwrap();
+        assert_eq!("\"something\"", serialized);
     }
 }
