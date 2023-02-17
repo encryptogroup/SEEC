@@ -10,8 +10,8 @@ run-tests:
     - rustc --version && cargo --version && cargo +nightly --version  # Print version info for debugging
     - cargo +nightly test --workspace --verbose --all-features
 
-# For this job, the Settings -> General -> Merge requests -> Enable merged results pipelines option should be enabled.
-# This ensures that the main branch will always have working tests and no formatting/clippy issues
+# For this job, the Settings -> Merge requests -> "Enable merged results pipelines" option should be enabled.
+# This ensures that the main branch will always have working tests and no formatting/Clippy issues
 merge-request:
   stage: test
   before_script:
@@ -20,7 +20,7 @@ merge-request:
   script:
     - cargo +nightly test --workspace --verbose --all-features
     - cargo fmt --all --check
-    - cargo +nightly clippy --all --all-features
+    - cargo +nightly clippy --workspace --all-features --examples --tests -- -D warnings
   rules:
     # Only run this job for merge requests which are **not** in the draft state
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_TITLE =~ /Merge branch.*/
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TITLE !~ /^Draft.*$/
