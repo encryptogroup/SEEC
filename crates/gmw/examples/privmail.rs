@@ -88,7 +88,10 @@ fn priv_mail_search(
     let mut search_results = Vec::with_capacity(target_texts.len());
     for (j, keyword) in search_keywords.iter().enumerate() {
         for (i, target_text) in target_texts.iter().enumerate() {
-            let search_result_per_mail = create_search_circuit(keyword, target_text);
+            let mut search_result_per_mail = ShareWrapper::from_const(0, false);
+            if keyword.len() <= target_text.len() {
+                search_result_per_mail = create_search_circuit(keyword, target_text);
+            }
             if j == 0 {
                 search_results.push(search_result_per_mail ^ &modifier_chain_share_input[0]);
             } else {
