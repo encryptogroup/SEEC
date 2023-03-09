@@ -714,7 +714,7 @@ mod tests {
         let in_3 = circuit.add_gate(inp());
         let xor_1 = circuit.add_wired_gate(xor(), &[in_3, and_1]);
         let and_2 = circuit.add_wired_gate(and(), &[and_1, xor_1]);
-        let _ = circuit.add_wire(and_2, out_1);
+        circuit.add_wire(and_2, out_1);
 
         let mut cl_iter = BaseLayerIter::new(&circuit);
 

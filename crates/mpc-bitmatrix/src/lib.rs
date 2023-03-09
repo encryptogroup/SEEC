@@ -371,6 +371,16 @@ mod tests {
 
         let res_nd_arr = nd_arr1.dot(&nd_arr2);
         let res_bit_mat = bitmat1.mat_mul(&bitmat2);
+
+        for (nd_row, bit_mat_row) in res_nd_arr.rows().into_iter().zip(res_bit_mat.iter_rows()) {
+            for (nd_bit, bit_mat_bit) in nd_row.iter().zip(bit_mat_row) {
+                assert_eq!(
+                    nd_bit.0 == 1,
+                    *bit_mat_bit,
+                    "BitMatrix::mat_mult differs from nd_array"
+                );
+            }
+        }
     }
 
     impl Add for Z2 {
@@ -434,11 +444,9 @@ mod tests {
                 .into_iter()
                 .zip(self.iter_rows())
                 .all(|(r1, r2)| {
-                    r1.iter().zip(r2).all(|(el1, el2)| match (el1, *el2) {
-                        (Z2(0), false) => true,
-                        (Z2(1), true) => true,
-                        _ => false,
-                    })
+                    r1.iter()
+                        .zip(r2)
+                        .all(|(el1, el2)| matches!((el1, *el2), (Z2(0), false) | (Z2(1), true)))
                 })
         }
     }

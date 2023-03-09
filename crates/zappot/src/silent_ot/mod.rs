@@ -796,11 +796,8 @@ mod test {
             let m2b = (B[i] ^ delta) & mask;
 
             let eqq = [m1 == m2a, m1 == m2b];
-            assert!(
-                eqq[c] == true && eqq[c ^ 1] == false,
-                "Blocks at {i} differ"
-            );
-            assert!(eqq[0] != false || eqq[1] != false);
+            assert!(eqq[c] && !eqq[c ^ 1], "Blocks at {i} differ");
+            assert!(eqq[0] || eqq[1]);
         }
     }
 

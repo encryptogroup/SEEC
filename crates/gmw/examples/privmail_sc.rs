@@ -142,19 +142,17 @@ fn comparison_circuit(keyword: &[[Secret; 8]], target_text: &[[Secret; 8]]) -> S
     const CHARACTER_BIT_LEN: usize = 6; // Follows from the special PrivMail encoding
     let splitted_keyword: Vec<_> = keyword
         .iter()
-        .map(|c| c.iter().cloned().take(CHARACTER_BIT_LEN))
-        .flatten()
+        .flat_map(|c| c.iter().take(CHARACTER_BIT_LEN).cloned())
         .collect();
     let splitted_text: Vec<_> = target_text
         .iter()
-        .map(|c| c.iter().cloned().take(CHARACTER_BIT_LEN))
-        .flatten()
+        .flat_map(|c| c.iter().take(CHARACTER_BIT_LEN).cloned())
         .collect();
 
     let res: Vec<_> = splitted_keyword
         .into_iter()
         .zip(splitted_text)
-        .map(|(k, t)| !(k.clone() ^ t))
+        .map(|(k, t)| !(k ^ t))
         .collect();
 
     low_depth_reduce(res, ops::BitAnd::bitand).expect("Empty input")

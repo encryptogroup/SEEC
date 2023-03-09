@@ -253,7 +253,7 @@ mod tests {
         let inputs = [BitVec::repeat(true, 2), BitVec::repeat(false, 2)];
         let out = execute_circuit(&circuit.into(), inputs, TestChannel::InMemory).await?;
         assert_eq!(1, out.len());
-        assert_eq!(false, out[0]);
+        assert!(!out[0]);
         Ok(())
     }
 
@@ -274,7 +274,7 @@ mod tests {
         )
         .await?;
         assert_eq!(1, out.len());
-        assert_eq!(true, out[0]);
+        assert!(out[0]);
         Ok(())
     }
 
