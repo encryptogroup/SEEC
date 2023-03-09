@@ -576,7 +576,7 @@ mod tests {
             .collect();
         dbg!(&mapped_ranges);
         assert_eq!(mapped_ranges.len(), 2);
-        assert_eq!(mapped_ranges[0], (from_range_0, &[to_range_0.clone()][..]));
+        assert_eq!(mapped_ranges[0], (from_range_0, &[to_range_0][..]));
         assert_eq!(mapped_ranges[1], (from_range_1, &[to_range_1][..]));
     }
 
@@ -636,7 +636,7 @@ mod tests {
             circuit_id: 2,
             gate_id: GateId(59_u32),
         };
-        rc.insert(from_range_1.clone(), to_range_1.clone());
+        rc.insert(from_range_1, to_range_1);
         let from_range_2 = SubCircuitGate {
             circuit_id: 0,
             gate_id: GateId(8_u32),
@@ -666,7 +666,7 @@ mod tests {
             circuit_id: 3,
             gate_id: GateId(159_u32),
         };
-        rc.insert(from_range_4.clone(), to_range_4.clone());
+        rc.insert(from_range_4, to_range_4);
 
         let mapped_ranges: Vec<_> = rc
             .get_mapped_ranges(SubCircuitGate::new(0, GateId(87_u32)))
@@ -702,7 +702,7 @@ mod tests {
         let to_range_1 =
             SubCircuitGate::new(1, GateId(110_u32))..=SubCircuitGate::new(1, GateId(120_u32));
 
-        rc.insert(from_range_0.clone(), to_range_0.clone());
-        rc.insert(from_range_1.clone(), to_range_1.clone());
+        rc.insert(from_range_0, to_range_0);
+        rc.insert(from_range_1, to_range_1);
     }
 }

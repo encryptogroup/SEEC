@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn alignment() {
-        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_64; 64][..]);
+        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_u16; 64][..]);
         assert_eq!(av.as_ptr() as usize % 32, 0)
     }
 
@@ -350,14 +350,14 @@ mod tests {
 
     #[test]
     fn slice_is_legal() {
-        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_64; 64][..]);
+        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_u16; 64][..]);
         dbg!(av[63]);
     }
 
     #[test]
     #[should_panic]
     fn index_panics() {
-        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_64; 64][..]);
+        let av: AlignedVec<_, U32> = AlignedVec::from(&[0_u16; 64][..]);
         dbg!(av[64]);
     }
 

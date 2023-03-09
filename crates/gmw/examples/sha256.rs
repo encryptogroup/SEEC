@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
     let mut res = comm_stats.into_run_result();
     res.add_metadata("circuit", "sha256.rs");
     serde_json::to_writer_pretty(&mut writer, &res)?;
-    write!(writer, "\n")?;
+    writeln!(writer)?;
 
     Ok(())
 }

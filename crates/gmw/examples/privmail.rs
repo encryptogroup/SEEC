@@ -149,13 +149,11 @@ fn create_comparison_circuit(
     const CHARACTER_BIT_LEN: usize = 6; // Follows from the special PrivMail encoding
     let splitted_keyword: Vec<_> = keyword
         .iter()
-        .map(|c| c.iter().cloned().take(CHARACTER_BIT_LEN))
-        .flatten()
+        .flat_map(|c| c.iter().take(CHARACTER_BIT_LEN).cloned())
         .collect();
     let splitted_text: Vec<_> = target_text[text_position..text_position + keyword.len()]
         .iter()
-        .map(|c| c.iter().cloned().take(CHARACTER_BIT_LEN))
-        .flatten()
+        .flat_map(|c| c.iter().take(CHARACTER_BIT_LEN).cloned())
         .collect();
 
     let mut res = splitted_keyword;

@@ -663,7 +663,7 @@ mod tests {
     }
 
     fn collect_groups(input: &[SubCircuitGate]) -> Vec<Vec<SubCircuitGate>> {
-        group_gates_iter(&input)
+        group_gates_iter(input)
             .unwrap()
             .into_iter()
             .map(|(k, group)| {

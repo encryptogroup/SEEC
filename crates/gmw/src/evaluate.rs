@@ -36,6 +36,6 @@ mod tests {
         let shares_1 = and::compute_shares(p1[0], p1[1], &mt1);
         let a0 = and::evaluate([shares_0.0, shares_1.0], [shares_0.1, shares_1.1], mt0, 0);
         let a1 = and::evaluate([shares_0.0, shares_1.0], [shares_0.1, shares_1.1], mt1, 1);
-        assert_eq!(true, a0 ^ a1);
+        assert!(a0 ^ a1);
     }
 }

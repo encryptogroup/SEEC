@@ -777,7 +777,7 @@ pub(crate) mod tests {
             out.ncols() * 128, // * 128 because of Block size
         );
         let out_t: &[Block] = bytemuck::cast_slice(&out_t);
-        for (i, blk) in (&out_t[0..conf.domain * conf.pnt_count]).iter().enumerate() {
+        for (i, blk) in out_t[0..conf.domain * conf.pnt_count].iter().enumerate() {
             let f = points.contains(&i);
             let exp = if f { Block::all_ones() } else { Block::zero() };
             assert_eq!(*blk, exp, "block {i} not as expected");
