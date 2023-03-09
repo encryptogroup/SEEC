@@ -931,3 +931,30 @@ mod test {
         check_random(&s_out, &r_out.0, &r_out.1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::silent_ot::get_partitions;
+    use num_prime::nt_funcs::next_prime;
+    use std::cmp::max;
+
+    #[test]
+    fn test_get_partitions() {
+        let num_ots_exp = [4, 5, 6, 7];
+        let scaler = [2, 4];
+        let kappa = [80, 128];
+
+        for k in kappa {
+            for s in scaler {
+                for n in num_ots_exp {
+                    let num_ot = 10_usize.pow(n);
+                    let P = next_prime(&max(num_ot, 128 * 128), None).unwrap();
+                    let part = get_partitions(s, P, k);
+                    println!("10^{n}\t{part}\t{s}\t{k}");
+                }
+                println!("-------------------------------");
+            }
+            println!("-------------------------------");
+        }
+    }
+}

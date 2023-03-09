@@ -4,8 +4,8 @@ use std::path::Path;
 use anyhow::Result;
 use bitvec::field::BitField;
 use bitvec::order::Lsb0;
+use bitvec::prelude::BitSlice;
 use bitvec::vec;
-use funty::Integral;
 use itertools::Itertools;
 use mpc_channel::sub_channel;
 use tokio::task::spawn_blocking;
@@ -14,11 +14,14 @@ use tracing::info;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+use crate::circuit::base_circuit::{BaseGate, Load};
 use crate::circuit::Circuit;
-use crate::circuit::{BaseCircuit, Gate, GateIdx};
+use crate::circuit::{BaseCircuit, BooleanGate, GateIdx};
 use crate::common::BitVec;
 use crate::executor::Executor;
 use crate::mul_triple::insecure_provider::InsecureMTProvider;
+use crate::protocols::boolean_gmw::BooleanGmw;
+use crate::protocols::ScalarDim;
 
 pub fn create_and_tree(depth: u32) -> BaseCircuit {
     let total_nodes = 2_u32.pow(depth);
@@ -26,18 +29,21 @@ pub fn create_and_tree(depth: u32) -> BaseCircuit {
     let mut circuit = BaseCircuit::new();
 
     let mut previous_layer: Vec<_> = (0..layer_count)
-        .map(|_| circuit.add_gate(Gate::Input))
+        .map(|_| circuit.add_gate(BooleanGate::Base(BaseGate::Input(ScalarDim))))
         .collect();
     while layer_count > 1 {
         layer_count /= 2;
         previous_layer = previous_layer
             .into_iter()
             .tuples()
-            .map(|(from_a, from_b)| circuit.add_wired_gate(Gate::And, &[from_a, from_b]))
+            .map(|(from_a, from_b)| circuit.add_wired_gate(BooleanGate::And, &[from_a, from_b]))
             .collect();
     }
     debug_assert_eq!(1, previous_layer.len());
-    circuit.add_wired_gate(Gate::Output, &[previous_layer[0]]);
+    circuit.add_wired_gate(
+        BooleanGate::Base(BaseGate::Output(ScalarDim)),
+        &[previous_layer[0]],
+    );
     circuit
 }
 
@@ -46,7 +52,7 @@ pub fn create_and_tree(depth: u32) -> BaseCircuit {
 /// Output can be configured via RUST_LOG env variable as explained
 /// [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/struct.EnvFilter.html)
 ///
-/// ```
+/// ```ignore
 /// use gmw::private_test_utils::init_tracing;
 /// fn some_test() {
 ///     let _guard = init_tracing();
@@ -75,16 +81,38 @@ pub trait IntoInput {
     fn into_input(self) -> (BitVec, BitVec);
 }
 
-impl<T: Integral> IntoShares for T {
+macro_rules! impl_into_shares {
+    ($($typ:ty),+) => {
+        $(
+            impl IntoShares for $typ {
+                fn into_shares(self) -> (BitVec, BitVec) {
+                    // TODO use pseudo random sharing (with fixed seed)
+                    let a = vec::BitVec::repeat(false, <$typ>::BITS as usize);
+                    let mut b = a.clone();
+                    b.store(self);
+                    (a, b)
+                }
+            }
+        )*
+    };
+}
+
+impl_into_shares!(u8, u16, u32, u64, u128);
+
+impl IntoShares for bool {
     fn into_shares(self) -> (BitVec, BitVec)
     where
-        bitvec::slice::BitSlice<u8, Lsb0>: BitField,
+        BitSlice<u8, Lsb0>: BitField,
     {
-        // TODO use pseudo random sharing (with fixed seed)
-        let a = vec::BitVec::repeat(false, T::BITS as usize);
-        let mut b = a.clone();
-        b.store(self);
+        let a = BitVec::repeat(false, 1);
+        let b = BitVec::repeat(self, 1);
         (a, b)
+    }
+}
+
+impl<T: IntoShares> IntoInput for T {
+    fn into_input(self) -> (BitVec, BitVec) {
+        self.into_shares()
     }
 }
 
@@ -120,26 +148,26 @@ pub async fn execute_bristol<I: IntoInput>(
 ) -> Result<BitVec> {
     let path = bristol_file.as_ref().to_path_buf();
     let now = Instant::now();
-    let circuit = spawn_blocking(move || BaseCircuit::load_bristol(path)).await??;
+    let circuit = spawn_blocking(move || BaseCircuit::load_bristol(path, Load::Circuit)).await??;
     info!(
         parsing_time = %now.elapsed().as_millis(),
         "Parsing bristol time (ms)"
     );
-    let inputs = inputs.into_input();
     execute_circuit(&circuit.into(), inputs, channel).await
 }
 
-#[tracing::instrument(skip(circuit, input_a, input_b))]
+#[tracing::instrument(skip(circuit, inputs))]
 pub async fn execute_circuit<Idx: GateIdx>(
-    circuit: &Circuit<Idx>,
-    (input_a, input_b): (BitVec, BitVec),
+    circuit: &Circuit<BooleanGate, Idx>,
+    inputs: impl IntoInput,
     channel: TestChannel,
 ) -> Result<BitVec> {
     let mt_provider = InsecureMTProvider::default();
-    let mut ex1 = Executor::new(circuit, 0, mt_provider.clone())
+    let (input_a, input_b) = inputs.into_input();
+    let mut ex1: Executor<BooleanGmw, Idx> = Executor::new(circuit, 0, mt_provider.clone())
         .await
         .unwrap();
-    let mut ex2 = Executor::new(circuit, 1, mt_provider).await.unwrap();
+    let mut ex2: Executor<BooleanGmw, Idx> = Executor::new(circuit, 1, mt_provider).await.unwrap();
     let now = Instant::now();
     let (out1, out2) = match channel {
         TestChannel::InMemory => {

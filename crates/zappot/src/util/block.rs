@@ -1,3 +1,7 @@
+// This seems to be needed with the nightly clippy, as otherwise the Pod and Zeroable expansions
+// lead to this error
+#![allow(clippy::extra_unused_type_parameters)]
+
 //! 128 bit Block
 use crate::DefaultRom;
 use bitvec::order::Lsb0;

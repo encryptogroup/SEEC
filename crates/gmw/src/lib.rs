@@ -1,22 +1,24 @@
-pub use gmw_macros::sub_circuit;
-
 pub use circuit::builder::{
     CircuitBuilder, SharedCircuit, SubCircuitGate, SubCircuitInput, SubCircuitOutput,
 };
 pub use circuit::Circuit;
-pub use circuit::{Gate, GateId};
+pub use circuit::GateId;
+pub use gmw_macros::sub_circuit;
+pub use parse::bristol;
+pub use protocols::boolean_gmw::BooleanGate;
 
-pub mod bristol;
 pub mod circuit;
 pub mod common;
 pub mod errors;
 pub mod evaluate;
 pub mod executor;
 pub mod mul_triple;
+pub mod parse;
 #[cfg(feature = "_integration_tests")]
 #[doc(hidden)]
 /// Do **not** use items from this module. They are intended for integration tests and must
 /// therefore be public.
 pub mod private_test_utils;
-pub mod share_wrapper;
+pub mod protocols;
+pub mod secret;
 pub(crate) mod utils;

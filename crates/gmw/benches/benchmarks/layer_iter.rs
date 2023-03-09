@@ -3,11 +3,11 @@ use std::ops;
 use criterion::{criterion_group, BenchmarkId, Criterion};
 
 use gmw::circuit::{Circuit, CircuitLayerIter};
-use gmw::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
-use gmw::{sub_circuit, CircuitBuilder};
+use gmw::secret::{inputs, low_depth_reduce, Secret};
+use gmw::{sub_circuit, BooleanGate, CircuitBuilder};
 
 fn build_circuit(keyword_size: usize, target_text_size: usize) -> Circuit {
-    CircuitBuilder::new().install();
+    CircuitBuilder::<BooleanGate, u32>::new().install();
     let keyword: Vec<_> = (0..keyword_size)
         .map(|_| inputs(8).try_into().unwrap())
         .collect();
@@ -17,14 +17,11 @@ fn build_circuit(keyword_size: usize, target_text_size: usize) -> Circuit {
 
     create_search_circuit(&keyword, &target_text);
 
-    let circ = CircuitBuilder::global_into_circuit();
+    let circ = CircuitBuilder::<BooleanGate, u32>::global_into_circuit();
     circ
 }
 
-fn create_search_circuit(
-    keyword: &[[ShareWrapper; 8]],
-    target_text: &[[ShareWrapper; 8]],
-) -> ShareWrapper {
+fn create_search_circuit(keyword: &[[Secret; 8]], target_text: &[[Secret; 8]]) -> Secret {
     /*
      * Calculate the number of positions we need to compare. E.g., if search_keyword
      * is "key" and target_text is "target", we must do 4 comparison:
@@ -42,10 +39,7 @@ fn create_search_circuit(
 }
 
 #[sub_circuit]
-fn comparison_circuit(
-    keyword: &[[ShareWrapper; 8]],
-    target_text: &[[ShareWrapper; 8]],
-) -> ShareWrapper {
+fn comparison_circuit(keyword: &[[Secret; 8]], target_text: &[[Secret; 8]]) -> Secret {
     const CHARACTER_BIT_LEN: usize = 6; // Follows from the special PrivMail encoding
     let splitted_keyword: Vec<_> = keyword
         .iter()
@@ -68,7 +62,7 @@ fn comparison_circuit(
 }
 
 #[sub_circuit]
-fn or_sc(input: &[ShareWrapper]) -> ShareWrapper {
+fn or_sc(input: &[Secret]) -> Secret {
     low_depth_reduce(input.to_owned(), ops::BitOr::bitor).expect("Empty input")
 }
 

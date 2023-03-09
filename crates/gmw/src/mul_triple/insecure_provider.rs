@@ -12,6 +12,7 @@ pub struct InsecureMTProvider;
 
 #[async_trait]
 impl MTProvider for InsecureMTProvider {
+    type Output = MulTriples;
     type Error = Infallible;
 
     async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {

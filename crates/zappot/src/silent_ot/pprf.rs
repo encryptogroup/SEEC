@@ -181,7 +181,7 @@ impl Sender {
                         .for_each(|(d, sums)| {
                             sums.iter_mut()
                                 .enumerate()
-                                .take(min as usize)
+                                .take(min)
                                 .for_each(|(j, sum)| *sum ^= base_ots[[g + j, d]][idx])
                         });
                 };
@@ -197,8 +197,8 @@ impl Sender {
                 // delta and ensure that they can only decrypt the correct ones.
 
                 let d = depth - 1;
-                tree_grp.last_ots.resize(min as usize, Default::default());
-                for j in 0..min as usize {
+                tree_grp.last_ots.resize(min, Default::default());
+                for j in 0..min {
                     // Construct the sums where we will allow the delta (mValue)
                     // to either be on the left child or right child depending
                     // on which has the active path.

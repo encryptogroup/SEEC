@@ -22,7 +22,8 @@ use tracing::error;
 
 use crate::common::BitVec;
 use crate::errors::MTProviderError;
-use crate::mul_triple::{compute_c_owned, rand_bitvecs, MTProvider, MulTriples};
+use crate::mul_triple::{compute_c_owned, MTProvider, MulTriples};
+use crate::utils::rand_bitvecs;
 use mpc_channel::{BaseReceiver, BaseSender};
 
 pub struct TrustedMTProviderClient {
@@ -62,6 +63,7 @@ impl TrustedMTProviderClient {
 
 #[async_trait]
 impl MTProvider for TrustedMTProviderClient {
+    type Output = MulTriples;
     type Error = MTProviderError<Message>;
 
     async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {

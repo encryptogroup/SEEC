@@ -1,5 +1,5 @@
 use crate::common::BitVec;
-use crate::mul_triple::{rand_bitvec, MTProvider, MulTriples};
+use crate::mul_triple::{MTProvider, MulTriples};
 use async_trait::async_trait;
 use num_integer::Integer;
 use rand::{CryptoRng, RngCore, SeedableRng};
@@ -7,6 +7,7 @@ use remoc::RemoteSend;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
 
+use crate::utils::rand_bitvec;
 use std::fmt::Debug;
 
 pub struct OtMTProvider<RNG, S: ExtROTSender, R: ExtROTReceiver> {
@@ -44,6 +45,7 @@ where
     R: ExtROTReceiver + Send,
     R::Msg: RemoteSend + Debug,
 {
+    type Output = MulTriples;
     type Error = ();
 
     async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {

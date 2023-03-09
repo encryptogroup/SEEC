@@ -29,9 +29,11 @@ async fn eval_aes_circuit() -> Result<()> {
     let _guard = init_tracing();
     // It seems that the output of the circuit and the aes crate use different bit orderings
     // for the output.
+    let key = hex!("00112233445566778899aabbccddeeff");
+    let block = key;
     let exp_output: bitvec::vec::BitVec<u8, Msb0> = {
-        let key = GenericArray::from([0u8; 16]);
-        let mut block = GenericArray::from([0u8; 16]);
+        let key = GenericArray::from(key);
+        let mut block = GenericArray::from(block);
         let cipher = Aes128::new(&key);
         cipher.encrypt_block(&mut block);
 
@@ -39,7 +41,10 @@ async fn eval_aes_circuit() -> Result<()> {
     };
     let out = execute_bristol(
         "test_resources/bristol-circuits/AES-non-expanded.txt",
-        (0_u128, 0_u128),
+        (
+            u128::from_be_bytes(block).reverse_bits(),
+            u128::from_be_bytes(key).reverse_bits(),
+        ),
         TestChannel::Tcp,
     )
     .await?;

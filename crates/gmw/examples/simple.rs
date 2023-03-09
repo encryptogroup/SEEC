@@ -1,4 +1,4 @@
-//! This example shows how to use the high-level ShareWrapper api to create a circuit and then
+//! This example shows how to use the high-level Secret api to create a circuit and then
 //! execute it with the messages being exchanged via Tcp.
 //! Run the example via `cargo run --example`.
 //!
@@ -12,34 +12,36 @@ use bitvec::prelude::*;
 use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::Circuit;
-use gmw::executor::{Executor, ExecutorMsg};
+use gmw::circuit::{Circuit, DefaultIdx};
+use gmw::executor::Executor;
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw::share_wrapper::inputs;
+use gmw::protocols::boolean_gmw;
+use gmw::protocols::boolean_gmw::BooleanGmw;
+use gmw::secret::inputs;
 use gmw::CircuitBuilder;
 use mpc_channel::sub_channels_for;
 
 fn build_circuit() {
     // The `inputs` method is a convenience method to create n input gates for the circuit.
-    // It returns a Vec<ShareWrapper>. In the following, we use try_into() to convert it into
+    // It returns a Vec<Secret>. In the following, we use try_into() to convert it into
     // an array to destructure it
-    let [a, b, c, d]: [_; 4] = inputs(4).try_into().unwrap();
-    // a,b,c,d are `ShareWrapper`s representing the output share of a gate. They support
+    let [a, b, c, d]: [_; 4] = inputs::<DefaultIdx>(4).try_into().unwrap();
+    // a,b,c,d are `Secret`s representing the output share of a gate. They support
     // the standard std::ops traits like BitAnd and BitXor (and their Assign variants) which
     // are used to implicitly build the circuit.
 
-    // Creates a new Xor gate with the input of a and b. The output is a new ShareWrapper
+    // Creates a new Xor gate with the input of a and b. The output is a new Secret
     // representing the output of the new gate.
     let xor = a ^ b;
-    // To use a ShareWrapper multiple times (connect to gate represented by it to multiple
+    // To use a Secret multiple times (connect to gate represented by it to multiple
     // different ones), simply use a reference to it (only possibile on the rhs).
     let and = c & &d;
     // we can still use d but not c
     let mut tmp = and ^ d;
-    // BitAnd and BitXor are also supported, as is Not. See the ShareWrapper documentation for
+    // BitAnd and BitXor are also supported, as is Not. See the Secret documentation for
     // all operations.
     tmp &= !xor;
-    // `output()` consumes the ShareWrapper and creates a new Output gate with its output.
+    // `output()` consumes the Secret and creates a new Output gate with its output.
     // It returns the gate_id of the Output gate (this is usually not needed).
     let _out_gate_id = tmp.output();
 }
@@ -53,7 +55,7 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // Create a new Executor for the circuit. It's important that the party_id is either 0 or 1,
     // as otherwise wrong results might be computed. In the future, there might be support for more
     // than two parties
-    let mut executor = Executor::new(&circuit, party_id, mt_provider).await?;
+    let mut executor = Executor::<BooleanGmw, _>::new(&circuit, party_id, mt_provider).await?;
 
     // Create inputs as a BitVector. The inputs will be used for the input gate with the
     // corresponding index.
@@ -71,7 +73,7 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     };
 
     let (mut sender, mut receiver) =
-        sub_channels_for!(&mut sender, &mut receiver, 8, ExecutorMsg).await?;
+        sub_channels_for!(&mut sender, &mut receiver, 8, boolean_gmw::Msg).await?;
     // Execute the circuit and await its result (in the form of a BitVec)
     let output = executor.execute(inputs, &mut sender, &mut receiver).await?;
 
@@ -87,7 +89,7 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    // Create the Circuit. The operations on the ShareWrapper will use a lazily initialized
+    // Create the Circuit. The operations on the Secret will use a lazily initialized
     // global CircuitBuilder from which we can get the constructed Circuit
     build_circuit();
     // Save the circuit in .dot format for easy inspection and debugging
@@ -95,7 +97,7 @@ async fn main() -> Result<()> {
     // In an actual setting, we would have two parties on different hosts, each constructing the
     // same circuit and evaluating it. To simulate that, we convert the shared Circuit into
     // an owned Circuit and clone it. The conversion will fail if there are any outstanding clones
-    // of the SharedCircuit, e.g. when there are ShareWrappers still alive.
+    // of the SharedCircuit, e.g. when there are Secrets still alive.
     // Each party has their own but identical circuit.
     let circuit_party_0: Circuit = CircuitBuilder::global_into_circuit();
     let circuit_party_1 = circuit_party_0.clone();

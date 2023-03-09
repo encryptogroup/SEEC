@@ -13,10 +13,11 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::builder::CircuitBuilder;
 use gmw::circuit::GateId;
 use gmw::common::BitVec;
-use gmw::executor::Executor;
+use gmw::executor::BoolGmwExecutor;
 use gmw::mul_triple::ot_ext::OtMTProvider;
-use gmw::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
-use gmw::{executor, sub_circuit};
+use gmw::protocols::boolean_gmw;
+use gmw::secret::{inputs, low_depth_reduce, Secret};
+use gmw::sub_circuit;
 use mpc_channel::sub_channels_for;
 use zappot::ot_ext;
 
@@ -104,27 +105,21 @@ fn priv_mail_search(
             }
         }
     }
-    let out_ids = search_results
-        .into_iter()
-        .map(ShareWrapper::output)
-        .collect();
+    let out_ids = search_results.into_iter().map(Secret::output).collect();
     (input, out_ids)
 }
 
 fn create_chaining_circuit(
-    previous_search_result: &ShareWrapper,
-    new_search_result: &ShareWrapper,
-    or_bit: &ShareWrapper,
-    not_bit: &ShareWrapper,
-) -> ShareWrapper {
+    previous_search_result: &Secret,
+    new_search_result: &Secret,
+    or_bit: &Secret,
+    not_bit: &Secret,
+) -> Secret {
     ((previous_search_result.clone() ^ or_bit) & ((new_search_result.clone() ^ not_bit) ^ or_bit))
         ^ or_bit
 }
 
-fn create_search_circuit(
-    keyword: &[[ShareWrapper; 8]],
-    target_text: &[[ShareWrapper; 8]],
-) -> ShareWrapper {
+fn create_search_circuit(keyword: &[[Secret; 8]], target_text: &[[Secret; 8]]) -> Secret {
     /*
      * Calculate the number of positions we need to compare. E.g., if search_keyword
      * is "key" and target_text is "target", we must do 4 comparison:
@@ -143,10 +138,7 @@ fn create_search_circuit(
 }
 
 #[sub_circuit]
-fn comparison_circuit(
-    keyword: &[[ShareWrapper; 8]],
-    target_text: &[[ShareWrapper; 8]],
-) -> ShareWrapper {
+fn comparison_circuit(keyword: &[[Secret; 8]], target_text: &[[Secret; 8]]) -> Secret {
     const CHARACTER_BIT_LEN: usize = 6; // Follows from the special PrivMail encoding
     let splitted_keyword: Vec<_> = keyword
         .iter()
@@ -169,15 +161,12 @@ fn comparison_circuit(
 }
 
 #[sub_circuit]
-fn or_sc(input: &[ShareWrapper]) -> ShareWrapper {
+fn or_sc(input: &[Secret]) -> Secret {
     low_depth_reduce(input.to_owned(), ops::BitOr::bitor)
-        .unwrap_or_else(|| ShareWrapper::from_const(0, false))
+        .unwrap_or_else(|| Secret::from_const(0, false))
 }
 
-fn base64_string_to_input(
-    input: &str,
-    duplication_factor: usize,
-) -> (BitVec, Vec<[ShareWrapper; 8]>) {
+fn base64_string_to_input(input: &str, duplication_factor: usize) -> (BitVec, Vec<[Secret; 8]>) {
     let decoded = base64::decode(input).expect("Decode base64 input");
     let duplicated = decoded.repeat(duplication_factor);
     let shares = (0..duplicated.len())
@@ -231,7 +220,7 @@ async fn main() -> anyhow::Result<()> {
         &mut receiver,
         64,
         mpc_channel::Receiver<ot_ext::ExtOTMsg>,
-        executor::ExecutorMsg
+        boolean_gmw::Msg
     )
     .await?;
 
@@ -243,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
             ch1.0,
             ch1.1,
         );
-        Executor::new(&circuit, args.my_id, mt_provider).await?
+        BoolGmwExecutor::new(&circuit, args.my_id, mt_provider).await?
     };
 
     let output = executor.execute(input, &mut ch2.0, &mut ch2.1).await?;

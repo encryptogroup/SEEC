@@ -103,9 +103,13 @@ async fn establish_remoc_connection<T: RemoteSend>(
     cfg.chunk_size = 1024 * 1024;
 
     // Establish Remoc connection over TCP.
-    let (conn, tx, rx) =
-        remoc::Connect::io::<_, _, _, _, remoc::codec::Bincode>(cfg, tracking_rx, tracking_tx)
-            .await?;
+    let (conn, tx, rx) = remoc::Connect::io_buffered::<_, _, _, _, remoc::codec::Bincode>(
+        cfg,
+        tracking_rx,
+        tracking_tx,
+        8096,
+    )
+    .await?;
     tokio::spawn(conn);
 
     Ok((tx, bytes_written, rx, bytes_read))

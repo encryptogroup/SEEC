@@ -11,10 +11,11 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::Circuit;
 use gmw::circuit::GateId;
 use gmw::common::BitVec;
-use gmw::executor::Executor;
+use gmw::executor::BoolGmwExecutor;
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
-use gmw::{executor, CircuitBuilder};
+use gmw::protocols::boolean_gmw;
+use gmw::secret::{inputs, low_depth_reduce, Secret};
+use gmw::CircuitBuilder;
 use mpc_channel::sub_channels_for;
 
 #[derive(Parser, Debug)]
@@ -88,7 +89,7 @@ fn priv_mail_search(
     let mut search_results = Vec::with_capacity(target_texts.len());
     for (j, keyword) in search_keywords.iter().enumerate() {
         for (i, target_text) in target_texts.iter().enumerate() {
-            let mut search_result_per_mail = ShareWrapper::from_const(0, false);
+            let mut search_result_per_mail = Secret::from_const(0, false);
             if keyword.len() <= target_text.len() {
                 search_result_per_mail = create_search_circuit(keyword, target_text);
             }
@@ -104,27 +105,21 @@ fn priv_mail_search(
             }
         }
     }
-    let out_ids = search_results
-        .into_iter()
-        .map(ShareWrapper::output)
-        .collect();
+    let out_ids = search_results.into_iter().map(Secret::output).collect();
     (input, out_ids)
 }
 
 fn create_chaining_circuit(
-    previous_search_result: &ShareWrapper,
-    new_search_result: &ShareWrapper,
-    or_bit: &ShareWrapper,
-    not_bit: &ShareWrapper,
-) -> ShareWrapper {
+    previous_search_result: &Secret,
+    new_search_result: &Secret,
+    or_bit: &Secret,
+    not_bit: &Secret,
+) -> Secret {
     ((previous_search_result.clone() ^ or_bit) & ((new_search_result.clone() ^ not_bit) ^ or_bit))
         ^ or_bit
 }
 
-fn create_search_circuit(
-    keyword: &[[ShareWrapper; 8]],
-    target_text: &[[ShareWrapper; 8]],
-) -> ShareWrapper {
+fn create_search_circuit(keyword: &[[Secret; 8]], target_text: &[[Secret; 8]]) -> Secret {
     /*
      * Calculate the number of positions we need to compare. E.g., if search_keyword
      * is "key" and target_text is "target", we must do 4 comparison:
@@ -147,10 +142,10 @@ fn create_search_circuit(
 }
 
 fn create_comparison_circuit(
-    keyword: &[[ShareWrapper; 8]],
-    target_text: &[[ShareWrapper; 8]],
+    keyword: &[[Secret; 8]],
+    target_text: &[[Secret; 8]],
     text_position: usize,
-) -> Vec<ShareWrapper> {
+) -> Vec<Secret> {
     const CHARACTER_BIT_LEN: usize = 6; // Follows from the special PrivMail encoding
     let splitted_keyword: Vec<_> = keyword
         .iter()
@@ -169,10 +164,7 @@ fn create_comparison_circuit(
     res
 }
 
-fn base64_string_to_input(
-    input: &str,
-    duplication_factor: usize,
-) -> (BitVec, Vec<[ShareWrapper; 8]>) {
+fn base64_string_to_input(input: &str, duplication_factor: usize) -> (BitVec, Vec<[Secret; 8]>) {
     let decoded = base64::decode(input).expect("Decode base64 input");
     let duplicated = decoded.repeat(duplication_factor);
     let shares = (0..duplicated.len())
@@ -182,7 +174,7 @@ fn base64_string_to_input(
     (input, shares)
 }
 
-fn xor_inplace(dst: &mut [ShareWrapper], other: &[ShareWrapper]) {
+fn xor_inplace(dst: &mut [Secret], other: &[Secret]) {
     assert_eq!(
         dst.len(),
         other.len(),
@@ -232,11 +224,11 @@ async fn main() -> anyhow::Result<()> {
 
     let mut executor = {
         let mt_provider = InsecureMTProvider::default();
-        Executor::new(&circuit, args.my_id, mt_provider).await?
+        BoolGmwExecutor::new(&circuit, args.my_id, mt_provider).await?
     };
 
     let (mut sender, mut receiver) =
-        sub_channels_for!(&mut sender, &mut receiver, 16, executor::ExecutorMsg).await?;
+        sub_channels_for!(&mut sender, &mut receiver, 16, boolean_gmw::Msg).await?;
 
     let output = executor.execute(input, &mut sender, &mut receiver).await?;
     info!(
