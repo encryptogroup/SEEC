@@ -302,7 +302,7 @@ impl Gate {
                 if party_id == 0 {
                     constant
                 } else {
-                    !constant
+                    false
                 }
             }
             Gate::Output | Gate::Input | Gate::SubCircuitInput | Gate::SubCircuitOutput => {
