@@ -170,7 +170,8 @@ fn comparison_circuit(
 
 #[sub_circuit]
 fn or_sc(input: &[ShareWrapper]) -> ShareWrapper {
-    low_depth_reduce(input.to_owned(), ops::BitOr::bitor).expect("Empty input")
+    low_depth_reduce(input.to_owned(), ops::BitOr::bitor)
+        .unwrap_or_else(|| ShareWrapper::from_const(0, false))
 }
 
 fn base64_string_to_input(
