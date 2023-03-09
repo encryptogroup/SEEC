@@ -1,5 +1,5 @@
 use crate::utils::RangeInclusiveStartWrapper;
-use crate::SubCircuitGate;
+use crate::{bristol, SubCircuitGate};
 pub use builder::SubCircCache;
 use num_integer::Integer;
 use petgraph::adj::IndexType;
@@ -8,19 +8,32 @@ use std::collections::{BTreeMap, Bound, HashMap};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::RangeInclusive;
+use std::path::Path;
 use std::sync::Arc;
 use tracing::trace;
 
 pub mod base_circuit;
 pub mod builder;
 
-pub use base_circuit::{BaseCircuit, Gate, GateId};
+use crate::circuit::base_circuit::{BaseGate, Load};
+use crate::errors::CircuitError;
+pub use crate::protocols::boolean_gmw::BooleanGate;
+use crate::protocols::{Gate, Wire};
+pub use base_circuit::{BaseCircuit, GateId};
 pub use builder::{CircuitBuilder, SharedCircuit};
 
 pub type CircuitId = u32;
 
 pub trait GateIdx:
-    IndexType + Integer + Copy + TryFrom<usize> + TryFrom<u32> + TryFrom<u16> + Into<GateId<Self>>
+    IndexType
+    + Integer
+    + Copy
+    + Send
+    + Sync
+    + TryFrom<usize>
+    + TryFrom<u32>
+    + TryFrom<u16>
+    + Into<GateId<Self>>
 {
 }
 
@@ -28,6 +41,8 @@ impl<
         T: IndexType
             + Integer
             + Copy
+            + Send
+            + Sync
             + TryFrom<usize>
             + TryFrom<u32>
             + TryFrom<u16>
@@ -47,9 +62,9 @@ pub trait LayerIterable {
     fn layer_iter(&self) -> Self::LayerIter<'_>;
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct Circuit<Idx = DefaultIdx> {
-    pub(crate) circuits: Vec<Arc<BaseCircuit<Idx>>>,
+#[derive(Debug, Clone)]
+pub struct Circuit<G = BooleanGate, Idx = DefaultIdx, W = ()> {
+    pub(crate) circuits: Vec<Arc<BaseCircuit<G, Idx, W>>>,
     pub(crate) connections: CrossCircuitConnections<Idx>,
 }
 
@@ -170,15 +185,20 @@ where
     }
 }
 
-impl<Idx: GateIdx> Circuit<Idx> {
+impl<G: Gate, Idx: GateIdx, W: Wire> Circuit<G, Idx, W> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add_circuit(&mut self, circuit: impl Into<Arc<BaseCircuit<Idx>>>) {
+    pub fn add_circuit(&mut self, circuit: impl Into<Arc<BaseCircuit<G, Idx, W>>>) {
         self.circuits.push(circuit.into());
     }
 
+    pub fn get_gate(&self, id: SubCircuitGate<Idx>) -> G {
+        self.circuits[id.circuit_id as usize].get_gate(id.gate_id)
+    }
+
+    // TODO optimization!
     pub fn parent_gates(
         &self,
         id: SubCircuitGate<Idx>,
@@ -190,22 +210,37 @@ impl<Idx: GateIdx> Circuit<Idx> {
         same_circuit.chain(self.connections.parent_gates(id))
     }
 
-    pub fn and_count(&self) -> usize {
-        self.circuits.iter().map(|circ| circ.and_count()).sum()
-    }
-
-    /// Returns the input count of the **main circuit**.
-    pub fn input_count(&self) -> usize {
-        self.circuits[0].input_count()
-    }
-
-    /// Returns the output count of the **main circuit**.
-    pub fn output_count(&self) -> usize {
-        self.circuits[0].output_count()
-    }
-
     pub fn gate_count(&self) -> usize {
         self.circuits.iter().map(|circ| circ.gate_count()).sum()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
+        // Reuse the the CircuitLayerIter api to get an iterator over individual gates. This
+        // is maybe a little more inefficient than necessary, but probably fine for the moment,
+        // as this method is expected to be called in the preprocessing phase
+        let layer_iter = CircuitLayerIter::new(self);
+        layer_iter.flat_map(|layer| {
+            layer.sc_layers.into_iter().flat_map(|(sc_id, base_layer)| {
+                base_layer
+                    .non_interactive
+                    .into_iter()
+                    .map(move |(gate, gate_id)| (gate, SubCircuitGate::new(sc_id, gate_id)))
+                    // Interactive gates need be chained after interactive gates
+                    .chain(
+                        base_layer
+                            .interactive
+                            .into_iter()
+                            .map(move |(gate, gate_id)| {
+                                (gate, SubCircuitGate::new(sc_id, gate_id))
+                            }),
+                    )
+            })
+        })
+    }
+
+    pub fn interactive_iter(&self) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
+        // TODO this can be optimized in the future
+        self.iter().filter(|(gate, _)| gate.is_interactive())
     }
 
     // pub fn into_base_circuit(self) -> BaseCircuit<Idx> {
@@ -256,6 +291,35 @@ impl<Idx: GateIdx> Circuit<Idx> {
     //
     //     res
     // }
+}
+
+impl<G, Idx, W> Circuit<G, Idx, W> {
+    pub fn interactive_count(&self) -> usize {
+        self.circuits
+            .iter()
+            .map(|circ| circ.interactive_count())
+            .sum()
+    }
+
+    /// Returns the input count of the **main circuit**.
+    pub fn input_count(&self) -> usize {
+        self.circuits[0].input_count()
+    }
+
+    /// Returns the output count of the **main circuit**.
+    pub fn output_count(&self) -> usize {
+        self.circuits[0].output_count()
+    }
+}
+
+impl<Share, G> Circuit<G, usize>
+where
+    Share: Clone,
+    G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
+{
+    pub fn load_bristol(path: impl AsRef<Path>) -> Result<Self, CircuitError> {
+        BaseCircuit::load_bristol(path, Load::Circuit).map(Into::into)
+    }
 }
 
 impl<Idx: Ord + Copy + IndexType + Debug> RangeSubCircuitConnections<Idx> {
@@ -324,13 +388,14 @@ impl<Idx: Ord + Copy + IndexType + Debug> RangeSubCircuitConnections<Idx> {
     }
 }
 
-pub struct CircuitLayerIter<'a, Idx: GateIdx> {
-    circuit: &'a Circuit<Idx>,
-    layer_iters: HashMap<CircuitId, base_circuit::BaseLayerIter<'a, Idx>>,
+#[derive(Clone)]
+pub struct CircuitLayerIter<'a, G, Idx: GateIdx, W> {
+    circuit: &'a Circuit<G, Idx, W>,
+    layer_iters: HashMap<CircuitId, base_circuit::BaseLayerIter<'a, G, Idx, W>>,
 }
 
-impl<'a, Idx: GateIdx> CircuitLayerIter<'a, Idx> {
-    pub fn new(circuit: &'a Circuit<Idx>) -> Self {
+impl<'a, G: Gate, Idx: GateIdx, W: Wire> CircuitLayerIter<'a, G, Idx, W> {
+    pub fn new(circuit: &'a Circuit<G, Idx, W>) -> Self {
         let first_iter = circuit.circuits[0].layer_iter();
         Self {
             circuit,
@@ -340,39 +405,34 @@ impl<'a, Idx: GateIdx> CircuitLayerIter<'a, Idx> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CircuitLayer<Idx: Hash + PartialEq + Eq> {
-    sc_layers: Vec<(CircuitId, base_circuit::CircuitLayer<Idx>)>,
+pub struct CircuitLayer<G, Idx: Hash + PartialEq + Eq> {
+    sc_layers: Vec<(CircuitId, base_circuit::CircuitLayer<G, Idx>)>,
 }
 
-impl<'a, Idx: GateIdx> Iterator for CircuitLayerIter<'a, Idx> {
-    type Item = CircuitLayer<Idx>;
+impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for CircuitLayerIter<'a, G, Idx, W> {
+    type Item = CircuitLayer<G, Idx>;
 
+    // TODO optimize this method, it makes up a big part of the runtime
+    // TODO remove BaseLayerIters when they are not use anymore
     fn next(&mut self) -> Option<Self::Item> {
-        // let now = Instant::now();
         trace!("layer_iters: {:#?}", &self.layer_iters);
         let mut sc_layers: Vec<_> = self
             .layer_iters
             .iter_mut()
             .filter_map(|(&sc_id, iter)| iter.next().map(|layer| (sc_id, layer)))
             .collect();
+        // Only retain iters which can yield elements
+        self.layer_iters.retain(|_sc_id, iter| !iter.is_exhausted());
+
         // This is crucial as the executor depends on the and gates being in the same order for
         // both parties
         sc_layers.sort_unstable_by_key(|sc_id| sc_id.0);
         for (sc_id, layer) in &sc_layers {
             // TODO this iterates over all range connections for circuit in sc_layers for every
             //  layer. This could slow down the layer generation. Use hashmaps?
-            for potential_out in layer
-                .non_interactive
-                .iter()
-                .map(|(_, id)| id)
-                .chain(&layer.and_gates)
-            {
+            for (_, potential_out) in layer.non_interactive.iter().chain(&layer.interactive) {
                 let from = SubCircuitGate::new(*sc_id, *potential_out);
-                let outgoing: Vec<_> = self.circuit.connections.outgoing_gates(from).collect();
-
-                if !outgoing.is_empty() {
-                    trace!(?from, ?outgoing, "outgoing_gates");
-                }
+                let outgoing = self.circuit.connections.outgoing_gates(from);
 
                 for sc_gate in outgoing {
                     let to_layer_iter =
@@ -387,7 +447,6 @@ impl<'a, Idx: GateIdx> Iterator for CircuitLayerIter<'a, Idx> {
                 }
             }
         }
-        // println!("next took {}", now.elapsed().as_secs_f32());
         // Todo can there be circuits where a layer is empty, but a later call to next returns
         //  a layer?
         if sc_layers.is_empty() {
@@ -398,32 +457,43 @@ impl<'a, Idx: GateIdx> Iterator for CircuitLayerIter<'a, Idx> {
     }
 }
 
-impl<Idx: Hash + PartialEq + Eq + Copy> CircuitLayer<Idx> {
+impl<G: Gate, Idx: Hash + PartialEq + Eq + Copy> CircuitLayer<G, Idx> {
     pub(crate) fn non_interactive_iter(
         &self,
-    ) -> impl Iterator<Item = (Gate, SubCircuitGate<Idx>)> + '_ {
+    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + '_ {
         self.sc_layers.iter().flat_map(|(sc_id, layer)| {
             layer
                 .non_interactive
                 .iter()
-                .copied()
+                .cloned()
                 .map(|(gate, gate_idx)| (gate, SubCircuitGate::new(*sc_id, gate_idx)))
         })
     }
 
-    pub(crate) fn and_iter(&self) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
+    pub(crate) fn interactive_iter(
+        &self,
+    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
         self.sc_layers.iter().flat_map(|(sc_id, layer)| {
             layer
-                .and_gates
+                .interactive
                 .iter()
-                .copied()
-                .map(|gate_idx| SubCircuitGate::new(*sc_id, gate_idx))
+                .cloned()
+                .map(|(gate, gate_idx)| (gate, SubCircuitGate::new(*sc_id, gate_idx)))
         })
     }
 }
 
-impl<Idx: Default> From<BaseCircuit<Idx>> for Circuit<Idx> {
-    fn from(bc: BaseCircuit<Idx>) -> Self {
+impl<G, Idx: GateIdx, W> Default for Circuit<G, Idx, W> {
+    fn default() -> Self {
+        Self {
+            circuits: vec![],
+            connections: Default::default(),
+        }
+    }
+}
+
+impl<G, Idx: GateIdx + Default, W> From<BaseCircuit<G, Idx, W>> for Circuit<G, Idx, W> {
+    fn from(bc: BaseCircuit<G, Idx, W>) -> Self {
         Self {
             circuits: vec![Arc::new(bc)],
             ..Default::default()
@@ -431,10 +501,10 @@ impl<Idx: Default> From<BaseCircuit<Idx>> for Circuit<Idx> {
     }
 }
 
-impl<Idx: Default> TryFrom<SharedCircuit<Idx>> for Circuit<Idx> {
-    type Error = SharedCircuit<Idx>;
+impl<G, Idx: GateIdx, W> TryFrom<SharedCircuit<G, Idx, W>> for Circuit<G, Idx, W> {
+    type Error = SharedCircuit<G, Idx, W>;
 
-    fn try_from(circuit: SharedCircuit<Idx>) -> Result<Self, Self::Error> {
+    fn try_from(circuit: SharedCircuit<G, Idx, W>) -> Result<Self, Self::Error> {
         Arc::try_unwrap(circuit).map(|mutex| mutex.into_inner().into())
     }
 }

@@ -1,5 +1,6 @@
-//! This example shows how to load a Bristol circuit (sha256) and execute it, optionally generating
-//! the multiplication triples via a third trusted party (see the `trusted_party_mts.rs` example).
+//! This example shows how to load a Bristol circuit (default sha256) and execute it,
+//! optionally generating the multiplication triples via a third trusted party
+//! (see the `trusted_party_mts.rs` example).
 //!
 //! It also demonstrates how to use the [`Statistics`] API to track the communication of
 //! different phases and write it to a file.
@@ -11,19 +12,23 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
+use rand::rngs::OsRng;
 
 use gmw::circuit::base_circuit::Load;
+use gmw::{BooleanGate, Circuit};
+use tracing_subscriber::EnvFilter;
+
 use gmw::circuit::BaseCircuit;
 use gmw::common::BitVec;
 use gmw::executor::Executor;
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::ot_ext::OtMTProvider;
 use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
 use gmw::protocols::boolean_gmw;
 use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::{BooleanGate, Circuit};
 use mpc_channel::sub_channels_for;
 use mpc_channel::util::{Phase, Statistics};
+use zappot::ot_ext;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -38,6 +43,9 @@ struct Args {
     /// Optional address of trusted server providing MTs
     #[clap(long)]
     mt_provider: Option<SocketAddr>,
+
+    /// Skips the MT generation
+    skip_setup: bool,
 
     /// Sha256 as a bristol circuit
     #[clap(
@@ -66,32 +74,50 @@ async fn main() -> Result<()> {
     // Initialize the communication statistics tracker with the counters for the main channel
     let mut comm_stats = Statistics::new(bytes_written, bytes_read).without_unaccounted(true);
 
-    let (mut sender, mut receiver) =
-        sub_channels_for!(&mut sender, &mut receiver, 8, boolean_gmw::Msg).await?;
+    let ((mut sender, mut receiver), (ot_sender, ot_receiver)) = sub_channels_for!(
+        &mut sender,
+        &mut receiver,
+        8,
+        boolean_gmw::Msg,
+        mpc_channel::Receiver<ot_ext::ExtOTMsg>,
+    )
+    .await?;
 
-    let mut executor: Executor<BooleanGmw, _> = if let Some(addr) = args.mt_provider {
-        let (mt_sender, bytes_written, mt_receiver, bytes_read) =
-            mpc_channel::tcp::connect(addr).await?;
-        // Set the counters for the helper channel
-        comm_stats.set_helper(bytes_written, bytes_read);
-        let mt_provider = TrustedMTProviderClient::new("unique-id".into(), mt_sender, mt_receiver);
-        // As the MTs are generated when the Executor is created, we record the communication
-        // with the `record_helper` method and a custom category
-        comm_stats
-            .record_helper(
-                Phase::Custom("Helper-Mts"),
-                Executor::new(&circuit, args.id, mt_provider),
-            )
-            .await?
-    } else {
-        let mt_provider = InsecureMTProvider::default();
-        comm_stats
-            .record(
-                Phase::FunctionDependentSetup,
-                Executor::new(&circuit, args.id, mt_provider),
-            )
-            .await?
+    let mut executor: Executor<BooleanGmw, _> = match (args.skip_setup, args.mt_provider) {
+        (true, _) => {
+            let mt_provider = InsecureMTProvider::default();
+            Executor::new(&circuit, args.id, mt_provider).await?
+        }
+        (false, Some(addr)) => {
+            let (mt_sender, bytes_written, mt_receiver, bytes_read) =
+                mpc_channel::tcp::connect(addr).await?;
+            // Set the counters for the helper channel
+            comm_stats.set_helper(bytes_written, bytes_read);
+            let mt_provider =
+                TrustedMTProviderClient::new("unique-id".into(), mt_sender, mt_receiver);
+            // As the MTs are generated when the Executor is created, we record the communication
+            // with the `record_helper` method and a custom category
+            comm_stats
+                .record_helper(
+                    Phase::Custom("Helper-Mts"),
+                    Executor::new(&circuit, args.id, mt_provider),
+                )
+                .await?
+        }
+        (false, None) => {
+            let mt_provider = OtMTProvider::new(
+                OsRng,
+                ot_ext::Sender::default(),
+                ot_ext::Receiver::default(),
+                ot_sender,
+                ot_receiver,
+            );
+            comm_stats
+                .record(Phase::Mts, Executor::new(&circuit, args.id, mt_provider))
+                .await?
+        }
     };
+
     let input = BitVec::repeat(false, 768);
     let _out = comm_stats
         .record(

@@ -53,6 +53,7 @@ impl TrustedMTProviderClient {
 
 #[async_trait]
 impl MTProvider for TrustedMTProviderClient {
+    type Output = MulTriples;
     type Error = MTProviderError<Message>;
     async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
         self.sender

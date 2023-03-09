@@ -1,4 +1,4 @@
-image: "instrumentisto/rust:beta"
+image: "instrumentisto/rust:nightly"
 
 .default:
   interruptible: true
@@ -7,8 +7,8 @@ image: "instrumentisto/rust:beta"
 run-tests:
   stage: test
   script:
-    - rustc --version && cargo --version  # Print version info for debugging
-    - cargo test --workspace --verbose --all-features
+    - rustc --version && cargo --version && cargo +nightly --version  # Print version info for debugging
+    - cargo +nightly test --workspace --verbose --all-features
 
 # For this job, the Settings -> General -> Merge requests -> Enable merged results pipelines option should be enabled.
 # This ensures that the main branch will always have working tests and no formatting/clippy issues
@@ -18,9 +18,9 @@ merge-request:
     - rustup component add rustfmt
     - rustup component add clippy
   script:
-    - cargo test --workspace --verbose --all-features
+    - cargo +nightly test --workspace --verbose --all-features
     - cargo fmt --all --check
-    - cargo clippy --all --all-features
+    - cargo +nightly clippy --all --all-features
   rules:
     # Only run this job for merge requests which are **not** in the draft state
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_TITLE =~ /Merge branch.*/

@@ -3,15 +3,15 @@ use std::path::Path;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::character::complete::{digit1, multispace0};
-use nom::combinator::{all_consuming, map_res};
-use nom::error::ParseError;
+use nom::character::complete::multispace0;
+use nom::combinator::all_consuming;
 use nom::multi::{count, fill};
-use nom::sequence::{delimited, tuple};
+use nom::sequence::tuple;
 use nom::IResult;
 use smallvec::SmallVec;
 
 use crate::errors::BristolError;
+use crate::parse;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Circuit {
@@ -56,17 +56,9 @@ pub struct GateData {
     pub output_wires: SmallVec<[usize; 1]>,
 }
 
-fn integer(i: &str) -> IResult<&str, usize> {
-    map_res(digit1, |s: &str| s.parse())(i)
-}
-
-fn integer_ws(i: &str) -> IResult<&str, usize> {
-    ws(integer)(i)
-}
-
 fn header(i: &str) -> IResult<&str, Header> {
     // parse the first line of the header
-    let int_ws = integer_ws;
+    let int_ws = parse::integer_ws;
     let (i, (gates, wires)) = tuple((int_ws, int_ws))(i)?;
 
     let (i, (input_wires, output_wires)) = tuple((array(int_ws), int_ws))(i)?;
@@ -80,11 +72,12 @@ fn header(i: &str) -> IResult<&str, Header> {
 }
 
 fn gate(i: &str) -> IResult<&str, Gate> {
-    let (i, (num_in_wires, num_out_wires)) = tuple((ws(integer), ws(integer)))(i)?;
+    let (i, (num_in_wires, num_out_wires)) =
+        tuple((parse::ws(parse::integer), parse::ws(parse::integer)))(i)?;
     let mut input_wires = SmallVec::from_elem(0, num_in_wires);
     let mut output_wires = SmallVec::from_elem(0, num_out_wires);
-    let (i, _) = fill(integer_ws, &mut input_wires)(i)?;
-    let (i, _) = fill(integer_ws, &mut output_wires)(i)?;
+    let (i, _) = fill(parse::integer_ws, &mut input_wires)(i)?;
+    let (i, _) = fill(parse::integer_ws, &mut output_wires)(i)?;
     let gate_data = GateData {
         input_wires,
         output_wires,
@@ -103,18 +96,6 @@ pub fn circuit(input: &str) -> Result<Circuit, nom::Err<nom::error::Error<&str>>
     let (i, gates) = count(gate, header.gates)(i)?;
     let _ = all_consuming(multispace0)(i)?;
     Ok(Circuit { header, gates })
-}
-
-/// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
-/// trailing whitespace, returning the output of `inner`.
-/// Source: https://docs.rs/nom/latest/nom/recipes/index.html#wrapper-combinators-that-eat-whitespace-before-and-after-a-parser
-fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(
-    inner: F,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-where
-    F: Fn(&'a str) -> IResult<&'a str, O, E>,
-{
-    delimited(multispace0, inner, multispace0)
 }
 
 fn array<'a, F: 'a, O: Default + Copy, const N: usize>(

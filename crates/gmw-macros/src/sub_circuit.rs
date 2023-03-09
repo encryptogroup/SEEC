@@ -25,6 +25,7 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
             }
         })
         .unzip();
+    let first_input_ty = input_tys[0].clone();
 
     let call_inner = quote!(inner(#(#input_idents),*));
     // the rev is important as otherwise the input gates are created in the wrong order
@@ -40,6 +41,9 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
         });
 
     let inputs_size_ty = quote!((#(<#input_tys as ::gmw::SubCircuitInput>::Size, )*));
+    let input_protocol_ty = quote!(<#first_input_ty as ::gmw::SubCircuitInput>::Protocol);
+    let input_gate_ty = quote!(<#input_protocol_ty as ::gmw::protocols::Protocol>::Gate);
+    let input_idx_ty = quote!(<#first_input_ty as ::gmw::SubCircuitInput>::Idx);
 
     let inner_ret = match &inner.sig.output {
         ReturnType::Default => quote!(()),
@@ -51,13 +55,13 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
 
             use ::gmw::SubCircuitInput;
 
-            // Safety: The following is a small hack. Currently ShareWrapper explicitly don't
-            // implement Send+Syn (via a PhantomData<*const  ()> because using ShareWrapper's
+            // Safety: The following is a small hack. Currently Secret explicitly don't
+            // implement Send+Syn (via a PhantomData<*const  ()> because using Secret's
             // currently is unlikely to provide a performance benefit and calling #[sub_circuit]s
             // in parrallel will even result in a panic!. But we need the return type of a sub
             // circuit to be Send + Sync to store it in a static Cache. So we forcibly implement
             // Send+Sync for the wrapped return type. This is definitely safe since the
-            // !Send + !Sync impl on ShareWrapper is only meant as a lint and not required for
+            // !Send + !Sync impl on Secret is only meant as a lint and not required for
             // safety. Furthermore, the CACHE can't even be accessed in parallel due to the
             // atomic guarding all sub circuit calls.
             struct _internal_ForceSendSync<T>(T);
@@ -72,12 +76,12 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
                 ::parking_lot::Mutex<
                     ::std::collections::HashMap<
                         #inputs_size_ty,
-                        (::gmw::circuit::SharedCircuit, _internal_ForceSendSync<#inner_ret>)
+                        (::gmw::circuit::SharedCircuit<#input_gate_ty, #input_idx_ty>, _internal_ForceSendSync<#inner_ret>)
                     >
                 >
             > = ::once_cell::sync::Lazy::new(|| ::parking_lot::Mutex::new(::std::collections::HashMap::new()));
 
-            ::gmw::CircuitBuilder::with_global(|builder| {
+            ::gmw::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::with_global(|builder| {
                 builder.add_cache(&*CACHE);
             });
 
@@ -88,8 +92,8 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
 
             let (sc_id, ret) = match CACHE.lock().entry(input_size.clone()) {
                 ::std::collections::hash_map::Entry::Vacant(entry) => {
-                    let sub_circuit = ::gmw::SharedCircuit::default();
-                    let sc_id = ::gmw::CircuitBuilder::push_global_circuit(sub_circuit.clone());
+                    let sub_circuit = ::gmw::SharedCircuit::<#input_gate_ty, #input_idx_ty>::default();
+                    let sc_id = ::gmw::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::push_global_circuit(sub_circuit.clone());
                     let ret = #call_inner;
                     let ret = ::gmw::SubCircuitOutput::create_output_gates(ret);
                     entry.insert((sub_circuit, _internal_ForceSendSync(ret.clone())));
@@ -97,11 +101,11 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
                 }
                 ::std::collections::hash_map::Entry::Occupied(entry) => {
                     let (sub_circuit, ret) = entry.get();
-                    let sc_id = ::gmw::CircuitBuilder::push_global_circuit(sub_circuit.clone());
+                    let sc_id = ::gmw::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::push_global_circuit(sub_circuit.clone());
                     (sc_id, ret.0.clone())
                 }
             };
-            ::gmw::CircuitBuilder::with_global(|builder| {
+            ::gmw::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::with_global(|builder| {
                 builder.connect_sub_circuit(&circ_inputs, sc_id);
             });
 

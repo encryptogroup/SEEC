@@ -3,17 +3,17 @@ use std::ops;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::builder::CircuitBuilder;
-use gmw::circuit::CircuitLayerIter;
-use gmw::share_wrapper::{inputs, low_depth_reduce, ShareWrapper};
-use gmw::sub_circuit;
+use gmw::circuit::{CircuitLayerIter, DefaultIdx};
+use gmw::secret::{inputs, low_depth_reduce, Secret};
+use gmw::{sub_circuit, BooleanGate, Circuit};
 
 #[sub_circuit]
-fn and_sc(input: &[ShareWrapper]) -> ShareWrapper {
+fn and_sc(input: &[Secret]) -> Secret {
     low_depth_reduce(input.iter().cloned(), ops::BitAnd::bitand).expect("Empty input")
 }
 
 #[sub_circuit]
-fn or_sc(input: &[ShareWrapper]) -> ShareWrapper {
+fn or_sc(input: &[Secret]) -> Secret {
     low_depth_reduce(input.iter().cloned(), ops::BitOr::bitor).expect("Empty input")
 }
 
@@ -22,7 +22,6 @@ fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    CircuitBuilder::new().install();
     let input_shares = inputs(8);
 
     let and_outputs = input_shares
@@ -37,7 +36,7 @@ fn main() {
 
     (or_out ^ false).output();
 
-    let circuit = CircuitBuilder::global_into_circuit();
+    let circuit: Circuit<BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
     let layer_iter = CircuitLayerIter::new(&circuit);
     for layer in layer_iter {
         dbg!(layer);

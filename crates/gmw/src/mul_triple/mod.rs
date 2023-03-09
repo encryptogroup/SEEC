@@ -1,12 +1,11 @@
 //! Multiplication triples.
-use async_trait::async_trait;
-use bitvec::store::BitStore;
-use num_integer::div_ceil;
-use rand::{CryptoRng, Fill, Rng};
-use serde::{Deserialize, Serialize};
-use std::mem;
-
 use crate::common::BitVec;
+use crate::protocols::{FunctionDependentSetup, SetupStorage};
+use crate::{utils, Circuit};
+use async_trait::async_trait;
+
+use rand::{CryptoRng, Rng};
+use serde::{Deserialize, Serialize};
 
 pub mod insecure_provider;
 pub mod ot_ext;
@@ -16,8 +15,9 @@ pub mod trusted_seed_provider;
 /// Provides a source of multiplication triples.
 #[async_trait]
 pub trait MTProvider {
+    type Output;
     type Error;
-    async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error>;
+    async fn request_mts(&mut self, amount: usize) -> Result<Self::Output, Self::Error>;
 }
 
 /// Efficient storage of multiple triples.
@@ -26,7 +26,7 @@ pub trait MTProvider {
 /// are efficiently stored in [`BitVec`]s. For a large amount, a single multiplication triple
 /// will only take up 3 bits of storage, compared to the 3 bytes needed for a single
 /// [`MulTriple`]. Prefer this type over `Vec<MulTriple>`.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MulTriples {
     a: BitVec<usize>,
     b: BitVec<usize>,
@@ -48,7 +48,7 @@ impl MulTriples {
     /// Create a random pair of multiplication triples `[(a1, b1, c1), (a2, b2, c2)]` where
     /// `c1 ^ c2 = (a1 ^ a2) & (b1 ^ b2)`.
     pub fn random_pair<R: CryptoRng + Rng>(size: usize, rng: &mut R) -> [Self; 2] {
-        let [a1, a2, b1, b2, c1] = rand_bitvecs(size, rng);
+        let [a1, a2, b1, b2, c1] = utils::rand_bitvecs(size, rng);
         let mts1 = Self::from_raw(a1, b1, c1);
         let c2 = compute_c(&mts1, &a2, &b2);
         let mts2 = Self::from_raw(a2, b2, c2);
@@ -57,13 +57,13 @@ impl MulTriples {
 
     /// Create multiplication triples with random values, without any structure.
     pub fn random<R: Rng + CryptoRng>(size: usize, rng: &mut R) -> Self {
-        let [a, b, c] = rand_bitvecs(size, rng);
+        let [a, b, c] = utils::rand_bitvecs(size, rng);
         Self::from_raw(a, b, c)
     }
 
     /// Create multiplication triples with the provided `c` values and random `a,b` values.
     pub fn random_with_fixed_c<R: Rng + CryptoRng>(c: BitVec<usize>, rng: &mut R) -> Self {
-        let [a, b] = rand_bitvecs(c.len(), rng);
+        let [a, b] = utils::rand_bitvecs(c.len(), rng);
         Self::from_raw(a, b, c)
     }
 
@@ -87,19 +87,8 @@ impl MulTriples {
         self.a.is_empty()
     }
 
-    /// Split of the last `count` many multiplication triples into a new `MulTriples`.
-    pub fn split_off_last(&mut self, count: usize) -> Self {
-        let len = self.len();
-        let a = self.a.split_off(len - count);
-        let b = self.b.split_off(len - count);
-        let c = self.c.split_off(len - count);
-        Self { a, b, c }
-    }
-
     /// Provides an iterator over the multiplication triples in the form of [`MulTriple`]s.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = MulTriple> + ExactSizeIterator<Item = MulTriple> + '_ {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = MulTriple> + '_ {
         self.a
             .iter()
             .by_vals()
@@ -108,15 +97,39 @@ impl MulTriples {
             .map(|((a, b), c)| MulTriple { a, b, c })
     }
 
-    // pub fn drain_mts(
-    //     &mut self,
-    // ) -> impl Iterator<Item = MulTriple> + ExactSizeIterator<Item = MulTriple> + '_ {
-    //     self.a
-    //         .drain(..)
-    //         .rev()
-    //         .zip(self.b.drain(..).rev().self.c.drain(..).rev())
-    //         .map(|((a, b), c)| MulTriple { a, b, c })
-    // }
+    pub fn pop(&mut self) -> Option<MulTriple> {
+        Some(MulTriple {
+            a: self.a.pop()?,
+            b: self.b.pop()?,
+            c: self.c.pop()?,
+        })
+    }
+}
+
+#[async_trait]
+impl<Mtp: MTProvider + Send> MTProvider for &mut Mtp {
+    type Output = Mtp::Output;
+    type Error = Mtp::Error;
+
+    async fn request_mts(&mut self, amount: usize) -> Result<Self::Output, Self::Error> {
+        (*self).request_mts(amount).await
+    }
+}
+
+#[async_trait]
+impl<ShareStorage: Sync, G: Send + Sync, Idx: Send + Sync, Mtp: MTProvider + Send>
+    FunctionDependentSetup<ShareStorage, G, Idx> for Mtp
+{
+    type Output = Mtp::Output;
+    type Error = Mtp::Error;
+
+    async fn setup(
+        &mut self,
+        _shares: &[ShareStorage],
+        circuit: &Circuit<G, Idx>,
+    ) -> Result<Self::Output, Self::Error> {
+        self.request_mts(circuit.interactive_count()).await
+    }
 }
 
 fn compute_c(mts: &MulTriples, a: &BitVec<usize>, b: &BitVec<usize>) -> BitVec<usize> {
@@ -125,29 +138,6 @@ fn compute_c(mts: &MulTriples, a: &BitVec<usize>, b: &BitVec<usize>) -> BitVec<u
 
 fn compute_c_owned(mts: MulTriples, a: BitVec<usize>, b: BitVec<usize>) -> BitVec<usize> {
     (a ^ mts.a) & (b ^ mts.b) ^ mts.c
-}
-
-/// Helper method to quickly create an array of random BitVecs.
-fn rand_bitvecs<R: CryptoRng + Rng, const N: usize>(
-    size: usize,
-    rng: &mut R,
-) -> [BitVec<usize>; N] {
-    // Workaround until array::from_fn https://github.com/rust-lang/rust/issues/89379 is stabilized
-    [(); N].map(|_| rand_bitvec(size, rng))
-}
-
-fn rand_bitvec<T, R>(size: usize, rng: &mut R) -> BitVec<T>
-where
-    T: BitStore + Copy,
-    [T]: Fill,
-    R: CryptoRng + Rng,
-{
-    let bitstore_items = div_ceil(size, mem::size_of::<T>());
-    let mut buf = vec![T::ZERO; bitstore_items];
-    rng.fill(&mut buf[..]);
-    let mut bv = BitVec::from_vec(buf);
-    bv.truncate(size);
-    bv
 }
 
 #[derive(Debug, Default)]
@@ -175,6 +165,17 @@ impl MulTriple {
 
     pub fn c(&self) -> bool {
         self.c
+    }
+}
+
+impl SetupStorage for MulTriples {
+    /// Split of the last `count` many multiplication triples into a new `MulTriples`.
+    fn split_off_last(&mut self, count: usize) -> Self {
+        let len = self.len();
+        let a = self.a.split_off(len - count);
+        let b = self.b.split_off(len - count);
+        let c = self.c.split_off(len - count);
+        Self { a, b, c }
     }
 }
 

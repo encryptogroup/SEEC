@@ -488,7 +488,7 @@ impl Serialize for Phase {
             Phase::Unaccounted => {
                 Serializer::serialize_unit_variant(serializer, "Phase", 5u32, "Unaccounted")
             }
-            Phase::Custom(ref inner) => {
+            Phase::Custom(inner) => {
                 Serializer::serialize_unit_variant(serializer, "Phase", 6u32, inner)
             }
         }
