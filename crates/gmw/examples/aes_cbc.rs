@@ -13,6 +13,7 @@ use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut};
 use clap::{Args, Parser};
 use once_cell::sync::Lazy;
 
+use rand::rngs::ThreadRng;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 
@@ -27,7 +28,7 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::{static_layers, BaseCircuit, ExecutableCircuit};
 use gmw::common::{BitSlice, BitVec};
 use gmw::executor::{Executor, Message};
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::protocols::boolean_gmw::{BooleanGmw, XorSharing};
 use gmw::protocols::Sharing;
 use gmw::secret::{inputs, Secret};
@@ -201,7 +202,7 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
                 anyhow::bail!("Received wrong message. Expected IvKeyShare")
             };
 
-            let ciphertext = sharing.reconstruct([out, shared_out]);
+            let ciphertext = XorSharing::<ThreadRng>::reconstruct([out, shared_out]);
 
             if args.validate {
                 let Msg::PlainIvKey {iv, key} = sharing_channel.1.recv().await

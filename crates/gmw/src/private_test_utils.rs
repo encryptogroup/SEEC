@@ -8,6 +8,8 @@ use bitvec::prelude::BitSlice;
 use bitvec::vec;
 use itertools::Itertools;
 use mpc_channel::sub_channel;
+use rand::rngs::ThreadRng;
+use rand::thread_rng;
 use tokio::task::spawn_blocking;
 use tokio::time::Instant;
 use tracing::info;
@@ -19,9 +21,23 @@ use crate::circuit::ExecutableCircuit;
 use crate::circuit::{BaseCircuit, BooleanGate, GateIdx};
 use crate::common::BitVec;
 use crate::executor::Executor;
-use crate::mul_triple::insecure_provider::InsecureMTProvider;
-use crate::protocols::boolean_gmw::BooleanGmw;
-use crate::protocols::ScalarDim;
+use crate::mul_triple::MTProvider;
+use crate::mul_triple::{arithmetic, boolean};
+use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
+use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
+use crate::protocols::{Gate, Protocol, Ring, ScalarDim, Share, Sharing};
+
+pub trait ProtocolTestExt: Protocol + Default {
+    type InsecureSetup: MTProvider<Output = Self::SetupStorage> + Default + Clone + Send + Sync;
+}
+
+impl ProtocolTestExt for BooleanGmw {
+    type InsecureSetup = boolean::insecure_provider::InsecureMTProvider;
+}
+
+impl<R: Ring> ProtocolTestExt for ArithmeticGmw<R> {
+    type InsecureSetup = arithmetic::insecure_provider::InsecureMTProvider<R>;
+}
 
 pub fn create_and_tree(depth: u32) -> BaseCircuit {
     let total_nodes = 2_u32.pow(depth);
@@ -71,26 +87,39 @@ pub enum TestChannel {
     Tcp,
 }
 
-pub trait IntoShares {
-    fn into_shares(self) -> (BitVec<usize>, BitVec<usize>)
-    where
-        bitvec::slice::BitSlice<u8, Lsb0>: BitField;
+pub trait IntoShares<S: Sharing> {
+    fn into_shares(self) -> (S::Shared, S::Shared);
 }
 
-pub trait IntoInput {
-    fn into_input(self) -> (BitVec<usize>, BitVec<usize>);
+pub trait IntoInput<S: Sharing> {
+    fn into_input(self) -> (S::Shared, S::Shared);
 }
 
 macro_rules! impl_into_shares {
     ($($typ:ty),+) => {
         $(
-            impl IntoShares for $typ {
+            impl IntoShares<XorSharing<ThreadRng>> for $typ {
                 fn into_shares(self) -> (BitVec<usize>, BitVec<usize>) {
-                    // TODO use pseudo random sharing (with fixed seed)
-                    let a = vec::BitVec::repeat(false, <$typ>::BITS as usize);
-                    let mut b = a.clone();
-                    b.store(self);
+                    let mut a = vec::BitVec::repeat(false, <$typ>::BITS as usize);
+                    a.store(self);
+                    let [a, b] = XorSharing::new(thread_rng()).share(a);
                     (a, b)
+                }
+            }
+
+            impl IntoShares<AdditiveSharing<$typ, ThreadRng>> for $typ
+                {
+                    fn into_shares(self) -> (Vec<$typ>, Vec<$typ>) {
+                        let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
+                        (a, b)
+                    }
+                }
+
+            impl<T: IntoShares<AdditiveSharing<$typ, ThreadRng>>> IntoInput<AdditiveSharing<$typ, ThreadRng>>
+                for T
+            {
+                fn into_input(self) -> (Vec<$typ>, Vec<$typ>) {
+                    self.into_shares()
                 }
             }
         )*
@@ -99,7 +128,7 @@ macro_rules! impl_into_shares {
 
 impl_into_shares!(u8, u16, u32, u64, u128);
 
-impl IntoShares for bool {
+impl IntoShares<XorSharing<ThreadRng>> for bool {
     fn into_shares(self) -> (BitVec<usize>, BitVec<usize>)
     where
         BitSlice<u8, Lsb0>: BitField,
@@ -110,30 +139,58 @@ impl IntoShares for bool {
     }
 }
 
-impl<T: IntoShares> IntoInput for T {
+impl<T: IntoShares<XorSharing<ThreadRng>>> IntoInput<XorSharing<ThreadRng>> for T {
     fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
         self.into_shares()
     }
 }
 
-impl<T: IntoShares> IntoInput for (T,) {
-    fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
+impl<S: Sharing, T: IntoShares<S>> IntoInput<S> for (T,) {
+    fn into_input(self) -> (S::Shared, S::Shared) {
         self.0.into_shares()
     }
 }
 
-impl<T1: IntoShares, T2: IntoShares> IntoInput for (T1, T2) {
-    fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
+impl<S, T1, T2> IntoInput<S> for (T1, T2)
+where
+    S: Sharing,
+    T1: IntoShares<S>,
+    T2: IntoShares<S>,
+    S::Shared: Extend<S::Plain>,
+    S::Shared: IntoIterator<Item = S::Plain>,
+{
+    fn into_input(self) -> (S::Shared, S::Shared) {
         let (mut p1, mut p2) = self.0.into_shares();
-        let mut second_input = self.1.into_shares();
-        p1.append(&mut second_input.0);
-        p2.append(&mut second_input.1);
+        let second_input = self.1.into_shares();
+        p1.extend(second_input.0);
+        p2.extend(second_input.1);
+        (p1, p2)
+    }
+}
+
+impl<S, T1, T2, T3> IntoInput<S> for (T1, T2, T3)
+where
+    S: Sharing,
+    T1: IntoShares<S>,
+    T2: IntoShares<S>,
+    T3: IntoShares<S>,
+    S::Shared: Extend<S::Plain>,
+    S::Shared: IntoIterator<Item = S::Plain>,
+{
+    fn into_input(self) -> (S::Shared, S::Shared) {
+        let (mut p1, mut p2) = self.0.into_shares();
+        let second_input = self.1.into_shares();
+        let third_input = self.2.into_shares();
+        p1.extend(second_input.0);
+        p1.extend(third_input.0);
+        p2.extend(second_input.1);
+        p2.extend(third_input.1);
         (p1, p2)
     }
 }
 
 /// This is kind of cursed...
-impl IntoInput for [BitVec<usize>; 2] {
+impl IntoInput<XorSharing<ThreadRng>> for [BitVec<usize>; 2] {
     fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
         let [a, b] = self;
         (a, b)
@@ -141,34 +198,44 @@ impl IntoInput for [BitVec<usize>; 2] {
 }
 
 #[tracing::instrument(skip(inputs))]
-pub async fn execute_bristol<I: IntoInput>(
+pub async fn execute_bristol<I: IntoInput<XorSharing<ThreadRng>>>(
     bristol_file: impl AsRef<Path> + Debug,
     inputs: I,
     channel: TestChannel,
 ) -> Result<BitVec<usize>> {
     let path = bristol_file.as_ref().to_path_buf();
     let now = Instant::now();
-    let bc = spawn_blocking(move || BaseCircuit::load_bristol(path, Load::Circuit)).await??;
+    let bc = spawn_blocking(move || {
+        BaseCircuit::<BooleanGate, usize>::load_bristol(path, Load::Circuit)
+    })
+    .await??;
     info!(
         parsing_time = %now.elapsed().as_millis(),
         "Parsing bristol time (ms)"
     );
     let circuit = ExecutableCircuit::DynLayers(bc.into());
-    execute_circuit(&circuit, inputs, channel).await
+    execute_circuit::<BooleanGmw, _, _>(&circuit, inputs, channel).await
 }
 
 #[tracing::instrument(skip(circuit, inputs))]
-pub async fn execute_circuit<Idx: GateIdx>(
-    circuit: &ExecutableCircuit<BooleanGate, Idx>,
-    inputs: impl IntoInput,
+pub async fn execute_circuit<P, Idx, S: Sharing>(
+    circuit: &ExecutableCircuit<P::Gate, Idx>,
+    inputs: impl IntoInput<S>,
     channel: TestChannel,
-) -> Result<BitVec<usize>> {
-    let mt_provider = InsecureMTProvider::default();
+) -> Result<S::Shared>
+where
+    P: ProtocolTestExt<ShareStorage = S::Shared>,
+    <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
+    Idx: GateIdx,
+    <P::InsecureSetup as MTProvider>::Error: Debug,
+    <P as Protocol>::ShareStorage: Send + Sync,
+{
+    let mt_provider = P::InsecureSetup::default();
     let (input_a, input_b) = inputs.into_input();
-    let mut ex1: Executor<BooleanGmw, Idx> = Executor::new(circuit, 0, mt_provider.clone())
+    let mut ex1: Executor<P, Idx> = Executor::new(circuit, 0, mt_provider.clone())
         .await
         .unwrap();
-    let mut ex2: Executor<BooleanGmw, Idx> = Executor::new(circuit, 1, mt_provider).await.unwrap();
+    let mut ex2: Executor<P, Idx> = Executor::new(circuit, 1, mt_provider).await.unwrap();
     let now = Instant::now();
     let (out1, out2) = match channel {
         TestChannel::InMemory => {
@@ -197,5 +264,5 @@ pub async fn execute_circuit<Idx: GateIdx>(
     };
     info!(exec_time = %now.elapsed().as_millis(), "Execution time (ms)");
 
-    Ok(out1 ^ out2)
+    Ok(S::reconstruct([out1, out2]))
 }

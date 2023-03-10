@@ -14,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
 use gmw::executor::{Executor, Message};
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::inputs;
 use gmw::CircuitBuilder;

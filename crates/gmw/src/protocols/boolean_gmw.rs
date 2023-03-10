@@ -2,7 +2,8 @@ use crate::bristol;
 use crate::circuit::base_circuit::BaseGate;
 use crate::common::BitVec;
 use crate::evaluate::and;
-use crate::mul_triple::{MulTriple, MulTriples};
+use crate::mul_triple::boolean::MulTriple;
+use crate::mul_triple::boolean::MulTriples;
 use crate::protocols::{Gate, Protocol, ScalarDim, SetupStorage, Share, Sharing};
 use crate::utils::rand_bitvec;
 use itertools::Itertools;
@@ -313,7 +314,7 @@ impl<R: CryptoRng + Rng> Sharing for XorSharing<R> {
         [rand, masked_input]
     }
 
-    fn reconstruct(&mut self, shares: [Self::Shared; 2]) -> Self::Shared {
+    fn reconstruct(shares: [Self::Shared; 2]) -> Self::Shared {
         let [a, b] = shares;
         a ^ b
     }
@@ -334,6 +335,7 @@ mod tests {
     use crate::circuit::ExecutableCircuit;
     use crate::common::BitVec;
     use crate::private_test_utils::{execute_circuit, TestChannel};
+    use crate::protocols::boolean_gmw::BooleanGmw;
     use crate::secret::Secret;
     use crate::{BooleanGate, CircuitBuilder};
 
@@ -343,7 +345,7 @@ mod tests {
         (a & false).output();
 
         let circ = CircuitBuilder::<BooleanGate, u32>::global_into_circuit();
-        let out = execute_circuit(
+        let out = execute_circuit::<BooleanGmw, _, _>(
             &ExecutableCircuit::DynLayers(circ),
             true,
             TestChannel::InMemory,

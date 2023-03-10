@@ -5,23 +5,22 @@
 //! [`MTProvider::request_mts`] is called on the client, a request is sent to the server. Upon
 //! receiving it, the server generates random multiplication triples by calling
 //! [`MulTriples::random_pair`] and returns one [`MulTriples`] struct to each party.
+use crate::errors::MTProviderError;
+use crate::mul_triple::boolean::MulTriples;
+use crate::mul_triple::MTProvider;
+use async_trait::async_trait;
+use futures::StreamExt;
+use mpc_channel::{BaseReceiver, BaseSender};
+use rand::thread_rng;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
 use std::sync::Arc;
-
-use async_trait::async_trait;
-use futures::StreamExt;
-use rand::thread_rng;
-use serde::{Deserialize, Serialize};
 use tokio::net::ToSocketAddrs;
 use tokio::sync::Mutex;
 use tracing::error;
-
-use crate::errors::MTProviderError;
-use crate::mul_triple::{MTProvider, MulTriples};
-use mpc_channel::{BaseReceiver, BaseSender};
 
 pub struct TrustedMTProviderClient {
     id: String,

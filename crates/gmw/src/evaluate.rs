@@ -1,5 +1,5 @@
 pub mod and {
-    use crate::mul_triple::MulTriple;
+    use crate::mul_triple::boolean::MulTriple;
 
     #[inline]
     pub fn compute_shares(x: bool, y: bool, mt: &MulTriple) -> (bool, bool) {
@@ -24,7 +24,7 @@ pub mod and {
 #[cfg(test)]
 mod tests {
     use crate::evaluate::and;
-    use crate::mul_triple::MulTriple;
+    use crate::mul_triple::boolean::MulTriple;
 
     #[test]
     fn and_eval() {

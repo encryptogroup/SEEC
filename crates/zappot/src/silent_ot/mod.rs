@@ -123,11 +123,11 @@ impl Sender {
         let conf = configure(num_ots, scaler, SECURITY_PARAM);
         let pprf_conf: PprfConfig = conf.into();
         let silent_base_ots = {
-            let (sender, receiver) = base_ot_channel(sender, receiver)
+            let (sender, mut receiver) = base_ot_channel(sender, receiver)
                 .await
                 .expect("Establishing sub channel");
             base_ot_sender
-                .send_random(pprf_conf.base_ot_count(), rng, sender, receiver)
+                .send_random(pprf_conf.base_ot_count(), rng, &sender, &mut receiver)
                 .await
                 .expect("Failed to generate base ots")
         };
@@ -292,11 +292,11 @@ impl Receiver {
         let silent_choice_bits = Self::sample_base_choice_bits(conf, rng);
         let silent_base_ots = {
             let choices = silent_choice_bits.as_bit_vec();
-            let (sender, receiver) = base_ot_channel(sender, receiver)
+            let (sender, mut receiver) = base_ot_channel(sender, receiver)
                 .await
                 .expect("Establishing Base OT channel");
             base_ot_receiver
-                .receive_random(&choices, rng, sender, receiver)
+                .receive_random(&choices, rng, &sender, &mut receiver)
                 .await
                 .expect("Failed to generate base ots")
         };

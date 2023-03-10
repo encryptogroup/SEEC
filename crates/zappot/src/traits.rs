@@ -2,6 +2,8 @@
 use crate::util::Block;
 use async_trait::async_trait;
 use bitvec::slice::BitSlice;
+use bitvec::store::BitStore;
+use bytemuck::Pod;
 use rand::{CryptoRng, RngCore};
 use remoc::rch::mpsc::{RecvError, SendError};
 use std::fmt::Debug;
@@ -82,6 +84,18 @@ pub trait ExtROTSender {
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
+
+    async fn send_correlated_bytes<const LEN: usize, RNG>(
+        &mut self,
+        count: usize,
+        correlation: impl Fn(usize, [u8; LEN]) -> [u8; LEN] + Send,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<[u8; LEN]>, Error<Self::Msg>>
+    where
+        RNG: RngCore + CryptoRng + Send,
+        [u8; LEN]: Pod;
 }
 
 /// OT extension receiver.
@@ -89,23 +103,40 @@ pub trait ExtROTSender {
 pub trait ExtROTReceiver {
     type Msg;
 
-    async fn receive_random<RNG>(
+    async fn receive_random<C, RNG>(
         &mut self,
-        choices: &BitSlice,
+        choices: &BitSlice<C>,
         rng: &mut RNG,
         sender: &mpc_channel::Sender<Self::Msg>,
         receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
-        RNG: RngCore + CryptoRng + Send;
+        RNG: RngCore + CryptoRng + Send,
+        C: Pod + BitStore + Sync,
+        <C as BitStore>::Unalias: Pod;
 
-    async fn receive_correlated<RNG>(
+    async fn receive_correlated<C, RNG>(
         &mut self,
-        choices: &BitSlice,
+        choices: &BitSlice<C>,
         rng: &mut RNG,
         sender: &mpc_channel::Sender<Self::Msg>,
         receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
-        RNG: RngCore + CryptoRng + Send;
+        RNG: RngCore + CryptoRng + Send,
+        C: Pod + BitStore + Sync,
+        <C as BitStore>::Unalias: Pod;
+
+    async fn receive_correlated_bytes<const LEN: usize, C, RNG>(
+        &mut self,
+        choices: &BitSlice<C>,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<[u8; LEN]>, Error<Self::Msg>>
+    where
+        RNG: RngCore + CryptoRng + Send,
+        [u8; LEN]: Pod,
+        C: Pod + BitStore + Sync,
+        <C as BitStore>::Unalias: Pod;
 }

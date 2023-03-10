@@ -5,26 +5,25 @@
 //! generates two random seeds and derives the MTs from them. The first party gets the first seed,
 //! while the second party receives the second seed and the `c` values for their MTs.
 //! For a visualization of the protocol, look at Figure 1 of the linked paper.
+use crate::common::BitVec;
+use crate::errors::MTProviderError;
+use crate::mul_triple::boolean::{compute_c_owned, MulTriples};
+use crate::mul_triple::MTProvider;
+use crate::utils::rand_bitvecs;
+use async_trait::async_trait;
+use futures::StreamExt;
+use mpc_channel::{BaseReceiver, BaseSender};
+use rand::{random, SeedableRng};
+use rand_chacha::ChaCha12Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
 use std::sync::Arc;
-
-use async_trait::async_trait;
-use futures::StreamExt;
-use rand::{random, SeedableRng};
-use rand_chacha::ChaCha12Rng;
-use serde::{Deserialize, Serialize};
 use tokio::net::ToSocketAddrs;
 use tokio::sync::Mutex;
 use tracing::error;
-
-use crate::common::BitVec;
-use crate::errors::MTProviderError;
-use crate::mul_triple::{compute_c_owned, MTProvider, MulTriples};
-use crate::utils::rand_bitvecs;
-use mpc_channel::{BaseReceiver, BaseSender};
 
 pub struct TrustedMTProviderClient {
     id: String,

@@ -12,7 +12,7 @@ use gmw::circuit::ExecutableCircuit;
 use gmw::circuit::GateId;
 use gmw::common::BitVec;
 use gmw::executor::{BoolGmwExecutor, Message};
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
 use gmw::CircuitBuilder;

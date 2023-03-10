@@ -1,14 +1,14 @@
 use crate::common::BitVec;
-use crate::mul_triple::{MTProvider, MulTriples};
+use crate::mul_triple::boolean::MulTriples;
+use crate::mul_triple::MTProvider;
+use crate::utils::rand_bitvec;
 use async_trait::async_trait;
 use num_integer::Integer;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use remoc::RemoteSend;
+use std::fmt::Debug;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
-
-use crate::utils::rand_bitvec;
-use std::fmt::Debug;
 
 pub struct OtMTProvider<RNG, S: ExtROTSender, R: ExtROTReceiver> {
     rng: RNG,
@@ -103,7 +103,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::mul_triple::boolean::ot_ext::OtMTProvider;
+    use crate::mul_triple::MTProvider;
     use crate::private_test_utils::init_tracing;
     use rand::rngs::OsRng;
     use zappot::ot_ext;

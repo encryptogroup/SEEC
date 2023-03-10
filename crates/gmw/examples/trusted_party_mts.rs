@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderServer;
+use gmw::mul_triple::boolean::trusted_seed_provider::TrustedMTProviderServer;
 
 /// Example usage of the `TrustedMTProviderServer`.
 #[derive(Parser, Debug)]

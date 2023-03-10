@@ -3,6 +3,7 @@ use gmw::circuit::{DefaultIdx, ExecutableCircuit};
 
 use gmw::common::BitVec;
 use gmw::private_test_utils::{execute_circuit, init_tracing, TestChannel};
+use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce};
 use gmw::{BooleanGate, CircuitBuilder};
 
@@ -26,7 +27,9 @@ async fn and_tree() -> Result<()> {
     let exp_output: BitVec = BitVec::repeat(true, 1);
     let and_tree: ExecutableCircuit<BooleanGate, DefaultIdx> =
         ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
-    let out = execute_circuit(&and_tree, [inputs_0, inputs_1], TestChannel::Tcp).await?;
+    let out =
+        execute_circuit::<BooleanGmw, _, _>(&and_tree, [inputs_0, inputs_1], TestChannel::Tcp)
+            .await?;
     assert_eq!(exp_output, out);
     Ok(())
 }
