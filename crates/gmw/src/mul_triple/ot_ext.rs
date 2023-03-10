@@ -54,25 +54,25 @@ where
 
         let amount = Integer::next_multiple_of(&amount, &8);
 
-        let (ch_sender1, ch_receiver1) =
+        let (ch_sender1, mut ch_receiver1) =
             mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
-        let (ch_sender2, ch_receiver2) =
+        let (ch_sender2, mut ch_receiver2) =
             mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
 
-        let send = self
-            .ot_sender
-            .send_random(amount, &mut sender_rng, ch_sender1, ch_receiver2);
+        let send =
+            self.ot_sender
+                .send_random(amount, &mut sender_rng, &ch_sender1, &mut ch_receiver2);
 
         let a_i = rand_bitvec(amount, &mut receiver_rng);
         let receive = self.ot_receiver.receive_random(
             a_i.as_bitslice(),
             &mut receiver_rng,
-            ch_sender2,
-            ch_receiver1,
+            &ch_sender2,
+            &mut ch_receiver1,
         );
 
         let (send_ots, recv_ots) = tokio::try_join!(send, receive).unwrap();

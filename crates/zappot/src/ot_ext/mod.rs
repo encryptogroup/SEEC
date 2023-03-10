@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::iter;
 
 pub struct Sender<BaseOT> {
     base_ot: BaseOT,
@@ -34,6 +35,7 @@ pub enum ExtOTMsg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
     #[serde(bound = "")]
     BaseOTChannel(mpc_channel::Receiver<BaseOTMsg>),
     URow(usize, Vec<u8>),
+    Correlated(Vec<Block>),
 }
 
 #[async_trait]
@@ -49,8 +51,8 @@ where
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        mut receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -66,7 +68,7 @@ where
                 .send(ExtOTMsg::BaseOTChannel(base_remote_receiver))
                 .await?;
             let msg = receiver.recv().await?.ok_or(Error::UnexpectedTermination)?;
-            let base_receiver = match msg {
+            let mut base_receiver = match msg {
                 ExtOTMsg::BaseOTChannel(receiver) => receiver,
                 _ => return Err(Error::WrongOrder(msg)),
             };
@@ -77,7 +79,7 @@ where
             };
             let base_ots = self
                 .base_ot
-                .receive_random(&rand_choices, rng, base_sender, base_receiver)
+                .receive_random(&rand_choices, rng, &base_sender, &mut base_receiver)
                 .await
                 .map_err(|err| Error::BaseOT(Box::new(err)))?;
             (base_ots, rand_choices)
@@ -140,6 +142,33 @@ where
         .await;
         Ok(ots)
     }
+
+    async fn send_correlated<RNG>(
+        &mut self,
+        count: usize,
+        correlation: impl Fn(usize, Block) -> Block + Send,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
+    where
+        RNG: RngCore + CryptoRng + Send,
+    {
+        let r_ot = self.send_random(count, rng, sender, receiver).await?;
+
+        let (ret, correlated) = r_ot
+            .into_iter()
+            .enumerate()
+            .map(|(idx, [ot0, ot1])| {
+                let correlated = ot1 ^ correlation(idx, ot0);
+                (ot0, correlated)
+            })
+            .unzip();
+        // TODO this sends a block for each c-ot, for an l bit c-ot with l < kappa,
+        //  this wastes communication
+        sender.send(ExtOTMsg::Correlated(correlated)).await?;
+        Ok(ret)
+    }
 }
 
 // fn assert_static<T: 'static>(val: &T) {}
@@ -157,8 +186,8 @@ where
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        mut receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -175,12 +204,12 @@ where
                 .send(ExtOTMsg::BaseOTChannel(base_remote_receiver))
                 .await?;
             let msg = receiver.recv().await?.ok_or(Error::UnexpectedTermination)?;
-            let base_receiver = match msg {
+            let mut base_receiver = match msg {
                 ExtOTMsg::BaseOTChannel(receiver) => receiver,
                 _ => return Err(Error::WrongOrder(msg)),
             };
             self.base_ot
-                .send_random(BASE_OT_COUNT, rng, base_sender, base_receiver)
+                .send_random(BASE_OT_COUNT, rng, &base_sender, &mut base_receiver)
                 .await
                 .map_err(|err| Error::BaseOT(Box::new(err)))?
         };
@@ -235,6 +264,26 @@ where
         .await;
         Ok(ots)
     }
+
+    async fn receive_correlated<RNG>(
+        &mut self,
+        choices: &BitSlice,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
+    where
+        RNG: RngCore + CryptoRng + Send,
+    {
+        let r_ot = self.receive_random(choices, rng, sender, receiver).await?;
+        let correlated = match receiver.recv().await? {
+            Some(ExtOTMsg::Correlated(correlated)) => correlated,
+            Some(other) => Err(Error::WrongOrder(other))?,
+            None => Err(Error::UnexpectedTermination)?,
+        };
+        let ret = iter::zip(r_ot, correlated).map(|(a, b)| a ^ b).collect();
+        Ok(ret)
+    }
 }
 
 impl<BaseOt> Sender<BaseOt> {
@@ -278,30 +327,59 @@ mod tests {
     use tokio::time::Instant;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn ot_ext() {
-        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
+    async fn random_ot_ext() {
+        let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(128);
         let num_ots: usize = 1000;
         let now = Instant::now();
         let send = tokio::spawn(async move {
             let mut sender = Sender::new(base_ot::Receiver {});
             let mut rng_send = StdRng::seed_from_u64(42);
             sender
-                .send_random(num_ots, &mut rng_send, ch1.0, ch1.1)
+                .send_random(num_ots, &mut rng_send, &ch1.0, &mut ch1.1)
                 .await
                 .unwrap()
         });
-        let choices = bitvec![usize, Lsb0; 0;num_ots];
+        let choices = bitvec![usize, Lsb0; 0; num_ots];
         let receive = tokio::spawn(async move {
             let mut receiver = Receiver::new(base_ot::Sender {});
             let mut rng_recv = StdRng::seed_from_u64(42 * 42);
             receiver
-                .receive_random(&choices, &mut rng_recv, ch2.0, ch2.1)
+                .receive_random(&choices, &mut rng_recv, &ch2.0, &mut ch2.1)
                 .await
                 .unwrap()
         });
         let (recv, sent) = tokio::try_join!(receive, send).unwrap();
         println!("Total time: {}", now.elapsed().as_secs_f32());
         for (r, [s, _]) in recv.into_iter().zip(sent) {
+            assert_eq!(r, s)
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn correlated_ot_ext() {
+        let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(128);
+        let num_ots: usize = 1000;
+        let now = Instant::now();
+        let send = tokio::spawn(async move {
+            let mut sender = Sender::new(base_ot::Receiver {});
+            let mut rng_send = StdRng::seed_from_u64(42);
+            sender
+                .send_correlated(num_ots, |i, x| x, &mut rng_send, &ch1.0, &mut ch1.1)
+                .await
+                .unwrap()
+        });
+        let choices = bitvec![usize, Lsb0; 1; num_ots];
+        let receive = tokio::spawn(async move {
+            let mut receiver = Receiver::new(base_ot::Sender {});
+            let mut rng_recv = StdRng::seed_from_u64(42 * 42);
+            receiver
+                .receive_correlated(&choices, &mut rng_recv, &ch2.0, &mut ch2.1)
+                .await
+                .unwrap()
+        });
+        let (recv, sent) = tokio::try_join!(receive, send).unwrap();
+        println!("Total time: {}", now.elapsed().as_secs_f32());
+        for (r, s) in recv.into_iter().zip(sent) {
             assert_eq!(r, s)
         }
     }

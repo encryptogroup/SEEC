@@ -33,8 +33,8 @@ pub trait BaseROTSender {
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
@@ -50,8 +50,8 @@ pub trait BaseROTReceiver {
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
@@ -66,9 +66,20 @@ pub trait ExtROTSender {
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
+    where
+        RNG: RngCore + CryptoRng + Send;
+
+    async fn send_correlated<RNG>(
+        &mut self,
+        count: usize,
+        correlation: impl Fn(usize, Block) -> Block + Send,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
 }
@@ -82,15 +93,19 @@ pub trait ExtROTReceiver {
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+    ) -> Result<Vec<Block>, Error<Self::Msg>>
+    where
+        RNG: RngCore + CryptoRng + Send;
+
+    async fn receive_correlated<RNG>(
+        &mut self,
+        choices: &BitSlice,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
 }
-
-// impl<Msg, Ch: Channel<Msg>> Debug for Error<Msg, Ch> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         f.debug_tuple("test").finish()
-//     }
-// }

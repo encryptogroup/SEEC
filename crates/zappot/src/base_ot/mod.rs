@@ -49,8 +49,8 @@ impl BaseROTSender for Sender {
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        mut receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -110,8 +110,8 @@ impl BaseROTReceiver for Receiver {
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Self::Msg>,
-        mut receiver: mpc_channel::Receiver<Self::Msg>,
+        sender: &mpc_channel::Sender<Self::Msg>,
+        receiver: &mut mpc_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -185,14 +185,14 @@ mod tests {
 
     #[tokio::test]
     async fn base_rot() {
-        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
+        let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(128);
         let mut rng_send = StdRng::seed_from_u64(42);
         let mut rng_recv = StdRng::seed_from_u64(42 * 42);
         let mut sender = Sender;
         let mut receiver = Receiver;
-        let send = sender.send_random(128, &mut rng_send, ch1.0, ch1.1);
+        let send = sender.send_random(128, &mut rng_send, &ch1.0, &mut ch1.1);
         let choices = bitvec![0;128];
-        let receive = receiver.receive_random(&choices, &mut rng_recv, ch2.0, ch2.1);
+        let receive = receiver.receive_random(&choices, &mut rng_recv, &ch2.0, &mut ch2.1);
 
         let (sender_out, receiver_out) = tokio::try_join!(send, receive).unwrap();
         for (recv, [send, _]) in receiver_out.into_iter().zip(sender_out) {
