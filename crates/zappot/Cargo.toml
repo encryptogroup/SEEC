@@ -42,7 +42,7 @@ remoc = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.3.5", features = ["async_tokio"]}
-clap = { version = "3.2.8", features = ["derive"]}
+clap = { workspace = true }
 tokio = { version = "1.18.2", features = ["full"]}
 ocelot = { git = "https://github.com/GaloisInc/swanky.git" }
 scuttlebutt = { git = "https://github.com/GaloisInc/swanky.git" }

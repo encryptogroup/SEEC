@@ -1,14 +1,14 @@
 use crate::circuit::base_circuit::BaseGate;
-use crate::circuit::{DefaultIdx, GateIdx};
+use crate::circuit::{DefaultIdx, ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
-use crate::executor::Executor;
+use crate::executor::{Executor, GateOutputs, ScGateOutputs};
 use crate::mul_triple::{MTProvider, MulTriples};
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
     boolean_gmw, FunctionDependentSetup, Gate, Protocol, ScalarDim, SetupStorage, ShareStorage,
 };
 use crate::secret::Secret;
-use crate::{bristol, Circuit, CircuitBuilder};
+use crate::{bristol, executor, CircuitBuilder};
 use ahash::AHashMap;
 use async_trait::async_trait;
 use rand::{Rng, SeedableRng};
@@ -45,7 +45,7 @@ pub struct Share {
     private: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq)]
 pub struct DeltaShareStorage {
     public: BitVec,
     private: BitVec,
@@ -68,7 +68,7 @@ pub enum BooleanGate {
 
 /// Contains preprocessing data ([\delta_ab]_i for interactive gates in
 /// **reverse** topological order. This is needed to evaluate interactive gates.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SetupData {
     eval_shares: Vec<EvalShares>,
 }
@@ -86,7 +86,7 @@ impl BooleanAby2 {
     }
 }
 
-pub type AbySetupMsg = boolean_gmw::Msg;
+pub type AbySetupMsg = executor::Message<BooleanGmw>;
 
 pub struct AbySetupProvider<Mtp> {
     party_id: usize,
@@ -96,7 +96,9 @@ pub struct AbySetupProvider<Mtp> {
 }
 
 impl Protocol for BooleanAby2 {
+    const SIMD_SUPPORT: bool = false;
     type Msg = Msg;
+    type SimdMsg = ();
     type Gate = BooleanGate;
     type Wire = ();
     type ShareStorage = DeltaShareStorage;
@@ -105,18 +107,17 @@ impl Protocol for BooleanAby2 {
     fn compute_msg(
         &self,
         party_id: usize,
-        interactive_gates: impl IntoIterator<Item = (BooleanGate, Share)>,
-        inputs: impl IntoIterator<Item = Share>,
-        preprocessing_data: &SetupData,
+        interactive_gates: impl Iterator<Item = BooleanGate>,
+        gate_outputs: impl Iterator<Item = Share>,
+        mut inputs: impl Iterator<Item = Share>,
+        preprocessing_data: &mut SetupData,
     ) -> Self::Msg {
-        let mut inputs = inputs.into_iter();
-        let mut preprocessing_data = preprocessing_data.clone();
         let delta: BitVec = interactive_gates
-            .into_iter()
+            .zip(gate_outputs)
             .map(|(gate, output)| {
                 assert!(matches!(gate, BooleanGate::And2));
                 let inputs = inputs.by_ref().take(gate.input_size());
-                gate.compute_delta_share(party_id, inputs, &mut preprocessing_data, output)
+                gate.compute_delta_share(party_id, inputs, preprocessing_data, output)
             })
             .collect();
         Msg::Delta {
@@ -127,41 +128,41 @@ impl Protocol for BooleanAby2 {
     fn evaluate_interactive(
         &self,
         _party_id: usize,
-        interactive_gates: impl IntoIterator<Item = (BooleanGate, Share)>,
+        _interactive_gates: impl Iterator<Item = BooleanGate>,
+        gate_outputs: impl Iterator<Item = Share>,
         Msg::Delta { delta }: Msg,
         Msg::Delta { delta: other_delta }: Msg,
-        _preprocessing_data: SetupData,
+        _preprocessing_data: &mut SetupData,
     ) -> Self::ShareStorage {
         let delta = BitVec::from_vec(delta);
         let other_delta = BitVec::from_vec(other_delta);
-        interactive_gates
-            .into_iter()
+        gate_outputs
             .zip(delta)
             .zip(other_delta)
-            .map(|(((_gate, mut out_share), my_delta), other_delta)| {
+            .map(|((mut out_share, my_delta), other_delta)| {
                 out_share.public = my_delta ^ other_delta;
                 out_share
             })
             .collect()
     }
 
-    // TODO I think this needs a &self for access to seeded rng's
     fn setup_gate_outputs<Idx: GateIdx>(
         &mut self,
         _party_id: usize,
-        circuit: &Circuit<Self::Gate, Idx>,
-    ) -> Vec<Self::ShareStorage> {
-        let mut storage: Vec<_> = circuit
-            .circuits
-            .iter()
+        circuit: &ExecutableCircuit<Self::Gate, Idx>,
+    ) -> GateOutputs<Self::ShareStorage> {
+        let storage: Vec<_> = circuit
+            .gate_counts()
             // Okay to use the default value, as they will be overwritten in the next step
-            .map(|base_circ| DeltaShareStorage::repeat(Default::default(), base_circ.gate_count()))
+            .map(|(gate_count, simd_size)| {
+                assert_eq!(None, simd_size, "SIMD not supported for ABY2 protocol");
+                ScGateOutputs::Scalar(DeltaShareStorage::repeat(Default::default(), gate_count))
+            })
             .collect();
+        let mut storage = GateOutputs::new(storage);
 
-        for (gate, sc_gate_id) in circuit.iter() {
-            let gate_input_iter = circuit
-                .parent_gates(sc_gate_id)
-                .map(|parent| storage[parent.circuit_id as usize].get(parent.gate_id.as_usize()));
+        for (gate, sc_gate_id, parents) in circuit.iter_with_parents() {
+            let gate_input_iter = parents.map(|parent| storage.get(parent));
             let rng = match self
                 .delta_sharing_state
                 .input_position_share_type_map
@@ -173,7 +174,7 @@ impl Protocol for BooleanAby2 {
                 Some(ShareType::Remote) => &mut self.delta_sharing_state.remote_joint_rng,
             };
             let output = gate.setup_output_share(gate_input_iter, rng);
-            storage[sc_gate_id.circuit_id as usize].set(sc_gate_id.gate_id.as_usize(), output);
+            storage.set(sc_gate_id, output);
         }
 
         storage
@@ -228,8 +229,12 @@ impl BooleanGate {
                 }
                 BaseGate::Output(_)
                 | BaseGate::SubCircuitInput(_)
-                | BaseGate::SubCircuitOutput(_) => inputs.next().expect("Empty input"),
+                | BaseGate::SubCircuitOutput(_)
+                | BaseGate::ConnectToMain(_) => inputs.next().expect("Empty input"),
                 BaseGate::Constant(_) => todo!(),
+                BaseGate::ConnectToMainFromSimd(_) => {
+                    unimplemented!("SIMD currently not supported for ABY2")
+                }
             },
             BooleanGate::And2 => {
                 // input is not actually needed at this stage
@@ -325,22 +330,21 @@ impl Gate for BooleanGate {
     fn evaluate_non_interactive(
         &self,
         party_id: usize,
-        inputs: impl IntoIterator<Item = Self::Share>,
+        mut inputs: impl Iterator<Item = Self::Share>,
     ) -> Self::Share {
-        let mut input = inputs.into_iter();
         match self {
-            BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, input.by_ref()),
+            BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, inputs.by_ref()),
             BooleanGate::And2 | BooleanGate::And3 | BooleanGate::And4 => {
                 panic!("Called evaluate_non_interactive on Gate::And<N>")
             }
             BooleanGate::Xor => {
-                let a = input.next().expect("Empty input");
-                let b = input.next().expect("Empty input");
+                let a = inputs.next().expect("Empty input");
+                let b = inputs.next().expect("Empty input");
                 // TODO change this
                 a.xor(b)
             }
             BooleanGate::Inv => {
-                let inp = input.next().expect("Empty input");
+                let inp = inputs.next().expect("Empty input");
                 if party_id == 0 {
                     !inp
                 } else {
@@ -349,6 +353,16 @@ impl Gate for BooleanGate {
             }
         }
     }
+}
+
+impl Default for Msg {
+    fn default() -> Self {
+        Msg::Delta { delta: vec![] }
+    }
+}
+
+impl super::Share for Share {
+    type SimdShare = DeltaShareStorage;
 }
 
 impl From<BaseGate<Share>> for BooleanGate {
@@ -461,6 +475,10 @@ impl SetupData {
 }
 
 impl SetupStorage for SetupData {
+    fn len(&self) -> usize {
+        self.eval_shares.len()
+    }
+
     fn split_off_last(&mut self, count: usize) -> Self {
         Self {
             eval_shares: self.eval_shares.split_off(self.len() - count),
@@ -590,41 +608,35 @@ where
 
     async fn setup(
         &mut self,
-        shares: &[DeltaShareStorage],
-        circuit: &Circuit<BooleanGate, usize>,
+        shares: &GateOutputs<DeltaShareStorage>,
+        circuit: &ExecutableCircuit<BooleanGate, usize>,
     ) -> Result<Self::Output, Self::Error> {
         let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate> = CircuitBuilder::new();
         let old = circ_builder.install();
-        let total_inputs = circuit
+        let total_inputs: usize = circuit
             .interactive_iter()
             .map(|(gate, _)| 2_usize.pow(gate.input_size() as u32))
             .sum();
 
-        let mut circ_inputs = BitVec::with_capacity(total_inputs);
+        let mut circ_inputs = BitVec::<usize>::with_capacity(total_inputs);
         // Block is needed as otherwise !Send types are held over .await
         let setup_outputs: Vec<Vec<_>> = {
             let mut input_sw_map: AHashMap<_, Secret> = AHashMap::with_capacity(total_inputs);
             let mut setup_outputs = Vec::with_capacity(circuit.interactive_count());
             let mut setup_sub_circ_cache = AHashMap::with_capacity(total_inputs);
-            for (gate, gate_id) in circuit.interactive_iter() {
+            for (gate, _gate_id, parents) in circuit.interactive_with_parents_iter() {
                 let mut gate_input_shares = vec![];
-                circuit
-                    .parent_gates(gate_id)
-                    .for_each(|parent| match input_sw_map.entry(parent) {
-                        Entry::Vacant(vacant) => {
-                            let sh = Secret::input(0);
-                            gate_input_shares.push(sh.clone());
-                            circ_inputs.push(
-                                shares[parent.circuit_id as usize]
-                                    .get(parent.gate_id.as_usize())
-                                    .get_private(),
-                            );
-                            vacant.insert(sh);
-                        }
-                        Entry::Occupied(occupied) => {
-                            gate_input_shares.push(occupied.get().clone());
-                        }
-                    });
+                parents.for_each(|parent| match input_sw_map.entry(parent) {
+                    Entry::Vacant(vacant) => {
+                        let sh = Secret::input(0);
+                        gate_input_shares.push(sh.clone());
+                        circ_inputs.push(shares.get(parent).get_private());
+                        vacant.insert(sh);
+                    }
+                    Entry::Occupied(occupied) => {
+                        gate_input_shares.push(occupied.get().clone());
+                    }
+                });
                 gate_input_shares.sort();
 
                 let t = gate.setup_data_circ(gate_input_shares.iter(), &mut setup_sub_circ_cache);
@@ -636,8 +648,8 @@ where
                 .collect()
         };
 
-        let setup_data_circ: Circuit<boolean_gmw::BooleanGate> =
-            CircuitBuilder::global_into_circuit();
+        let setup_data_circ: ExecutableCircuit<boolean_gmw::BooleanGate, _> =
+            ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
         old.install();
         let mut executor: Executor<BooleanGmw, DefaultIdx> =
             Executor::new(&setup_data_circ, self.party_id, &mut self.mt_provider)
@@ -647,7 +659,10 @@ where
             .execute(circ_inputs, &mut self.sender, &mut self.receiver)
             .await
             .unwrap();
-        let executor_gate_outputs = &executor.gate_outputs()[0]; // not using sc's
+        let ScGateOutputs::Scalar(executor_gate_outputs) = executor.gate_outputs().get_sc(0) else {
+            panic!("SIMD not supported for ABY2");
+        };
+
         let eval_shares = circuit
             .interactive_iter()
             .zip(setup_outputs)

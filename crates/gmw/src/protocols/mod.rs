@@ -1,21 +1,29 @@
 use crate::circuit::base_circuit::BaseGate;
-use crate::circuit::GateIdx;
+use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::{BitSlice, BitVec};
-use crate::Circuit;
+use crate::executor::{GateOutputs, ScGateOutputs};
 use async_trait::async_trait;
+use bitvec::store::BitStore;
 use remoc::RemoteSend;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem;
 
 pub mod aby2;
 pub mod boolean_gmw;
 pub mod tensor_aby2;
 
-pub trait Protocol {
+pub type ShareOf<Gate> = <Gate as self::Gate>::Share;
+pub type SimdShareOf<Gate> = <ShareOf<Gate> as Share>::SimdShare;
+
+pub trait Protocol: Send + Sync {
+    const SIMD_SUPPORT: bool = false;
     type Msg: RemoteSend + Clone;
+    type SimdMsg: RemoteSend + Clone;
     type Gate: Gate;
     type Wire;
-    type ShareStorage: ShareStorage<<Self::Gate as Gate>::Share>;
+    type ShareStorage: ShareStorage<ShareOf<Self::Gate>>;
     /// The type which provides the data needed to evaluate interactive gate.
     /// In the case of normal GMW, this data is multiplication triples.
     type SetupStorage: SetupStorage;
@@ -23,36 +31,73 @@ pub trait Protocol {
     fn compute_msg(
         &self,
         party_id: usize,
-        interactive_gates: impl IntoIterator<Item = (Self::Gate, <Self::Gate as Gate>::Share)>,
-        inputs: impl IntoIterator<Item = <Self::Gate as Gate>::Share>,
-        preprocessing_data: &Self::SetupStorage,
+        interactive_gates: impl Iterator<Item = Self::Gate>,
+        gate_outputs: impl Iterator<Item = ShareOf<Self::Gate>>,
+        inputs: impl Iterator<Item = ShareOf<Self::Gate>>,
+        preprocessing_data: &mut Self::SetupStorage,
     ) -> Self::Msg;
+
+    fn compute_msg_simd<'e>(
+        &self,
+        _party_id: usize,
+        _interactive_gates: impl Iterator<Item = Self::Gate>,
+        _gate_outputs: impl Iterator<Item = &'e SimdShareOf<Self::Gate>>,
+        _inputs: impl Iterator<Item = &'e SimdShareOf<Self::Gate>>,
+        _preprocessing_data: &mut Self::SetupStorage,
+    ) -> Self::SimdMsg {
+        unimplemented!("SIMD evaluation not implemented for this protocol")
+    }
 
     fn evaluate_interactive(
         &self,
         party_id: usize,
-        interactive_gates: impl IntoIterator<Item = (Self::Gate, <Self::Gate as Gate>::Share)>,
+        interactive_gates: impl Iterator<Item = Self::Gate>,
+        gate_outputs: impl Iterator<Item = ShareOf<Self::Gate>>,
         own_msg: Self::Msg,
         other_msg: Self::Msg,
-        preprocessing_data: Self::SetupStorage,
+        preprocessing_data: &mut Self::SetupStorage,
     ) -> Self::ShareStorage;
+
+    fn evaluate_interactive_simd<'e>(
+        &self,
+        _party_id: usize,
+        _interactive_gates: impl Iterator<Item = Self::Gate>,
+        _gate_outputs: impl Iterator<Item = &'e SimdShareOf<Self::Gate>>,
+        _own_msg: Self::SimdMsg,
+        _other_msg: Self::SimdMsg,
+        _preprocessing_data: &mut Self::SetupStorage,
+    ) -> Vec<Self::ShareStorage> {
+        unimplemented!("SIMD evaluation not implemented for this protocol")
+    }
 
     // TODO i'm not sure if party_id is needed here
     fn setup_gate_outputs<Idx: GateIdx>(
         &mut self,
         _party_id: usize,
-        circuit: &Circuit<Self::Gate, Idx>,
-    ) -> Vec<Self::ShareStorage> {
-        circuit
-            .circuits
-            .iter()
-            .map(|base_circ| Self::ShareStorage::repeat(Default::default(), base_circ.gate_count()))
-            .collect()
+        circuit: &ExecutableCircuit<Self::Gate, Idx>,
+    ) -> GateOutputs<Self::ShareStorage> {
+        let data = circuit
+            .gate_counts()
+            .map(|(count, simd_size)| match simd_size {
+                None => {
+                    ScGateOutputs::Scalar(Self::ShareStorage::repeat(Default::default(), count))
+                }
+                Some(simd_size) => ScGateOutputs::Simd(vec![
+                    // TODO: Default here instead of allocating?
+                    Self::ShareStorage::repeat(
+                        Default::default(),
+                        simd_size.get()
+                    );
+                    count
+                ]),
+            })
+            .collect();
+        GateOutputs::new(data)
     }
 }
 
-pub trait Gate: Clone + Hash + Ord + PartialEq + Eq + Send + Sync + Debug + 'static {
-    type Share: Clone + Default + Debug + PartialEq + Eq;
+pub trait Gate: Clone + Hash + PartialOrd + PartialEq + Send + Sync + Debug + 'static {
+    type Share: Share;
     type DimTy: Dimension;
 
     fn is_interactive(&self) -> bool;
@@ -66,12 +111,30 @@ pub trait Gate: Clone + Hash + Ord + PartialEq + Eq + Send + Sync + Debug + 'sta
     fn evaluate_non_interactive(
         &self,
         party_id: usize,
-        inputs: impl IntoIterator<Item = Self::Share>,
+        inputs: impl Iterator<Item = Self::Share>,
     ) -> Self::Share;
+
+    fn evaluate_non_interactive_simd<'e>(
+        &self,
+        party_id: usize,
+        inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
+    ) -> <Self::Share as Share>::SimdShare {
+        let inputs: Vec<_> = inputs.collect();
+        let simd_len = inputs.first().map(|v| v.len()).unwrap_or(0);
+        (0..simd_len)
+            .map(|idx| self.evaluate_non_interactive(party_id, inputs.iter().map(|v| v.get(idx))))
+            .collect()
+    }
 
     fn is_non_interactive(&self) -> bool {
         !self.is_interactive()
     }
+}
+
+pub trait Share:
+    Clone + Default + Debug + PartialEq + PartialOrd + Hash + Send + Sync + 'static
+{
+    type SimdShare: ShareStorage<Self> + Clone + Default + Debug + PartialEq + PartialOrd + Hash;
 }
 
 pub trait Wire: Clone + Debug + Send + Sync + 'static {}
@@ -79,7 +142,7 @@ pub trait Wire: Clone + Debug + Send + Sync + 'static {}
 impl<W: Clone + Debug + Send + Sync + 'static> Wire for W {}
 
 pub trait ShareStorage<Share>:
-    IntoIterator<Item = Share> + FromIterator<Share> + Clone + Default + Debug
+    IntoIterator<Item = Share> + FromIterator<Share> + Clone + Default + Debug + Send + Sync
 {
     fn len(&self) -> usize;
     fn repeat(val: Share, len: usize) -> Self;
@@ -91,7 +154,7 @@ pub trait ShareStorage<Share>:
     }
 }
 
-impl ShareStorage<bool> for BitVec {
+impl<T: BitStore> ShareStorage<bool> for BitVec<T> {
     fn len(&self) -> usize {
         BitVec::len(self)
     }
@@ -109,9 +172,20 @@ impl ShareStorage<bool> for BitVec {
     }
 }
 
-pub trait SetupStorage {
+pub trait SetupStorage: Default + Sized + Send + Sync {
+    fn len(&self) -> usize;
     /// Split of the last `count` mul triples.
     fn split_off_last(&mut self, count: usize) -> Self;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Removes the first `count` elements from self and returns them.
+    fn remove_first(&mut self, count: usize) -> Self {
+        let removed = self.split_off_last(self.len() - count);
+        mem::replace(self, removed)
+    }
 }
 
 pub trait Sharing {
@@ -142,12 +216,12 @@ pub trait FunctionDependentSetup<ShareStorage, G, Idx> {
 
     async fn setup(
         &mut self,
-        shares: &[ShareStorage],
-        circuit: &Circuit<G, Idx>,
+        shares: &GateOutputs<ShareStorage>,
+        circuit: &ExecutableCircuit<G, Idx>,
     ) -> Result<Self::Output, Self::Error>;
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct ScalarDim;
 
 impl Dimension for ScalarDim {

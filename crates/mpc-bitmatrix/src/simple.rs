@@ -9,7 +9,7 @@ use std::mem;
 pub(crate) fn transpose<T: Storage + BitStore>(input: &[T], rows: usize, cols: usize) -> Vec<T> {
     assert_eq!(
         rows * cols,
-        input.len() * mem::size_of::<T>() * 8,
+        mem::size_of_val(input) * 8,
         "input has wrong length"
     );
     let input = input.view_bits::<Lsb0>();

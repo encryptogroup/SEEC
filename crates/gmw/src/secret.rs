@@ -39,10 +39,6 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
     }
 
     /// Note: Do not use while holding mutable borrow of self.circuit as it will panic!
-    /// TODO: This method is currently broken if const is true, as no sharing of the constant is
-    ///     done. Doing this would require the party_id of the party constructing the circuit.
-    ///     But for testing purposes, I want to have the same circuit for a party...
-    ///     Maybe I should just add communication for the const gate, there I have the party id
     pub fn from_const(circuit_id: CircuitId, constant: bool) -> Self {
         let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
             panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
@@ -85,14 +81,18 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
         Self::from_parts(self.circuit_id, output_of)
     }
 
-    /// Consumes this Secret and constructs a `Gate::Output` in the circuit with its value
-    pub fn output(self) -> GateId<Idx> {
+    /// Constructs a `Gate::Output` in the circuit with this secret's value
+    pub fn output(&self) -> GateId<Idx> {
         let circuit = self.get_circuit();
         let mut circuit = circuit.lock();
         circuit.add_wired_gate(
             BooleanGate::Base(BaseGate::Output(ScalarDim)),
             &[self.output_of],
         )
+    }
+
+    pub fn into_output(self) -> GateId<Idx> {
+        self.output()
     }
 
     pub fn connect_to_main_circuit(self) -> Self {
@@ -363,7 +363,7 @@ pub(crate) fn sub_circuit_inputs<Idx: GateIdx>(
 }
 
 /// Reduce the slice of Secrets with the provided operation. The operation can be a closure
-/// or simply one of the operations implemented on [`Secret`]s, like [`std::ops::BitAnd`].  
+/// or simply one of the operations implemented on [`Secret`]s, like [`BitAnd`].  
 /// The circuit will be constructed such that the depth is minimal.
 ///
 /// ```rust

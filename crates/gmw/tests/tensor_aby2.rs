@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use gmw::circuit::base_circuit::BaseGate;
-use gmw::circuit::BaseCircuit;
-use gmw::executor::Executor;
+use gmw::circuit::{BaseCircuit, ExecutableCircuit};
+use gmw::executor::{Executor, GateOutputs};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::tensor_aby2::{
-    AbySetupProvider, BooleanAby2, BooleanGate, DeltaShareStorage, DeltaSharing, PartialShare,
+    AbySetupProvider, BoolTensorAby2, BooleanGate, DeltaShareStorage, DeltaSharing, PartialShare,
     SetupData, ShareType, TensorGate,
 };
 use gmw::protocols::{DynDim, FunctionDependentSetup, Protocol};
@@ -21,14 +21,15 @@ struct MockSetupProvider {
 }
 
 impl MockSetupProvider {
-    fn new(party_id: usize, shares: &[Vec<DeltaShareStorage>]) -> Self {
+    fn new(party_id: usize, shares: &[GateOutputs<DeltaShareStorage>]) -> Self {
         let shares = shares[0]
             .iter()
-            .zip(&shares[1])
+            .zip(shares[1].iter())
             .map(|(a, b)| {
-                a.clone()
-                    .into_iter()
-                    .zip(b.clone())
+                let a = a.as_scalar().unwrap().clone();
+                let b = b.as_scalar().unwrap().clone();
+                a.into_iter()
+                    .zip(b)
                     .map(|(a, b)| a.get_private() ^ b.get_private())
                     .collect()
             })
@@ -44,15 +45,13 @@ impl FunctionDependentSetup<DeltaShareStorage, BooleanGate, usize> for MockSetup
 
     async fn setup(
         &mut self,
-        _shares: &[DeltaShareStorage],
-        circuit: &Circuit<BooleanGate, usize>,
+        _shares: &GateOutputs<DeltaShareStorage>,
+        circuit: &ExecutableCircuit<BooleanGate, usize>,
     ) -> Result<Self::Output, Self::Error> {
         let res = circuit
-            .interactive_iter()
-            .map(|(gate, gate_id)| {
-                let mut gate_inp: Vec<_> = circuit
-                    // TODO order of parent gates is relevant for some gate types!
-                    .parent_gates(gate_id)
+            .interactive_with_parents_iter()
+            .map(|(gate, _gate_id, parents)| {
+                let mut gate_inp: Vec<_> = parents
                     .map(|parent| {
                         self.shares[parent.circuit_id as usize]
                             .get(parent.gate_id.as_usize())
@@ -84,7 +83,7 @@ impl FunctionDependentSetup<DeltaShareStorage, BooleanGate, usize> for MockSetup
 #[tokio::test]
 async fn simple_matmul() -> anyhow::Result<()> {
     let _guard = init_tracing();
-    let circ = build_circ();
+    let circ = ExecutableCircuit::DynLayers(build_circ());
     let mut rng = ChaChaRng::seed_from_u64(4269);
     let priv_seed1 = rng.gen();
     let priv_seed2 = rng.gen(); //rng.gen();
@@ -102,8 +101,8 @@ async fn simple_matmul() -> anyhow::Result<()> {
     dbg!(&share_map1);
     let mut sharing_state1 = DeltaSharing::new(priv_seed1, joint_seed1, joint_seed2, share_map1);
     let mut sharing_state2 = DeltaSharing::new(priv_seed2, joint_seed2, joint_seed1, share_map2);
-    let state1 = BooleanAby2::new(sharing_state1.clone());
-    let state2 = BooleanAby2::new(sharing_state2.clone());
+    let state1 = BoolTensorAby2::new(sharing_state1.clone());
+    let state2 = BoolTensorAby2::new(sharing_state2.clone());
 
     let (ch1, ch2) = mpc_channel::in_memory::new_pair(16);
     let delta_provider1 = AbySetupProvider::new(0, InsecureMTProvider, ch1.0, ch1.1);
@@ -115,7 +114,7 @@ async fn simple_matmul() -> anyhow::Result<()> {
     let mut mock_delta_provider1 = MockSetupProvider::new(0, &gate_output[..]);
     let mut mock_delta_provider2 = MockSetupProvider::new(1, &gate_output[..]);
 
-    let (mut ex1, mut ex2): (Executor<BooleanAby2, _>, Executor<BooleanAby2, _>) =
+    let (mut ex1, mut ex2): (Executor<BoolTensorAby2, _>, Executor<BoolTensorAby2, _>) =
         tokio::try_join!(
             Executor::new_with_state(state1, &circ, 0, delta_provider1),
             Executor::new_with_state(state2, &circ, 1, delta_provider2)

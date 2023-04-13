@@ -15,7 +15,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use crate::circuit::base_circuit::{BaseGate, Load};
-use crate::circuit::Circuit;
+use crate::circuit::ExecutableCircuit;
 use crate::circuit::{BaseCircuit, BooleanGate, GateIdx};
 use crate::common::BitVec;
 use crate::executor::Executor;
@@ -72,20 +72,20 @@ pub enum TestChannel {
 }
 
 pub trait IntoShares {
-    fn into_shares(self) -> (BitVec, BitVec)
+    fn into_shares(self) -> (BitVec<usize>, BitVec<usize>)
     where
         bitvec::slice::BitSlice<u8, Lsb0>: BitField;
 }
 
 pub trait IntoInput {
-    fn into_input(self) -> (BitVec, BitVec);
+    fn into_input(self) -> (BitVec<usize>, BitVec<usize>);
 }
 
 macro_rules! impl_into_shares {
     ($($typ:ty),+) => {
         $(
             impl IntoShares for $typ {
-                fn into_shares(self) -> (BitVec, BitVec) {
+                fn into_shares(self) -> (BitVec<usize>, BitVec<usize>) {
                     // TODO use pseudo random sharing (with fixed seed)
                     let a = vec::BitVec::repeat(false, <$typ>::BITS as usize);
                     let mut b = a.clone();
@@ -100,7 +100,7 @@ macro_rules! impl_into_shares {
 impl_into_shares!(u8, u16, u32, u64, u128);
 
 impl IntoShares for bool {
-    fn into_shares(self) -> (BitVec, BitVec)
+    fn into_shares(self) -> (BitVec<usize>, BitVec<usize>)
     where
         BitSlice<u8, Lsb0>: BitField,
     {
@@ -111,19 +111,19 @@ impl IntoShares for bool {
 }
 
 impl<T: IntoShares> IntoInput for T {
-    fn into_input(self) -> (BitVec, BitVec) {
+    fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
         self.into_shares()
     }
 }
 
 impl<T: IntoShares> IntoInput for (T,) {
-    fn into_input(self) -> (BitVec, BitVec) {
+    fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
         self.0.into_shares()
     }
 }
 
 impl<T1: IntoShares, T2: IntoShares> IntoInput for (T1, T2) {
-    fn into_input(self) -> (BitVec, BitVec) {
+    fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
         let (mut p1, mut p2) = self.0.into_shares();
         let mut second_input = self.1.into_shares();
         p1.append(&mut second_input.0);
@@ -133,8 +133,8 @@ impl<T1: IntoShares, T2: IntoShares> IntoInput for (T1, T2) {
 }
 
 /// This is kind of cursed...
-impl IntoInput for [BitVec; 2] {
-    fn into_input(self) -> (BitVec, BitVec) {
+impl IntoInput for [BitVec<usize>; 2] {
+    fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
         let [a, b] = self;
         (a, b)
     }
@@ -145,23 +145,24 @@ pub async fn execute_bristol<I: IntoInput>(
     bristol_file: impl AsRef<Path> + Debug,
     inputs: I,
     channel: TestChannel,
-) -> Result<BitVec> {
+) -> Result<BitVec<usize>> {
     let path = bristol_file.as_ref().to_path_buf();
     let now = Instant::now();
-    let circuit = spawn_blocking(move || BaseCircuit::load_bristol(path, Load::Circuit)).await??;
+    let bc = spawn_blocking(move || BaseCircuit::load_bristol(path, Load::Circuit)).await??;
     info!(
         parsing_time = %now.elapsed().as_millis(),
         "Parsing bristol time (ms)"
     );
-    execute_circuit(&circuit.into(), inputs, channel).await
+    let circuit = ExecutableCircuit::DynLayers(bc.into());
+    execute_circuit(&circuit, inputs, channel).await
 }
 
 #[tracing::instrument(skip(circuit, inputs))]
 pub async fn execute_circuit<Idx: GateIdx>(
-    circuit: &Circuit<BooleanGate, Idx>,
+    circuit: &ExecutableCircuit<BooleanGate, Idx>,
     inputs: impl IntoInput,
     channel: TestChannel,
-) -> Result<BitVec> {
+) -> Result<BitVec<usize>> {
     let mt_provider = InsecureMTProvider::default();
     let (input_a, input_b) = inputs.into_input();
     let mut ex1: Executor<BooleanGmw, Idx> = Executor::new(circuit, 0, mt_provider.clone())

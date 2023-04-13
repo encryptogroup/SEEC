@@ -1,6 +1,7 @@
 use gmw::common::BitVec;
 use gmw::executor::Executor;
 
+use gmw::circuit::ExecutableCircuit;
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::aby2::{AbySetupProvider, BooleanAby2, DeltaSharing, ShareType};
@@ -10,7 +11,9 @@ use rand::{thread_rng, Rng};
 #[tokio::test(flavor = "multi_thread")]
 async fn eval_8_bit_adder() -> anyhow::Result<()> {
     let _guard = init_tracing();
-    let circ = Circuit::load_bristol("test_resources/bristol-circuits/int_add8_depth.bristol")?;
+    let circ = ExecutableCircuit::DynLayers(Circuit::load_bristol(
+        "test_resources/bristol-circuits/int_add8_depth.bristol",
+    )?);
 
     let priv_seed1 = thread_rng().gen();
     let priv_seed2 = thread_rng().gen();

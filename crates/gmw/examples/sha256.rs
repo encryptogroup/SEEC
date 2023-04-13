@@ -14,14 +14,13 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::base_circuit::Load;
-use gmw::circuit::BaseCircuit;
+use gmw::circuit::{BaseCircuit, ExecutableCircuit};
 use gmw::common::BitVec;
-use gmw::executor::Executor;
+use gmw::executor::{Executor, Message};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
 use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
-use gmw::protocols::boolean_gmw;
 use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::{BooleanGate, Circuit};
+use gmw::BooleanGate;
 use mpc_channel::sub_channels_for;
 use mpc_channel::util::{Phase, Statistics};
 
@@ -54,8 +53,9 @@ struct Args {
 async fn main() -> Result<()> {
     let _guard = init_tracing()?;
     let args = Args::parse();
-    let circuit: Circuit<BooleanGate, _> =
-        BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into();
+    let circuit: ExecutableCircuit<BooleanGate, _> = ExecutableCircuit::DynLayers(
+        BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into(),
+    );
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
         0 => mpc_channel::tcp::listen(args.server).await?,
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
     let mut comm_stats = Statistics::new(bytes_written, bytes_read).without_unaccounted(true);
 
     let (mut sender, mut receiver) =
-        sub_channels_for!(&mut sender, &mut receiver, 8, boolean_gmw::Msg).await?;
+        sub_channels_for!(&mut sender, &mut receiver, 8, Message<BooleanGmw>).await?;
 
     let mut executor: Executor<BooleanGmw, _> = if let Some(addr) = args.mt_provider {
         let (mt_sender, bytes_written, mt_receiver, bytes_read) =

@@ -5,29 +5,25 @@
 //! It also demonstrates how to use the [`Statistics`] API to track the communication of
 //! different phases and write it to a file.
 
+use anyhow::Result;
+use clap::Parser;
+use gmw::circuit::base_circuit::Load;
+use gmw::circuit::{BaseCircuit, ExecutableCircuit};
+use gmw::common::BitVec;
+use gmw::executor::{Executor, Message};
+use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::ot_ext::OtMTProvider;
+use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
+use gmw::protocols::boolean_gmw::BooleanGmw;
+use gmw::BooleanGate;
+use mpc_channel::sub_channels_for;
+use mpc_channel::util::{Phase, Statistics};
+use rand::rngs::OsRng;
 use std::fs::File;
 use std::io::{stdout, BufWriter, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-
-use anyhow::Result;
-use clap::Parser;
-use rand::rngs::OsRng;
-
-use gmw::circuit::base_circuit::Load;
-use gmw::{BooleanGate, Circuit};
 use tracing_subscriber::EnvFilter;
-
-use gmw::circuit::BaseCircuit;
-use gmw::common::BitVec;
-use gmw::executor::Executor;
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw::mul_triple::ot_ext::OtMTProvider;
-use gmw::mul_triple::trusted_seed_provider::TrustedMTProviderClient;
-use gmw::protocols::boolean_gmw;
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use mpc_channel::sub_channels_for;
-use mpc_channel::util::{Phase, Statistics};
 use zappot::ot_ext;
 
 #[derive(Parser, Debug)]
@@ -62,8 +58,9 @@ struct Args {
 async fn main() -> Result<()> {
     let _guard = init_tracing()?;
     let args = Args::parse();
-    let circuit: Circuit<BooleanGate, _> =
-        BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into();
+    let circuit: ExecutableCircuit<BooleanGate, _> = ExecutableCircuit::DynLayers(
+        BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into(),
+    );
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
         0 => mpc_channel::tcp::listen(args.server).await?,
@@ -78,7 +75,7 @@ async fn main() -> Result<()> {
         &mut sender,
         &mut receiver,
         8,
-        boolean_gmw::Msg,
+        Message<BooleanGmw>,
         mpc_channel::Receiver<ot_ext::ExtOTMsg>,
     )
     .await?;

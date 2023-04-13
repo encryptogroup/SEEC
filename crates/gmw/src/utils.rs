@@ -2,6 +2,7 @@ use crate::common::BitVec;
 use bitvec::prelude::BitStore;
 use num_integer::div_ceil;
 use rand::{CryptoRng, Fill, Rng};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::RangeInclusive;
@@ -27,7 +28,7 @@ impl<'a, T: ?Sized> Eq for ByAddress<'a, T> {}
 // RangeInclusive start wrapper
 //
 
-#[derive(Eq, Debug, Clone)]
+#[derive(Eq, Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RangeInclusiveStartWrapper<T> {
     pub(crate) range: RangeInclusive<T>,
 }
