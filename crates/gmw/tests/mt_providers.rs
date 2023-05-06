@@ -2,7 +2,8 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
 use bitvec::order::Msb0;
-use gmw::Circuit;
+use gmw::circuit::dyn_layers::Circuit;
+use gmw::circuit::ExecutableCircuit;
 use tokio::task::spawn_blocking;
 
 use gmw::common::BitVec;
@@ -20,10 +21,12 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
     let tp_addr = ("127.0.0.1", 7750);
     let _mt_server =
         tokio::spawn(async move { TrustedMTProviderServer::start(tp_addr).await.unwrap() });
-    let circuit = spawn_blocking(move || {
-        Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
-    })
-    .await??;
+    let circuit = ExecutableCircuit::DynLayers(
+        spawn_blocking(move || {
+            Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
+        })
+        .await??,
+    );
     let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
     let mt_provider_1 = TrustedMTProviderClient::new("some_id".into(), sender, receiver);
     let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
@@ -65,10 +68,12 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
             .await
             .unwrap()
     });
-    let circuit = spawn_blocking(move || {
-        Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
-    })
-    .await??;
+    let circuit = ExecutableCircuit::DynLayers(
+        spawn_blocking(move || {
+            Circuit::load_bristol("test_resources/bristol-circuits/AES-non-expanded.txt")
+        })
+        .await??,
+    );
     let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
     let mt_provider_1 =
         trusted_seed_provider::TrustedMTProviderClient::new("some_id".into(), sender, receiver);

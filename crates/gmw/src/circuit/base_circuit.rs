@@ -1,55 +1,85 @@
+#![allow(clippy::extra_unused_type_parameters)] // false positive in current nightly
+
 use parking_lot::lock_api::Mutex;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs;
 use std::hash::Hash;
-use std::ops::Not;
+use std::num::NonZeroUsize;
 use std::path::Path;
 
+use bytemuck::{Pod, Zeroable};
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::IntoNodeIdentifiers;
 use petgraph::visit::{VisitMap, Visitable};
 use petgraph::{Directed, Direction, Graph};
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, trace};
 
-use crate::circuit::{DefaultIdx, GateIdx, LayerIterable};
+use crate::circuit::{CircuitId, DefaultIdx, GateIdx, LayerIterable};
 use crate::errors::CircuitError;
 use crate::protocols::boolean_gmw::BooleanGate;
-use crate::protocols::{Dimension, Gate, ScalarDim, Wire};
-use crate::{bristol, SharedCircuit};
+use crate::protocols::{Dimension, Gate, ScalarDim, Share, ShareStorage, Wire};
+use crate::{bristol, SharedCircuit, SubCircuitGate};
 
 type CircuitGraph<Gate, Idx, Wire> = Graph<Gate, Wire, Directed, Idx>;
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "Gate: serde::Serialize + serde::de::DeserializeOwned,\
+    Idx: GateIdx + serde::Serialize + serde::de::DeserializeOwned,\
+    Wire: serde::Serialize + serde::de::DeserializeOwned")]
 pub struct BaseCircuit<Gate = BooleanGate, Idx = u32, Wire = ()> {
     graph: CircuitGraph<Gate, Idx, Wire>,
+    is_main: bool,
+    simd_size: Option<NonZeroUsize>,
     interactive_gate_count: usize,
     input_gates: Vec<GateId<Idx>>,
     output_gates: Vec<GateId<Idx>>,
     constant_gates: Vec<GateId<Idx>>,
-    // TODO I don't think this field is needed anymore
     sub_circuit_output_gates: Vec<GateId<Idx>>,
     pub(crate) sub_circuit_input_gates: Vec<GateId<Idx>>,
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum BaseGate<T, D = ScalarDim> {
     Output(D),
     Input(D),
-    // Input from a sub circuit called within a circuit.
+    /// Input from a sub circuit called within a circuit.
     SubCircuitInput(D),
-    // Output from this circuit into another sub circuit
+    /// Output from this circuit into another sub circuit
     SubCircuitOutput(D),
+    ConnectToMain(D),
+    /// Connects a sub circuit to the main circuit and selects the i'th individual value from
+    /// the SIMD output
+    ConnectToMainFromSimd((D, u32)),
     Constant(T),
 }
 
-#[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Default,
+    Copy,
+    Clone,
+    Ord,
+    PartialOrd,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Pod,
+    Zeroable,
+)]
+#[repr(transparent)]
 pub struct GateId<Idx = DefaultIdx>(pub(crate) Idx);
 
 impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
     pub fn new() -> Self {
         Self {
             graph: Default::default(),
+            is_main: false,
+            simd_size: None,
             interactive_gate_count: 0,
             input_gates: vec![],
             output_gates: vec![],
@@ -57,6 +87,12 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
             sub_circuit_output_gates: vec![],
             sub_circuit_input_gates: vec![],
         }
+    }
+
+    pub fn new_main() -> Self {
+        let mut new = Self::new();
+        new.is_main = true;
+        new
     }
 
     pub fn with_capacity(gates: usize, wires: usize) -> Self {
@@ -75,7 +111,9 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
                 BaseGate::Constant(_) => self.constant_gates.push(gate_id),
                 BaseGate::Output(_) => self.output_gates.push(gate_id),
                 BaseGate::SubCircuitOutput(_) => self.sub_circuit_output_gates.push(gate_id),
-                BaseGate::SubCircuitInput(_) => self.sub_circuit_input_gates.push(gate_id),
+                BaseGate::SubCircuitInput(_)
+                | BaseGate::ConnectToMain(_)
+                | BaseGate::ConnectToMainFromSimd(_) => self.sub_circuit_input_gates.push(gate_id),
             }
         }
         if gate.is_interactive() {
@@ -138,13 +176,13 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
     pub fn interactive_iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + '_ {
         self.layer_iter()
             .visit_sc_inputs()
-            .flat_map(|layer| layer.interactive)
+            .flat_map(|layer| layer.into_interactive_iter())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + '_ {
         self.layer_iter()
             .visit_sc_inputs()
-            .flat_map(|layer| layer.non_interactive.into_iter().chain(layer.interactive))
+            .flat_map(|layer| layer.into_iter())
     }
 }
 
@@ -171,6 +209,7 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
         circuit: &Self,
         inputs: impl IntoIterator<Item = GateId<Idx>>,
     ) -> Vec<GateId<Idx>> {
+        assert!(!self.is_main, "Can't add main circuit as sub circuit");
         assert!(
             circuit.input_gates().is_empty(),
             "Added circuit can't have Input gates. Must have SubCircuitInput gates"
@@ -203,6 +242,14 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
 }
 
 impl<G, Idx, W> BaseCircuit<G, Idx, W> {
+    pub fn is_simd(&self) -> bool {
+        self.simd_size.is_some()
+    }
+
+    pub fn simd_size(&self) -> Option<NonZeroUsize> {
+        self.simd_size
+    }
+
     pub fn interactive_count(&self) -> usize {
         self.interactive_gate_count
     }
@@ -233,6 +280,10 @@ impl<G, Idx, W> BaseCircuit<G, Idx, W> {
 
     pub fn into_shared(self) -> SharedCircuit<G, Idx, W> {
         SharedCircuit::new(Mutex::new(self))
+    }
+
+    pub fn set_simd_size(&mut self, size: NonZeroUsize) {
+        self.simd_size = Some(size);
     }
 }
 
@@ -301,10 +352,12 @@ where
     }
 }
 
-impl<G: Clone, Idx: GateIdx> Clone for BaseCircuit<G, Idx> {
+impl<G: Clone, Idx: GateIdx, W: Clone> Clone for BaseCircuit<G, Idx, W> {
     fn clone(&self) -> Self {
         Self {
             graph: self.graph.clone(),
+            is_main: self.is_main,
+            simd_size: self.simd_size,
             interactive_gate_count: self.interactive_gate_count,
             input_gates: self.input_gates.clone(),
             output_gates: self.output_gates.clone(),
@@ -339,11 +392,29 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
     }
 }
 
-impl<
-        T: Clone + Hash + Ord + Eq + Not<Output = T> + Debug + Default + Send + Sync + 'static,
-        D: Dimension,
-    > Gate for BaseGate<T, D>
-{
+impl<T: Share, D: Dimension> BaseGate<T, D> {
+    pub(crate) fn evaluate_sc_input_simd(
+        &self,
+        inputs: impl Iterator<Item = <Self as Gate>::Share>,
+    ) -> <<Self as Gate>::Share as Share>::SimdShare {
+        let Self::SubCircuitInput(_) = self else {
+            panic!("Called evaluate_sc_input_simd on wrong gate {self:?}");
+        };
+        inputs.collect()
+    }
+
+    pub(crate) fn evaluate_connect_to_main_simd(
+        &self,
+        input: &<<Self as Gate>::Share as Share>::SimdShare,
+    ) -> <Self as Gate>::Share {
+        let Self::ConnectToMainFromSimd((_, at)) = self else {
+            panic!("Called evaluate_connect_to_main_simd on wrong gate {self:?}");
+        };
+        input.get(*at as usize)
+    }
+}
+
+impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
     type Share = T;
     type DimTy = D;
 
@@ -366,9 +437,8 @@ impl<
     fn evaluate_non_interactive(
         &self,
         party_id: usize,
-        inputs: impl IntoIterator<Item = Self::Share>,
+        mut inputs: impl Iterator<Item = Self::Share>,
     ) -> Self::Share {
-        let mut input = inputs.into_iter();
         match self {
             Self::Constant(constant) => {
                 if party_id == 0 {
@@ -380,9 +450,37 @@ impl<
             Self::Output(_)
             | Self::Input(_)
             | Self::SubCircuitInput(_)
-            | Self::SubCircuitOutput(_) => input
+            | Self::SubCircuitOutput(_)
+            | Self::ConnectToMain(_) => inputs
                 .next()
                 .unwrap_or_else(|| panic!("Empty input for {self:?}")),
+            Self::ConnectToMainFromSimd(_) => {
+                panic!("BaseGate::evaluate_non_interactive called on SIMD gates")
+            }
+        }
+    }
+
+    fn evaluate_non_interactive_simd<'e>(
+        &self,
+        _party_id: usize,
+        mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
+    ) -> <Self::Share as Share>::SimdShare {
+        match self {
+            BaseGate::Output(_) | BaseGate::Input(_) | BaseGate::ConnectToMain(_) => {
+                todo!("Implement this for main circ SIMD support")
+            }
+            BaseGate::SubCircuitInput(_) | BaseGate::ConnectToMainFromSimd(_) => {
+                panic!(
+                    "Gate::evaluate_non_interactive_simd  cant evaluate SubCircuitInput \
+                    and ConnectToMainSimd, call respective evaluate methods"
+                );
+            }
+            BaseGate::SubCircuitOutput(_) => {
+                inputs.next().expect("Missing input to {self:?}").clone()
+            }
+            BaseGate::Constant(_constant) => {
+                todo!("SimdShare from constant")
+            }
         }
     }
 }
@@ -394,6 +492,7 @@ pub struct BaseLayerIter<'a, G, Idx: GateIdx, W> {
     to_visit: VecDeque<NodeIndex<Idx>>,
     next_layer: VecDeque<NodeIndex<Idx>>,
     visited: <CircuitGraph<G, Idx, W> as Visitable>::Map,
+    added_to_next: <CircuitGraph<G, Idx, W> as Visitable>::Map,
     // (non_interactive, interactive)
     last_layer_size: (usize, usize),
     gates_produced: usize,
@@ -430,6 +529,7 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
         let to_visit = VecDeque::new();
         let next_layer = VecDeque::new();
         let visited = circuit.graph.visit_map();
+        let added_to_next = circuit.graph.visit_map();
         // let interactive_gates_set = AHashSet::new();
         Self {
             circuit,
@@ -437,6 +537,7 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
             to_visit,
             next_layer,
             visited,
+            added_to_next,
             last_layer_size: (0, 0),
             // interactive_gates_set,
             gates_produced: 0,
@@ -458,8 +559,12 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
         self.to_visit.push_back(idx);
     }
 
+    /// Adds idx to the next layer if it has not been visited
     pub fn add_to_next_layer(&mut self, idx: NodeIndex<Idx>) {
-        self.next_layer.push_back(idx);
+        if !self.added_to_next.is_visited(&idx) {
+            self.next_layer.push_back(idx);
+            self.added_to_next.visit(idx);
+        }
     }
 
     pub fn is_exhausted(&self) -> bool {
@@ -468,24 +573,102 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct CircuitLayer<G, Idx: Hash + PartialEq + Eq> {
-    // TODO alignment of the tuple? Check this and maybe split it into two vecs
-    pub(crate) non_interactive: Vec<(G, GateId<Idx>)>,
-    pub(crate) interactive: Vec<(G, GateId<Idx>)>,
+pub struct CircuitLayer<G, Idx> {
+    pub(crate) non_interactive_gates: Vec<G>,
+    pub(crate) non_interactive_ids: Vec<GateId<Idx>>,
+    pub(crate) interactive_gates: Vec<G>,
+    pub(crate) interactive_ids: Vec<GateId<Idx>>,
     // TODO add output gates here so that the CircuitLayerIter::next doesn't need to iterate
     //  over all potential outs
 }
 
-impl<G: Gate, Idx: GateIdx> CircuitLayer<G, Idx> {
+impl<G, Idx> CircuitLayer<G, Idx> {
     fn with_capacity((non_interactive, interactive): (usize, usize)) -> Self {
         Self {
-            non_interactive: Vec::with_capacity(non_interactive),
-            interactive: Vec::with_capacity(interactive),
+            non_interactive_gates: Vec::with_capacity(non_interactive),
+            non_interactive_ids: Vec::with_capacity(non_interactive),
+            interactive_gates: Vec::with_capacity(interactive),
+            interactive_ids: Vec::with_capacity(interactive),
         }
     }
 
-    fn is_empty(&self) -> bool {
-        self.non_interactive.is_empty() && self.interactive.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.non_interactive_gates.is_empty() && self.interactive_gates.is_empty()
+    }
+
+    fn push_interactive(&mut self, (gate, id): (G, GateId<Idx>)) {
+        self.interactive_gates.push(gate);
+        self.interactive_ids.push(id);
+    }
+
+    fn push_non_interactive(&mut self, (gate, id): (G, GateId<Idx>)) {
+        self.non_interactive_gates.push(gate);
+        self.non_interactive_ids.push(id);
+    }
+
+    pub fn interactive_len(&self) -> usize {
+        self.interactive_gates.len()
+    }
+
+    pub fn non_interactive_len(&self) -> usize {
+        self.non_interactive_gates.len()
+    }
+}
+
+impl<G: Clone, Idx: Clone> CircuitLayer<G, Idx> {
+    pub(crate) fn iter_ids(&self) -> impl Iterator<Item = GateId<Idx>> + '_ {
+        self.non_interactive_ids
+            .iter()
+            .chain(&self.interactive_ids)
+            .cloned()
+    }
+
+    pub(crate) fn into_interactive_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
+        self.interactive_gates.into_iter().zip(self.interactive_ids)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn into_non_interactive_iter(
+        self,
+    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
+        self.non_interactive_gates
+            .into_iter()
+            .zip(self.non_interactive_ids)
+    }
+
+    pub(crate) fn interactive_iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
+        self.interactive_gates
+            .clone()
+            .into_iter()
+            .zip(self.interactive_ids.clone())
+    }
+
+    pub(crate) fn non_interactive_iter(
+        &self,
+    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
+        self.non_interactive_gates
+            .clone()
+            .into_iter()
+            .zip(self.non_interactive_ids.clone())
+    }
+}
+
+impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
+        let ni = self
+            .non_interactive_gates
+            .into_iter()
+            .zip(self.non_interactive_ids);
+        let i = self.interactive_gates.into_iter().zip(self.interactive_ids);
+        ni.chain(i)
+    }
+
+    pub(crate) fn into_sc_iter(
+        self,
+        sc_id: CircuitId,
+    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone {
+        self.into_iter()
+            .map(move |(g, gate_id)| (g, SubCircuitGate::new(sc_id, gate_id)))
     }
 }
 
@@ -500,14 +683,16 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
         std::mem::swap(&mut self.to_visit, &mut self.next_layer);
 
         while let Some(node_idx) = self.to_visit.pop_front() {
+            // This case handles the interactive gates at the front of to_visit that
+            // are here because they were `add_to_next_layer` but whose neighbours have not
+            // had their counts decreased
             if self.visited.is_visited(&node_idx) {
                 for neigh in graph.neighbors(node_idx) {
                     self.inputs_needed_cnt[neigh.index()] -= 1;
                     let inputs_needed = self.inputs_needed_cnt[neigh.index()];
-                    if inputs_needed > 0 {
-                        continue;
+                    if inputs_needed == 0 {
+                        self.add_to_visit(neigh);
                     }
-                    self.add_to_visit(neigh)
                 }
                 continue;
             }
@@ -516,9 +701,9 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
             let gate = graph[node_idx].clone();
             if gate.is_interactive() {
                 self.add_to_next_layer(node_idx);
-                layer.interactive.push((gate.clone(), node_idx.into()));
+                layer.push_interactive((gate.clone(), node_idx.into()));
             } else {
-                layer.non_interactive.push((gate.clone(), node_idx.into()));
+                layer.push_non_interactive((gate.clone(), node_idx.into()));
                 for neigh in graph.neighbors(node_idx) {
                     self.inputs_needed_cnt[neigh.index()] -= 1;
                     let inputs_needed = self.inputs_needed_cnt[neigh.index()];
@@ -532,65 +717,9 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
         if layer.is_empty() {
             None
         } else {
-            self.gates_produced += layer.interactive.len() + layer.non_interactive.len();
+            self.gates_produced += layer.interactive_len() + layer.non_interactive_len();
             Some(layer)
         }
-
-        // let mut interactive_gates: AHashSet<(G, GateId<Idx>)> =
-        //     AHashSet::with_capacity(self.last_layer_size.1);
-        // while let Some(node_idx) = self.to_visit.pop_front() {
-        //     if self.visited.is_visited(&node_idx) {
-        //         continue;
-        //     }
-        //     let gate = graph[node_idx].clone();
-        //     match gate {
-        //         gate if gate.is_interactive() => {
-        //             interactive_gates.insert((gate.clone(), node_idx.into()));
-        //             self.next_layer
-        //                 .extend(graph.neighbors(node_idx).filter(|neigh| {
-        //                     Reversed(graph).neighbors(*neigh).all(|b| {
-        //                         let neigh_gate = graph[b].clone();
-        //                         self.visited.is_visited(&b)
-        //                             || interactive_gates.contains(&(neigh_gate, b.into()))
-        //                     })
-        //                 }));
-        //         }
-        //         non_interactive => {
-        //             self.visited.visit(node_idx);
-        //             layer.add_non_interactive((non_interactive, node_idx.into()));
-        //             for neigh in graph.neighbors(node_idx) {
-        //                 let mut push_to_visit = true;
-        //                 let mut push_to_next_layer = true;
-        //                 for b in Reversed(graph).neighbors(neigh) {
-        //                     let is_visited = self.visited.is_visited(&b);
-        //                     let b_gate = graph[b].clone();
-        //                     push_to_visit &= is_visited;
-        //                     push_to_next_layer &=
-        //                         is_visited || interactive_gates.contains(&(b_gate, b.into()));
-        //                     if !(push_to_visit || push_to_next_layer) {
-        //                         break;
-        //                     }
-        //                 }
-        //                 if push_to_visit {
-        //                     self.to_visit.push_back(neigh);
-        //                 } else if push_to_next_layer {
-        //                     self.next_layer.push_back(neigh);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-        // for (_, interactive_id) in &interactive_gates {
-        //     self.visited.visit(interactive_id.0);
-        // }
-        // layer.interactive_gates = interactive_gates.into_iter().collect();
-        // layer.interactive_gates.sort_unstable();
-        // self.last_layer_size = (layer.non_interactive.len(), layer.interactive_gates.len());
-        // if layer.is_empty() {
-        //     None
-        // } else {
-        //     Some(layer)
-        // }
     }
 }
 
@@ -606,8 +735,10 @@ impl<G: Gate, Idx: GateIdx, W: Wire> LayerIterable for BaseCircuit<G, Idx, W> {
 impl<G, Idx: GateIdx> Default for CircuitLayer<G, Idx> {
     fn default() -> Self {
         Self {
-            non_interactive: vec![],
-            interactive: vec![],
+            non_interactive_gates: vec![],
+            non_interactive_ids: vec![],
+            interactive_gates: vec![],
+            interactive_ids: vec![],
         }
     }
 }
@@ -696,8 +827,8 @@ mod tests {
 
     #[test]
     fn gate_size() {
-        // Assert that the gate size stays at 1 byte (might change in the future)
-        assert_eq!(1, mem::size_of::<BooleanGate>());
+        // Assert that the gate size stays at 8 bytes (might change in the future)
+        assert_eq!(8, mem::size_of::<BooleanGate>());
     }
 
     #[test]
@@ -719,24 +850,24 @@ mod tests {
         let mut cl_iter = BaseLayerIter::new(&circuit);
 
         let first_layer = CircuitLayer {
-            non_interactive: [
-                (inp(), 0_u32.into()),
-                (inp(), 1_u32.into()),
-                (inp(), 4_u32.into()),
-            ]
-            .into_iter()
-            .collect(),
-            interactive: [(BooleanGate::And, 3_u32.into())].into_iter().collect(),
+            non_interactive_gates: vec![inp(), inp(), inp()],
+            non_interactive_ids: vec![0_u32.into(), 1_u32.into(), 4_u32.into()],
+            interactive_gates: vec![BooleanGate::And],
+            interactive_ids: vec![3_u32.into()],
         };
 
         let snd_layer = CircuitLayer {
-            non_interactive: [(xor(), 5_u32.into())].into_iter().collect(),
-            interactive: [(BooleanGate::And, 6_u32.into())].into_iter().collect(),
+            non_interactive_gates: vec![xor()],
+            non_interactive_ids: vec![5_u32.into()],
+            interactive_gates: vec![BooleanGate::And],
+            interactive_ids: vec![6_u32.into()],
         };
 
         let third_layer = CircuitLayer {
-            non_interactive: [(out(), 2_u32.into())].into_iter().collect(),
-            interactive: [].into_iter().collect(),
+            non_interactive_gates: vec![out()],
+            non_interactive_ids: vec![2_u32.into()],
+            interactive_gates: vec![],
+            interactive_ids: vec![],
         };
 
         assert_eq!(Some(first_layer), cl_iter.next());

@@ -12,10 +12,9 @@ use bitvec::prelude::*;
 use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::{Circuit, DefaultIdx};
-use gmw::executor::Executor;
+use gmw::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
+use gmw::executor::{Executor, Message};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw::protocols::boolean_gmw;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::inputs;
 use gmw::CircuitBuilder;
@@ -55,13 +54,14 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // Create a new Executor for the circuit. It's important that the party_id is either 0 or 1,
     // as otherwise wrong results might be computed. In the future, there might be support for more
     // than two parties
-    let mut executor = Executor::<BooleanGmw, _>::new(&circuit, party_id, mt_provider).await?;
+    let exec_circuit = ExecutableCircuit::DynLayers(circuit);
+    let mut executor = Executor::<BooleanGmw, _>::new(&exec_circuit, party_id, mt_provider).await?;
 
     // Create inputs as a BitVector. The inputs will be used for the input gate with the
     // corresponding index.
-    let inputs = bitvec![u8, Lsb0; 0, 1, 1, 0];
+    let inputs = bitvec![usize, Lsb0; 0, 1, 1, 0];
     // `circuit.input_count()` input count can be used to determine how big the input should be
-    assert_eq!(circuit.input_count(), inputs.len());
+    assert_eq!(exec_circuit.input_count(), inputs.len());
 
     // When using the Tcp transport, one party is essentially a server and needs to `listen` for
     // new connections. The other party then `connect`s to it. If party 1 connects before party 0
@@ -73,11 +73,11 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     };
 
     let (mut sender, mut receiver) =
-        sub_channels_for!(&mut sender, &mut receiver, 8, boolean_gmw::Msg).await?;
+        sub_channels_for!(&mut sender, &mut receiver, 8, Message<BooleanGmw>).await?;
     // Execute the circuit and await its result (in the form of a BitVec)
     let output = executor.execute(inputs, &mut sender, &mut receiver).await?;
 
-    assert_eq!(circuit.output_count(), output.len());
+    assert_eq!(exec_circuit.output_count(), output.len());
     // As there is only one output gate, we simply return the first element
     Ok(output[0])
 }

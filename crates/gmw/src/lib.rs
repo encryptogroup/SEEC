@@ -1,7 +1,7 @@
 pub use circuit::builder::{
     CircuitBuilder, SharedCircuit, SubCircuitGate, SubCircuitInput, SubCircuitOutput,
 };
-pub use circuit::Circuit;
+pub use circuit::dyn_layers::Circuit;
 pub use circuit::GateId;
 pub use gmw_macros::sub_circuit;
 pub use parse::bristol;

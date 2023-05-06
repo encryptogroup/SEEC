@@ -3,7 +3,8 @@ use std::ops;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::builder::CircuitBuilder;
-use gmw::circuit::{CircuitLayerIter, DefaultIdx};
+use gmw::circuit::dyn_layers::CircuitLayerIter;
+use gmw::circuit::DefaultIdx;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
 use gmw::{sub_circuit, BooleanGate, Circuit};
 

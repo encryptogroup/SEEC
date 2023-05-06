@@ -1,24 +1,23 @@
-use crate::utils::RangeInclusiveStartWrapper;
-use crate::{bristol, SubCircuitGate};
+use crate::SubCircuitGate;
 pub use builder::SubCircCache;
+use bytemuck::Pod;
+use either::Either;
 use num_integer::Integer;
 use petgraph::adj::IndexType;
-use smallvec::SmallVec;
-use std::collections::{BTreeMap, Bound, HashMap};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::ops::RangeInclusive;
-use std::path::Path;
-use std::sync::Arc;
-use tracing::trace;
+use std::iter;
+use std::num::NonZeroUsize;
 
 pub mod base_circuit;
 pub mod builder;
+pub(crate) mod circuit_connections;
+pub mod dyn_layers;
+pub mod static_layers;
 
-use crate::circuit::base_circuit::{BaseGate, Load};
-use crate::errors::CircuitError;
 pub use crate::protocols::boolean_gmw::BooleanGate;
-use crate::protocols::{Gate, Wire};
+use crate::protocols::Gate;
 pub use base_circuit::{BaseCircuit, GateId};
 pub use builder::{CircuitBuilder, SharedCircuit};
 
@@ -34,20 +33,21 @@ pub trait GateIdx:
     + TryFrom<u32>
     + TryFrom<u16>
     + Into<GateId<Self>>
+    + Pod
 {
 }
 
-impl<
-        T: IndexType
-            + Integer
-            + Copy
-            + Send
-            + Sync
-            + TryFrom<usize>
-            + TryFrom<u32>
-            + TryFrom<u16>
-            + Into<GateId<Self>>,
-    > GateIdx for T
+impl<T> GateIdx for T where
+    T: IndexType
+        + Integer
+        + Copy
+        + Send
+        + Sync
+        + TryFrom<usize>
+        + TryFrom<u32>
+        + TryFrom<u16>
+        + Into<GateId<Self>>
+        + Pod
 {
 }
 
@@ -62,647 +62,327 @@ pub trait LayerIterable {
     fn layer_iter(&self) -> Self::LayerIter<'_>;
 }
 
-#[derive(Debug, Clone)]
-pub struct Circuit<G = BooleanGate, Idx = DefaultIdx, W = ()> {
-    pub(crate) circuits: Vec<Arc<BaseCircuit<G, Idx, W>>>,
-    pub(crate) connections: CrossCircuitConnections<Idx>,
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound = "\
+    G: serde::Serialize + serde::de::DeserializeOwned,\
+    Idx: GateIdx + Ord + Eq + Hash + serde::Serialize + serde::de::DeserializeOwned")]
+pub enum ExecutableCircuit<G, Idx> {
+    DynLayers(dyn_layers::Circuit<G, Idx>),
+    StaticLayers(static_layers::Circuit<G, Idx>),
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CrossCircuitConnections<Idx> {
-    pub(crate) one_to_one: OneToOneConnections<Idx>,
-    pub(crate) range_connections: RangeConnections<Idx>,
+pub enum ExecutableLayer<'c, G, Idx: Hash + PartialEq + Eq> {
+    DynLayer(dyn_layers::CircuitLayer<G, Idx>),
+    StaticLayer(static_layers::ScLayerIterator<'c, G, Idx>),
 }
 
-type OneToOneMap<Idx, const BUF_SIZE: usize> =
-    HashMap<SubCircuitGate<Idx>, SmallVec<[SubCircuitGate<Idx>; BUF_SIZE]>>;
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct OneToOneConnections<Idx> {
-    pub(crate) outgoing: OneToOneMap<Idx, 1>,
-    pub(crate) incoming: OneToOneMap<Idx, 2>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RangeConnections<Idx> {
-    pub(crate) incoming: RangeSubCircuitConnections<Idx>,
-    pub(crate) outgoing: RangeSubCircuitConnections<Idx>,
-}
-
-type FromRange<Idx> = RangeInclusiveStartWrapper<SubCircuitGate<Idx>>;
-type ToRanges<Idx> = SmallVec<[RangeInclusive<SubCircuitGate<Idx>>; 1]>;
-
-#[derive(Debug, Clone, Default)]
-pub struct RangeSubCircuitConnections<Idx> {
-    map: HashMap<CircuitId, BTreeMap<FromRange<Idx>, ToRanges<Idx>>>,
-}
-
-impl<Idx: GateIdx> CrossCircuitConnections<Idx> {
-    fn parent_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        self.one_to_one
-            .parent_gates(id)
-            .chain(self.range_connections.parent_gates(id))
+impl<G, Idx> ExecutableCircuit<G, Idx> {
+    pub fn interactive_count(&self) -> usize {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.interactive_count(),
+            ExecutableCircuit::StaticLayers(circ) => circ.interactive_count(),
+        }
     }
 
-    fn outgoing_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        self.one_to_one
-            .outgoing_gates(id)
-            .chain(self.range_connections.outgoing_gates(id))
-    }
-}
-
-impl<Idx: GateIdx> OneToOneConnections<Idx> {
-    fn parent_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        self.incoming
-            .get(&id)
-            .map(SmallVec::as_slice)
-            .unwrap_or(&[])
-            .iter()
-            .copied()
+    // Returns interactive count and treats each interactive gate in a SIMD circuit as <simd_size>
+    // interactive gates.
+    pub fn interactive_count_times_simd(&self) -> usize {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.interactive_count_times_simd(),
+            ExecutableCircuit::StaticLayers(circ) => circ.interactive_count_times_simd(),
+        }
     }
 
-    fn outgoing_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        self.outgoing
-            .get(&id)
-            .map(|sv| sv.iter().copied())
-            .into_iter()
-            .flatten()
+    pub fn input_count(&self) -> usize {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.input_count(),
+            ExecutableCircuit::StaticLayers(circ) => circ.input_count(),
+        }
+    }
+
+    pub fn output_count(&self) -> usize {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.output_count(),
+            ExecutableCircuit::StaticLayers(circ) => circ.output_count(),
+        }
+    }
+
+    pub fn input_gates(&self) -> &[GateId<Idx>] {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.get_circ(0).input_gates(),
+            ExecutableCircuit::StaticLayers(circ) => circ.input_gates(),
+        }
+    }
+
+    pub fn output_gates(&self) -> &[GateId<Idx>] {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.get_circ(0).output_gates(),
+            ExecutableCircuit::StaticLayers(circ) => circ.output_gates(),
+        }
+    }
+
+    pub fn simd_size(&self, circ_id: CircuitId) -> Option<NonZeroUsize> {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.get_circ(circ_id).simd_size(),
+            ExecutableCircuit::StaticLayers(circ) => circ.get_circ(circ_id).simd_size(),
+        }
     }
 }
 
-impl<Idx> RangeConnections<Idx>
-where
-    Idx: GateIdx,
-{
-    fn parent_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        let range_conns = self.incoming.get_mapped_ranges(id);
-        range_conns.flat_map(move |(to_range, from_ranges)| {
-            if !to_range.contains(&id) {
-                unreachable!("to_range is wrong");
+impl<G: Gate, Idx: GateIdx> ExecutableCircuit<G, Idx> {
+    pub fn precompute_layers(self) -> Self {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => {
+                ExecutableCircuit::StaticLayers(circ.precompute_layers())
             }
-            let offset = id.gate_id.0 - to_range.start().gate_id.0;
-
-            from_ranges.iter().map(move |from_range| {
-                let from_range_start = from_range.start();
-                let from_gate_id = (from_range_start.gate_id.0 + offset).into();
-                SubCircuitGate::new(from_range_start.circuit_id, from_gate_id)
-            })
-        })
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn outgoing_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        let range_conns = self.outgoing.get_mapped_ranges(id);
-        range_conns.flat_map(move |(from_range, to_ranges)| {
-            trace!(?from_range, ?to_ranges, "range_conns_outgoing_gates");
-            if !from_range.contains(&id) {
-                unreachable!("from_range does not contain id")
-            }
-            let offset = id.gate_id.0 - from_range.start().gate_id.0;
-            to_ranges.iter().map(move |to_range| {
-                let to_gate_id = (to_range.start().gate_id.0 + offset).into();
-                SubCircuitGate::new(to_range.start().circuit_id, to_gate_id)
-            })
-        })
-    }
-}
-
-impl<G: Gate, Idx: GateIdx, W: Wire> Circuit<G, Idx, W> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add_circuit(&mut self, circuit: impl Into<Arc<BaseCircuit<G, Idx, W>>>) {
-        self.circuits.push(circuit.into());
-    }
-
-    pub fn get_gate(&self, id: SubCircuitGate<Idx>) -> G {
-        self.circuits[id.circuit_id as usize].get_gate(id.gate_id)
-    }
-
-    // TODO optimization!
-    pub fn parent_gates(
-        &self,
-        id: SubCircuitGate<Idx>,
-    ) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
-        let same_circuit = self.circuits[id.circuit_id as usize]
-            .parent_gates(id.gate_id)
-            .map(move |parent_gate| SubCircuitGate::new(id.circuit_id, parent_gate));
-
-        same_circuit.chain(self.connections.parent_gates(id))
+            compressed @ ExecutableCircuit::StaticLayers(_) => compressed,
+        }
     }
 
     pub fn gate_count(&self) -> usize {
-        self.circuits.iter().map(|circ| circ.gate_count()).sum()
+        match self {
+            ExecutableCircuit::DynLayers(circ) => circ.gate_count(),
+            ExecutableCircuit::StaticLayers(circ) => circ.gate_count(),
+        }
+    }
+
+    /// Returns iterator over tuples of (gate_count, simd_size) for each sub_circuit
+    pub fn gate_counts(&self) -> impl Iterator<Item = (usize, Option<NonZeroUsize>)> + '_ {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => Either::Left(
+                circ.circuits
+                    .iter()
+                    .map(|bc| (bc.gate_count(), bc.simd_size())),
+            ),
+            ExecutableCircuit::StaticLayers(circ) => Either::Right(circ.gate_counts()),
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
-        // Reuse the the CircuitLayerIter api to get an iterator over individual gates. This
-        // is maybe a little more inefficient than necessary, but probably fine for the moment,
-        // as this method is expected to be called in the preprocessing phase
-        let layer_iter = CircuitLayerIter::new(self);
-        layer_iter.flat_map(|layer| {
-            layer.sc_layers.into_iter().flat_map(|(sc_id, base_layer)| {
-                base_layer
-                    .non_interactive
-                    .into_iter()
-                    .map(move |(gate, gate_id)| (gate, SubCircuitGate::new(sc_id, gate_id)))
-                    // Interactive gates need be chained after interactive gates
-                    .chain(
-                        base_layer
-                            .interactive
-                            .into_iter()
-                            .map(move |(gate, gate_id)| {
-                                (gate, SubCircuitGate::new(sc_id, gate_id))
-                            }),
-                    )
-            })
-        })
+        match self {
+            ExecutableCircuit::DynLayers(circ) => Either::Left(circ.iter()),
+            ExecutableCircuit::StaticLayers(circ) => Either::Right(circ.iter()),
+        }
+    }
+
+    pub fn iter_with_parents(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            G,
+            SubCircuitGate<Idx>,
+            impl Iterator<Item = SubCircuitGate<Idx>> + '_,
+        ),
+    > + '_ {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => {
+                let iter = circ
+                    .iter()
+                    .map(|(g, idx)| (g, idx, Either::Left(circ.parent_gates(idx))));
+                Either::Left(iter)
+            }
+            ExecutableCircuit::StaticLayers(circ) => Either::Right(
+                circ.iter_with_parents()
+                    .map(|(g, idx, parents)| (g, idx, Either::Right(parents))),
+            ),
+        }
     }
 
     pub fn interactive_iter(&self) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
-        // TODO this can be optimized in the future
-        self.iter().filter(|(gate, _)| gate.is_interactive())
-    }
-
-    // pub fn into_base_circuit(self) -> BaseCircuit<Idx> {
-    //     let mut res = BaseCircuit::new();
-    //     let mut new_ids: Vec<Vec<_>> = vec![];
-    //     for (c_id, circ) in self.circuits.into_iter().enumerate() {
-    //         let g = circ.as_graph();
-    //         let (nodes, edges) = (g.raw_nodes(), g.raw_edges());
-    //
-    //         new_ids.push(nodes.into_iter().map(|n| res.add_gate(n.weight)).collect());
-    //         for edge in edges {
-    //             let from = new_ids[c_id][edge.source().index()];
-    //             let to = new_ids[c_id][edge.target().index()];
-    //             res.add_wire(from, to);
-    //         }
-    //         // TODO DRY
-    //         // TODO to convert this to the map implementation, maybe not iterate over input gates
-    //         //  of circ but iterate over all edges in self.circuit_connectioctions at the end
-    //         //  to link up circuits
-    //         for input_gate in circ.sub_circuit_input_gates() {
-    //             let to = (c_id.try_into().unwrap(), *input_gate);
-    //             for from in self
-    //                 .circuit_connections
-    //                 .neighbors_directed(to, Direction::Incoming)
-    //             {
-    //                 if from.0 as usize >= new_ids.len() {
-    //                     continue;
-    //                 }
-    //                 let from = new_ids[from.0 as usize][from.1.as_usize()];
-    //                 res.add_wire(from, new_ids[c_id][to.1.as_usize()]);
-    //             }
-    //         }
-    //         // TODO remove following when removing interleaving of SCs
-    //         for output_gate in circ.sub_circuit_output_gates() {
-    //             let from = (c_id.try_into().unwrap(), *output_gate);
-    //             for to in self
-    //                 .circuit_connections
-    //                 .neighbors_directed(from, Direction::Outgoing)
-    //             {
-    //                 if to.0 as usize >= new_ids.len() {
-    //                     continue;
-    //                 }
-    //                 let from = new_ids[from.0 as usize][from.1.as_usize()];
-    //                 res.add_wire(from, new_ids[to.0 as usize][to.1.as_usize()]);
-    //             }
-    //         }
-    //     }
-    //
-    //     res
-    // }
-}
-
-impl<G, Idx, W> Circuit<G, Idx, W> {
-    pub fn interactive_count(&self) -> usize {
-        self.circuits
-            .iter()
-            .map(|circ| circ.interactive_count())
-            .sum()
-    }
-
-    /// Returns the input count of the **main circuit**.
-    pub fn input_count(&self) -> usize {
-        self.circuits[0].input_count()
-    }
-
-    /// Returns the output count of the **main circuit**.
-    pub fn output_count(&self) -> usize {
-        self.circuits[0].output_count()
-    }
-}
-
-impl<Share, G> Circuit<G, usize>
-where
-    Share: Clone,
-    G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
-{
-    pub fn load_bristol(path: impl AsRef<Path>) -> Result<Self, CircuitError> {
-        BaseCircuit::load_bristol(path, Load::Circuit).map(Into::into)
-    }
-}
-
-impl<Idx: Ord + Copy + IndexType + Debug> RangeSubCircuitConnections<Idx> {
-    /// # Panics
-    /// This function asserts that the from range is not a strictly contained in an
-    /// already stored range.
-    /// E.g. When (3..=9) is stored, it is illegal to store (4..=6)
-    /// It **is** allowed, to store ranges with the same start but differing lengths, e.g. (3..=5)
-    pub(crate) fn insert(
-        &mut self,
-        from: RangeInclusive<SubCircuitGate<Idx>>,
-        to: RangeInclusive<SubCircuitGate<Idx>>,
-    ) {
-        assert!(
-            from.start() <= from.end(),
-            "from.start() must be <= than end()"
-        );
-        let from_circuit_id = from.start().circuit_id;
-        let new_from_start_wrapper = RangeInclusiveStartWrapper::new(from.clone());
-        let bmap = self.map.entry(from_circuit_id).or_default();
-        let potential_conflict = bmap
-            .range((
-                Bound::Unbounded,
-                Bound::Included(new_from_start_wrapper.clone()),
-            ))
-            .next_back();
-        if let Some((potential_conflict, _)) = potential_conflict {
-            assert!(
-                !(potential_conflict.range.start() < from.start()
-                    && from.end() <= potential_conflict.range.end()),
-                "RangeSubCircuitConnections can't store a range which is a \
-                strict sub range of an already stored one"
-            );
+        match self {
+            ExecutableCircuit::DynLayers(circ) => Either::Left(circ.interactive_iter()),
+            ExecutableCircuit::StaticLayers(circ) => Either::Right(circ.interactive_iter()),
         }
-
-        bmap.entry(new_from_start_wrapper).or_default().push(to);
     }
 
-    // TODO is it possible to provide an API that takes multiple (sorted?) gates and more
-    //  efficiently returns the mapped ranges?
-    pub(crate) fn get_mapped_ranges(
+    pub fn interactive_with_parents_iter(
         &self,
-        gate: SubCircuitGate<Idx>,
     ) -> impl Iterator<
         Item = (
-            RangeInclusive<SubCircuitGate<Idx>>,
-            &[RangeInclusive<SubCircuitGate<Idx>>],
+            G,
+            SubCircuitGate<Idx>,
+            impl Iterator<Item = SubCircuitGate<Idx>> + '_,
         ),
-    > {
-        let start_wrapper = RangeInclusiveStartWrapper::new(
-            gate..=SubCircuitGate::new(gate.circuit_id, GateId(<Idx as IndexType>::max())),
-        );
-        self.map
-            .get(&gate.circuit_id)
-            .into_iter()
-            .flat_map(move |bmap| {
-                bmap.range((Bound::Unbounded, Bound::Included(start_wrapper.clone())))
-                    .rev()
-                    .take_while(move |(range_wrapper, _to_ranges)| {
-                        *range_wrapper.range.start() <= gate && gate <= *range_wrapper.range.end()
-                    })
-                    .map(|(from_range_wrapper, to_vec)| {
-                        (from_range_wrapper.range.clone(), to_vec.as_slice())
-                    })
-            })
+    > + '_ {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => Either::Left(
+                circ.interactive_iter()
+                    .map(|(g, idx)| (g, idx, Either::Left(circ.parent_gates(idx)))),
+            ),
+            ExecutableCircuit::StaticLayers(circ) => Either::Right(
+                circ.interactive_with_parents_iter()
+                    .map(|(g, idx, parents)| (g, idx, Either::Right(parents))),
+            ),
+        }
     }
-}
 
-#[derive(Clone)]
-pub struct CircuitLayerIter<'a, G, Idx: GateIdx, W> {
-    circuit: &'a Circuit<G, Idx, W>,
-    layer_iters: HashMap<CircuitId, base_circuit::BaseLayerIter<'a, G, Idx, W>>,
-}
-
-impl<'a, G: Gate, Idx: GateIdx, W: Wire> CircuitLayerIter<'a, G, Idx, W> {
-    pub fn new(circuit: &'a Circuit<G, Idx, W>) -> Self {
-        let first_iter = circuit.circuits[0].layer_iter();
-        Self {
-            circuit,
-            layer_iters: [(0, first_iter)].into(),
+    pub fn layer_iter(&self) -> impl Iterator<Item = ExecutableLayer<'_, G, Idx>> + '_ {
+        match self {
+            ExecutableCircuit::DynLayers(circ) => {
+                Either::Left(dyn_layers::CircuitLayerIter::new(circ).map(ExecutableLayer::DynLayer))
+            }
+            ExecutableCircuit::StaticLayers(circ) => Either::Right(
+                static_layers::LayerIterator::new(circ).map(ExecutableLayer::StaticLayer),
+            ),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CircuitLayer<G, Idx: Hash + PartialEq + Eq> {
-    sc_layers: Vec<(CircuitId, base_circuit::CircuitLayer<G, Idx>)>,
+impl<G: Clone, Idx: GateIdx> Clone for ExecutableCircuit<G, Idx> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::DynLayers(circ) => Self::DynLayers(circ.clone()),
+            Self::StaticLayers(circ) => Self::StaticLayers(circ.clone()),
+        }
+    }
 }
 
-impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for CircuitLayerIter<'a, G, Idx, W> {
-    type Item = CircuitLayer<G, Idx>;
+impl<'c, G: Gate, Idx: GateIdx> ExecutableLayer<'c, G, Idx> {
+    pub fn interactive_count(&self) -> usize {
+        match self {
+            ExecutableLayer::DynLayer(layer) => layer.interactive_iter().count(),
+            ExecutableLayer::StaticLayer(layer_iter) => layer_iter
+                .clone()
+                .map(|layer| layer.interactive_count())
+                .sum(),
+        }
+    }
 
-    // TODO optimize this method, it makes up a big part of the runtime
-    // TODO remove BaseLayerIters when they are not use anymore
-    fn next(&mut self) -> Option<Self::Item> {
-        trace!("layer_iters: {:#?}", &self.layer_iters);
-        let mut sc_layers: Vec<_> = self
-            .layer_iters
-            .iter_mut()
-            .filter_map(|(&sc_id, iter)| iter.next().map(|layer| (sc_id, layer)))
-            .collect();
-        // Only retain iters which can yield elements
-        self.layer_iters.retain(|_sc_id, iter| !iter.is_exhausted());
-
-        // This is crucial as the executor depends on the and gates being in the same order for
-        // both parties
-        sc_layers.sort_unstable_by_key(|sc_id| sc_id.0);
-        for (sc_id, layer) in &sc_layers {
-            // TODO this iterates over all range connections for circuit in sc_layers for every
-            //  layer. This could slow down the layer generation. Use hashmaps?
-            for (_, potential_out) in layer.non_interactive.iter().chain(&layer.interactive) {
-                let from = SubCircuitGate::new(*sc_id, *potential_out);
-                let outgoing = self.circuit.connections.outgoing_gates(from);
-
-                for sc_gate in outgoing {
-                    let to_layer_iter =
-                        self.layer_iters
-                            .entry(sc_gate.circuit_id)
-                            .or_insert_with(|| {
-                                base_circuit::BaseLayerIter::new_uninit(
-                                    &self.circuit.circuits[sc_gate.circuit_id as usize],
-                                )
-                            });
-                    to_layer_iter.add_to_next_layer(sc_gate.gate_id.into());
-                }
+    pub fn interactive_iter(&self) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
+        match self {
+            ExecutableLayer::DynLayer(layer) => Either::Left(layer.interactive_iter()),
+            ExecutableLayer::StaticLayer(layer_iter) => {
+                Either::Right(layer_iter.clone().flat_map(|layer| {
+                    layer
+                        .interactive_iter()
+                        .map(move |(g, id)| (g, SubCircuitGate::new(layer.sc_id, id)))
+                }))
             }
         }
-        // Todo can there be circuits where a layer is empty, but a later call to next returns
-        //  a layer?
-        if sc_layers.is_empty() {
-            None
-        } else {
-            Some(CircuitLayer { sc_layers })
+    }
+
+    pub fn interactive_gates<'s>(&'s self) -> impl Iterator<Item = &'s [G]> + Clone
+    where
+        'c: 's,
+    {
+        match self {
+            ExecutableLayer::DynLayer(layer) => Either::Left(
+                layer
+                    .sc_layers
+                    .iter()
+                    .map(|(_, _, base_layer)| &base_layer.interactive_gates[..]),
+            ),
+            ExecutableLayer::StaticLayer(layer_iter) => {
+                Either::Right(layer_iter.clone().map(|layer| layer.interactive_gates()))
+            }
         }
     }
-}
 
-impl<G: Gate, Idx: Hash + PartialEq + Eq + Copy> CircuitLayer<G, Idx> {
-    pub(crate) fn non_interactive_iter(
-        &self,
-    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + '_ {
-        self.sc_layers.iter().flat_map(|(sc_id, layer)| {
-            layer
-                .non_interactive
-                .iter()
-                .cloned()
-                .map(|(gate, gate_idx)| (gate, SubCircuitGate::new(*sc_id, gate_idx)))
-        })
+    pub fn interactive_indices<'s>(
+        &'s self,
+    ) -> impl Iterator<Item = (CircuitId, &'s [GateId<Idx>])> + Clone
+    where
+        'c: 's,
+    {
+        match self {
+            ExecutableLayer::DynLayer(layer) => Either::Left(
+                layer
+                    .sc_layers
+                    .iter()
+                    .map(|(sc_id, _, base_layer)| (*sc_id, &base_layer.interactive_ids[..])),
+            ),
+            ExecutableLayer::StaticLayer(layer_iter) => Either::Right(
+                layer_iter
+                    .clone()
+                    .map(|layer| (layer.sc_id, layer.interactive_indices())),
+            ),
+        }
     }
 
-    pub(crate) fn interactive_iter(
+    pub fn interactive_parents_iter<'s>(
+        &'s self,
+        circ: &'c ExecutableCircuit<G, Idx>,
+    ) -> impl Iterator<Item = impl Iterator<Item = SubCircuitGate<Idx>> + 'c> + 's
+    where
+        'c: 's,
+    {
+        match (self, circ) {
+            (ExecutableLayer::DynLayer(layer), ExecutableCircuit::DynLayers(circ)) => Either::Left(
+                layer
+                    .interactive_iter()
+                    .map(|(_, id)| Either::Left(circ.parent_gates(id))),
+            ),
+            (ExecutableLayer::StaticLayer(layer_iter), ExecutableCircuit::StaticLayers(circ)) => {
+                Either::Right(
+                    layer_iter
+                        .clone()
+                        .flat_map(|layer| layer.interactive_parents_iter(circ).map(Either::Right)),
+                )
+            }
+            _ => panic!("Non matching ExecutableLayer and ExecutableCircuit"),
+        }
+    }
+
+    pub fn non_interactive_iter(
         &self,
     ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
-        self.sc_layers.iter().flat_map(|(sc_id, layer)| {
-            layer
-                .interactive
-                .iter()
-                .cloned()
-                .map(|(gate, gate_idx)| (gate, SubCircuitGate::new(*sc_id, gate_idx)))
-        })
-    }
-}
-
-impl<G, Idx: GateIdx, W> Default for Circuit<G, Idx, W> {
-    fn default() -> Self {
-        Self {
-            circuits: vec![],
-            connections: Default::default(),
-        }
-    }
-}
-
-impl<G, Idx: GateIdx + Default, W> From<BaseCircuit<G, Idx, W>> for Circuit<G, Idx, W> {
-    fn from(bc: BaseCircuit<G, Idx, W>) -> Self {
-        Self {
-            circuits: vec![Arc::new(bc)],
-            ..Default::default()
-        }
-    }
-}
-
-impl<G, Idx: GateIdx, W> TryFrom<SharedCircuit<G, Idx, W>> for Circuit<G, Idx, W> {
-    type Error = SharedCircuit<G, Idx, W>;
-
-    fn try_from(circuit: SharedCircuit<G, Idx, W>) -> Result<Self, Self::Error> {
-        Arc::try_unwrap(circuit).map(|mutex| mutex.into_inner().into())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::circuit::RangeSubCircuitConnections;
-    use crate::{GateId, SubCircuitGate};
-
-    #[test]
-    fn test_range_connections_simple() {
-        let mut rc = RangeSubCircuitConnections::default();
-        let from_range =
-            SubCircuitGate::new(0, GateId(0_u32))..=SubCircuitGate::new(0, GateId(50_u32));
-        let to_range =
-            SubCircuitGate::new(1, GateId(100_u32))..=SubCircuitGate::new(1, GateId(150_u32));
-
-        rc.insert(from_range.clone(), to_range.clone());
-
-        for (ret_from_range, ret_to_ranges) in
-            rc.get_mapped_ranges(SubCircuitGate::new(0, GateId(0_u32)))
-        {
-            assert_eq!(ret_from_range, from_range);
-            assert_eq!(ret_to_ranges[0], to_range);
-            assert_eq!(ret_to_ranges.len(), 1);
+        match self {
+            ExecutableLayer::DynLayer(layer) => Either::Left(layer.non_interactive_iter()),
+            ExecutableLayer::StaticLayer(layer_iter) => {
+                Either::Right(layer_iter.clone().flat_map(|layer| {
+                    layer
+                        .non_interactive_iter()
+                        .map(move |(g, id)| (g, SubCircuitGate::new(layer.sc_id, id)))
+                }))
+            }
         }
     }
 
-    #[test]
-    fn test_range_connections_overlapping() {
-        let mut rc = RangeSubCircuitConnections::default();
-        let from_range_0 =
-            SubCircuitGate::new(0, GateId(0_u32))..=SubCircuitGate::new(0, GateId(50_u32));
-        let from_range_1 =
-            SubCircuitGate::new(0, GateId(50_u32))..=SubCircuitGate::new(0, GateId(100_u32));
-        let to_range =
-            SubCircuitGate::new(1, GateId(100_u32))..=SubCircuitGate::new(1, GateId(150_u32));
+    pub fn non_interactive_with_parents_iter<'s>(
+        &'s self,
+        circ: &'c ExecutableCircuit<G, Idx>,
+    ) -> impl Iterator<
+        Item = (
+            (G, SubCircuitGate<Idx>),
+            impl Iterator<Item = SubCircuitGate<Idx>> + 'c,
+        ),
+    > + 's
+    where
+        'c: 's,
+    {
+        match (self, circ) {
+            (ExecutableLayer::DynLayer(layer), ExecutableCircuit::DynLayers(circ)) => Either::Left(
+                layer
+                    .non_interactive_iter()
+                    .map(|(g, id)| ((g, id), Either::Left(circ.parent_gates(id)))),
+            ),
+            (ExecutableLayer::StaticLayer(layer_iter), ExecutableCircuit::StaticLayers(circ)) => {
+                Either::Right(layer_iter.clone().flat_map(|layer| {
+                    let non_inter_active_iter = layer
+                        .non_interactive_iter()
+                        .map(move |(g, id)| (g, SubCircuitGate::new(layer.sc_id, id)));
 
-        rc.insert(from_range_0.clone(), to_range.clone());
-        rc.insert(from_range_1.clone(), to_range.clone());
-
-        let mapped_ranges: Vec<_> = rc
-            .get_mapped_ranges(SubCircuitGate::new(0, GateId(50_u32)))
-            .collect();
-        dbg!(&rc.map);
-        dbg!(&mapped_ranges);
-        assert_eq!(mapped_ranges.len(), 2);
-        assert_eq!(mapped_ranges[1], (from_range_0, &[to_range.clone()][..]));
-        assert_eq!(mapped_ranges[0], (from_range_1, &[to_range][..]));
+                    iter::zip(
+                        non_inter_active_iter,
+                        layer.non_interactive_parents_iter(circ).map(Either::Right),
+                    )
+                }))
+            }
+            _ => panic!("Non matching ExecutableLayer and ExecutableCircuit"),
+        }
     }
 
-    #[test]
-    fn test_range_connections_inside_each_other_same_start() {
-        let mut rc = RangeSubCircuitConnections::default();
-        let from_range_0 =
-            SubCircuitGate::new(0, GateId(0_u32))..=SubCircuitGate::new(0, GateId(50_u32));
-        let from_range_1 =
-            SubCircuitGate::new(0, GateId(0_u32))..=SubCircuitGate::new(0, GateId(20_u32));
-        let to_range_0 =
-            SubCircuitGate::new(1, GateId(100_u32))..=SubCircuitGate::new(1, GateId(150_u32));
-        let to_range_1 =
-            SubCircuitGate::new(1, GateId(100_u32))..=SubCircuitGate::new(1, GateId(120_u32));
-
-        rc.insert(from_range_0.clone(), to_range_0.clone());
-        rc.insert(from_range_1.clone(), to_range_1.clone());
-
-        let mapped_ranges: Vec<_> = rc
-            .get_mapped_ranges(SubCircuitGate::new(0, GateId(20_u32)))
-            .collect();
-        dbg!(&mapped_ranges);
-        assert_eq!(mapped_ranges.len(), 2);
-        assert_eq!(mapped_ranges[0], (from_range_0, &[to_range_0][..]));
-        assert_eq!(mapped_ranges[1], (from_range_1, &[to_range_1][..]));
-    }
-
-    #[test]
-    fn test_range_connections_map_to_multiple() {
-        let mut rc = RangeSubCircuitConnections::default();
-        let from_range_0 =
-            SubCircuitGate::new(0, GateId(0_u32))..=SubCircuitGate::new(0, GateId(50_u32));
-        let to_range_0 =
-            SubCircuitGate::new(1, GateId(100_u32))..=SubCircuitGate::new(1, GateId(150_u32));
-        let to_range_1 =
-            SubCircuitGate::new(2, GateId(100_u32))..=SubCircuitGate::new(2, GateId(150_u32));
-
-        rc.insert(from_range_0.clone(), to_range_0.clone());
-        rc.insert(from_range_0.clone(), to_range_1.clone());
-
-        let mapped_ranges: Vec<_> = rc
-            .get_mapped_ranges(SubCircuitGate::new(0, GateId(20_u32)))
-            .collect();
-        assert_eq!(mapped_ranges.len(), 1);
-        assert_eq!(
-            mapped_ranges[0],
-            (from_range_0, &[to_range_0, to_range_1][..])
-        );
-    }
-
-    #[test]
-    fn test_range_connections_regression() {
-        let mut rc = RangeSubCircuitConnections::default();
-
-        let from_range_0 = SubCircuitGate {
-            circuit_id: 0,
-            gate_id: GateId(8_u32),
-        }..=SubCircuitGate {
-            circuit_id: 0,
-            gate_id: GateId(167_u32),
-        };
-        let to_range_0 = SubCircuitGate {
-            circuit_id: 1,
-            gate_id: GateId(0_u32),
-        }..=SubCircuitGate {
-            circuit_id: 1,
-            gate_id: GateId(159_u32),
-        };
-        rc.insert(from_range_0.clone(), to_range_0.clone());
-        let from_range_1 = SubCircuitGate {
-            circuit_id: 1,
-            gate_id: GateId(280_u32),
-        }..=SubCircuitGate {
-            circuit_id: 1,
-            gate_id: GateId(339_u32),
-        };
-        let to_range_1 = SubCircuitGate {
-            circuit_id: 2,
-            gate_id: GateId(0_u32),
-        }..=SubCircuitGate {
-            circuit_id: 2,
-            gate_id: GateId(59_u32),
-        };
-        rc.insert(from_range_1, to_range_1);
-        let from_range_2 = SubCircuitGate {
-            circuit_id: 0,
-            gate_id: GateId(8_u32),
-        }..=SubCircuitGate {
-            circuit_id: 0,
-            gate_id: GateId(87_u32),
-        };
-        let to_range_2 = SubCircuitGate {
-            circuit_id: 3,
-            gate_id: GateId(0_u32),
-        }..=SubCircuitGate {
-            circuit_id: 3,
-            gate_id: GateId(79_u32),
-        };
-        rc.insert(from_range_2.clone(), to_range_2.clone());
-        let from_range_4 = SubCircuitGate {
-            circuit_id: 0,
-            gate_id: GateId(96_u32),
-        }..=SubCircuitGate {
-            circuit_id: 0,
-            gate_id: GateId(175_u32),
-        };
-        let to_range_4 = SubCircuitGate {
-            circuit_id: 3,
-            gate_id: GateId(80_u32),
-        }..=SubCircuitGate {
-            circuit_id: 3,
-            gate_id: GateId(159_u32),
-        };
-        rc.insert(from_range_4, to_range_4);
-
-        let mapped_ranges: Vec<_> = rc
-            .get_mapped_ranges(SubCircuitGate::new(0, GateId(87_u32)))
-            .collect();
-        dbg!(&rc.map);
-        dbg!(&mapped_ranges);
-        assert_eq!(mapped_ranges.len(), 2);
-        assert_eq!(
-            mapped_ranges[0],
-            (from_range_0.clone(), &[to_range_0.clone()][..])
-        );
-        assert_eq!(mapped_ranges[1], (from_range_2, &[to_range_2][..]));
-
-        let mapped_ranges: Vec<_> = rc
-            .get_mapped_ranges(SubCircuitGate::new(0, GateId(88_u32)))
-            .collect();
-        dbg!(&rc.map);
-        dbg!(&mapped_ranges);
-        assert_eq!(mapped_ranges.len(), 1);
-        assert_eq!(mapped_ranges[0], (from_range_0, &[to_range_0][..]));
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_range_connections_inside_each_other_illegal() {
-        let mut rc = RangeSubCircuitConnections::default();
-        let from_range_0 =
-            SubCircuitGate::new(0, GateId(0_u32))..=SubCircuitGate::new(0, GateId(50_u32));
-        let from_range_1 =
-            SubCircuitGate::new(0, GateId(10_u32))..=SubCircuitGate::new(0, GateId(20_u32));
-        let to_range_0 =
-            SubCircuitGate::new(1, GateId(100_u32))..=SubCircuitGate::new(1, GateId(150_u32));
-        let to_range_1 =
-            SubCircuitGate::new(1, GateId(110_u32))..=SubCircuitGate::new(1, GateId(120_u32));
-
-        rc.insert(from_range_0, to_range_0);
-        rc.insert(from_range_1, to_range_1);
+    /// Split layer into (scalar, simd) gates
+    pub(crate) fn split_simd(&self) -> (Self, Self) {
+        match self {
+            Self::DynLayer(layer) => {
+                let (scalar, simd) = layer.split_simd();
+                (Self::DynLayer(scalar), Self::DynLayer(simd))
+            }
+            Self::StaticLayer(layer_iter) => {
+                let (scalar, simd) = layer_iter.split_simd();
+                (Self::StaticLayer(scalar), Self::StaticLayer(simd))
+            }
+        }
     }
 }

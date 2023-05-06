@@ -2,7 +2,7 @@ use std::ops;
 
 use criterion::{criterion_group, BenchmarkId, Criterion};
 
-use gmw::circuit::{Circuit, CircuitLayerIter};
+use gmw::circuit::dyn_layers::{Circuit, CircuitLayerIter};
 use gmw::secret::{inputs, low_depth_reduce, Secret};
 use gmw::{sub_circuit, BooleanGate, CircuitBuilder};
 

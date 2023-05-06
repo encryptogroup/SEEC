@@ -11,11 +11,11 @@ use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::builder::CircuitBuilder;
-use gmw::circuit::GateId;
+use gmw::circuit::{ExecutableCircuit, GateId};
 use gmw::common::BitVec;
-use gmw::executor::BoolGmwExecutor;
+use gmw::executor::{BoolGmwExecutor, Message};
 use gmw::mul_triple::ot_ext::OtMTProvider;
-use gmw::protocols::boolean_gmw;
+use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
 use gmw::sub_circuit;
 use mpc_channel::sub_channels_for;
@@ -59,7 +59,7 @@ fn priv_mail_search(
     modifier_chain_share: &str,
     mails: &[Mail],
     duplication_factor: usize,
-) -> (BitVec, Vec<GateId>) {
+) -> (BitVec<usize>, Vec<GateId>) {
     debug!(%modifier_chain_share);
     let (mut input, modifier_chain_input) = base64_string_to_input(modifier_chain_share, 1);
     let modifier_chain_share_input: Vec<_> = modifier_chain_input.into_iter().flatten().collect();
@@ -105,7 +105,10 @@ fn priv_mail_search(
             }
         }
     }
-    let out_ids = search_results.into_iter().map(Secret::output).collect();
+    let out_ids = search_results
+        .into_iter()
+        .map(Secret::into_output)
+        .collect();
     (input, out_ids)
 }
 
@@ -164,13 +167,17 @@ fn or_sc(input: &[Secret]) -> Secret {
         .unwrap_or_else(|| Secret::from_const(0, false))
 }
 
-fn base64_string_to_input(input: &str, duplication_factor: usize) -> (BitVec, Vec<[Secret; 8]>) {
+fn base64_string_to_input(
+    input: &str,
+    duplication_factor: usize,
+) -> (BitVec<usize>, Vec<[Secret; 8]>) {
     let decoded = base64::decode(input).expect("Decode base64 input");
     let duplicated = decoded.repeat(duplication_factor);
     let shares = (0..duplicated.len())
         .map(|_| inputs(8).try_into().unwrap())
         .collect();
     let input = BitVec::from_vec(duplicated);
+    let input = BitVec::from_iter(input);
     (input, shares)
 }
 
@@ -200,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
         &mails,
         args.duplication_factor,
     );
-    let circuit = CircuitBuilder::global_into_circuit();
+    let circuit = ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
     info!("Building circuit took: {}", now.elapsed().as_secs_f32());
     // circuit = circuit.clone().into_base_circuit().into();
     // if args.save_circuit {
@@ -218,7 +225,7 @@ async fn main() -> anyhow::Result<()> {
         &mut receiver,
         64,
         mpc_channel::Receiver<ot_ext::ExtOTMsg>,
-        boolean_gmw::Msg
+        Message<BooleanGmw>
     )
     .await?;
 

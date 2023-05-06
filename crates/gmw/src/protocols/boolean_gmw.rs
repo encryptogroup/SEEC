@@ -3,11 +3,12 @@ use crate::circuit::base_circuit::BaseGate;
 use crate::common::BitVec;
 use crate::evaluate::and;
 use crate::mul_triple::{MulTriple, MulTriples};
-use crate::protocols::{Gate, Protocol, ScalarDim, Sharing};
+use crate::protocols::{Gate, Protocol, ScalarDim, SetupStorage, Share, Sharing};
 use crate::utils::rand_bitvec;
+use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-use std::ops;
+use tracing::trace;
 
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct BooleanGmw;
@@ -15,10 +16,20 @@ pub struct BooleanGmw;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Msg {
     // TODO ser/de the BitVecs or Vecs? Or maybe a single Vec? e and d have the same length
-    AndLayer { e: Vec<u8>, d: Vec<u8> },
+    AndLayer {
+        size: usize,
+        e: Vec<usize>,
+        d: Vec<usize>,
+    },
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SimdMsg {
+    packed_data: Msg,
+    simd_sizes: Vec<u32>,
+}
+
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum BooleanGate {
     Base(BaseGate<bool>),
     And,
@@ -32,24 +43,26 @@ pub struct XorSharing<R: CryptoRng + Rng> {
 }
 
 impl Protocol for BooleanGmw {
+    const SIMD_SUPPORT: bool = true;
     type Msg = Msg;
+    type SimdMsg = SimdMsg;
     type Gate = BooleanGate;
     type Wire = ();
-    type ShareStorage = BitVec;
+    type ShareStorage = BitVec<usize>;
     type SetupStorage = MulTriples;
 
     fn compute_msg(
         &self,
         _party_id: usize,
-        interactive_gates: impl IntoIterator<Item = (BooleanGate, bool)>,
-        inputs: impl IntoIterator<Item = bool>,
-        mul_triples: &MulTriples,
+        interactive_gates: impl Iterator<Item = BooleanGate>,
+        _gate_outputs: impl Iterator<Item = bool>,
+        mut inputs: impl Iterator<Item = bool>,
+        mul_triples: &mut MulTriples,
     ) -> Self::Msg {
-        let mut inputs = inputs.into_iter();
-        let (d, e): (BitVec, BitVec) = interactive_gates
-            .into_iter()
+        trace!("compute_msg");
+        let (d, e): (BitVec<usize>, BitVec<usize>) = interactive_gates
             .zip(mul_triples.iter())
-            .map(|((gate, _), mt): ((BooleanGate, bool), MulTriple)| {
+            .map(|(gate, mt): (BooleanGate, MulTriple)| {
                 // TODO debug_assert?
                 assert!(matches!(gate, BooleanGate::And));
                 let mut inputs = inputs.by_ref().take(gate.input_size());
@@ -62,26 +75,66 @@ impl Protocol for BooleanGmw {
             })
             .unzip();
         Msg::AndLayer {
+            size: e.len(),
             e: e.into_vec(),
             d: d.into_vec(),
+        }
+    }
+
+    fn compute_msg_simd<'e>(
+        &self,
+        _party_id: usize,
+        _interactive_gates: impl Iterator<Item = Self::Gate>,
+        _gate_outputs: impl Iterator<Item = &'e BitVec<usize>>,
+        inputs: impl Iterator<Item = &'e BitVec<usize>>,
+        preprocessing_data: &mut Self::SetupStorage,
+    ) -> Self::SimdMsg {
+        let mut simd_sizes = vec![];
+        let mut d = BitVec::new();
+        let mut e = BitVec::new();
+        inputs.chunks(2).into_iter().for_each(|mut chunk| {
+            let x = chunk.next().unwrap();
+            let y = chunk.next().unwrap();
+            simd_sizes.push(x.len() as u32);
+            debug_assert_eq!(x.len(), y.len(), "Unequal SIMD sizes");
+            e.extend_from_bitslice(x);
+            d.extend_from_bitslice(y);
+        });
+        let mts = preprocessing_data.slice(..d.len());
+
+        d ^= mts.a();
+        e ^= mts.b();
+
+        SimdMsg {
+            packed_data: Msg::AndLayer {
+                size: 0,
+                e: e.into_vec(),
+                d: d.into_vec(),
+            },
+            simd_sizes,
         }
     }
 
     fn evaluate_interactive(
         &self,
         party_id: usize,
-        _interactive_gates: impl IntoIterator<Item = (Self::Gate, bool)>,
+        _interactive_gates: impl Iterator<Item = Self::Gate>,
+        _gate_outputs: impl Iterator<Item = bool>,
         own_msg: Self::Msg,
         other_msg: Self::Msg,
-        mul_triples: MulTriples,
+        mul_triples: &mut MulTriples,
     ) -> Self::ShareStorage {
-        let Msg::AndLayer { d, e } = own_msg;
+        let Msg::AndLayer { d, e, size } = own_msg;
         let d = BitVec::from_vec(d);
         let e = BitVec::from_vec(e);
         let Msg::AndLayer {
+            size: resp_size,
             d: resp_d,
             e: resp_e,
         } = other_msg;
+        assert_eq!(size, resp_size, "Message have unequal size");
+        // Remove the mul_triples used in compute_msg
+        let mul_triples = mul_triples.remove_first(size);
         d.into_iter()
             .zip(e)
             .zip(BitVec::from_vec(resp_d))
@@ -94,6 +147,64 @@ impl Protocol for BooleanGmw {
             })
             .collect()
     }
+
+    fn evaluate_interactive_simd<'e>(
+        &self,
+        party_id: usize,
+        _interactive_gates: impl Iterator<Item = Self::Gate>,
+        _gate_outputs: impl Iterator<Item = &'e BitVec<usize>>,
+        own_msg: Self::SimdMsg,
+        other_msg: Self::SimdMsg,
+        mul_triples: &mut Self::SetupStorage,
+    ) -> Vec<Self::ShareStorage> {
+        let SimdMsg {
+            packed_data: Msg::AndLayer { d, e, size },
+            simd_sizes,
+        } = own_msg;
+        let own_d = BitVec::from_vec(d);
+        let own_e = BitVec::from_vec(e);
+        let SimdMsg {
+            packed_data:
+                Msg::AndLayer {
+                    d: resp_d,
+                    e: resp_e,
+                    size: resp_size,
+                },
+            simd_sizes: resp_simd_sizes,
+        } = other_msg;
+        let resp_d = BitVec::from_vec(resp_d);
+        let resp_e = BitVec::from_vec(resp_e);
+
+        assert_eq!(size, resp_size, "Message have unequal size");
+        assert_eq!(
+            simd_sizes, resp_simd_sizes,
+            "Message have unequal simd sizes"
+        );
+        let total_size = simd_sizes.iter().copied().sum::<u32>() as usize;
+        // Remove the mul_triples used in compute_msg
+        let mts = mul_triples.remove_first(total_size);
+        let d = own_d ^ resp_d;
+        let e = own_e ^ resp_e;
+        let mut res = if party_id == 0 {
+            d.clone() & e.clone()
+        } else {
+            BitVec::repeat(false, total_size)
+        };
+        res ^= d & mts.b() ^ e & mts.a() & mts.a() ^ mts.c();
+        let mut res = res.as_bitslice();
+        simd_sizes
+            .iter()
+            .map(|size| {
+                let simd_share = res[..*size as usize].to_bitvec();
+                res = &res[*size as usize..];
+                simd_share
+            })
+            .collect()
+    }
+}
+
+impl Share for bool {
+    type SimdShare = BitVec<usize>;
 }
 
 impl Gate for BooleanGate {
@@ -123,18 +234,43 @@ impl Gate for BooleanGate {
         Self::Base(base_gate)
     }
 
+    #[inline]
     fn evaluate_non_interactive(
         &self,
         party_id: usize,
-        inputs: impl IntoIterator<Item = Self::Share>,
+        mut inputs: impl Iterator<Item = Self::Share>,
     ) -> Self::Share {
-        let mut input = inputs.into_iter();
         match self {
-            BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, input.by_ref()),
+            BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, inputs),
             BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
-            BooleanGate::Xor => input.take(2).fold(false, ops::BitXor::bitxor),
+            BooleanGate::Xor => {
+                inputs.next().expect("Missing inputs") ^ inputs.next().expect("Missing inputs")
+            }
             BooleanGate::Inv => {
-                let inp = input.next().expect("Empty input");
+                let inp = inputs.next().expect("Empty input");
+                if party_id == 0 {
+                    !inp
+                } else {
+                    inp
+                }
+            }
+        }
+    }
+
+    fn evaluate_non_interactive_simd<'this, 'e>(
+        &'this self,
+        party_id: usize,
+        mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
+    ) -> <Self::Share as Share>::SimdShare {
+        match self {
+            BooleanGate::Base(base) => base.evaluate_non_interactive_simd(party_id, inputs),
+            BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
+            BooleanGate::Xor => {
+                inputs.next().expect("Missing inputs").clone()
+                    ^ inputs.next().expect("Missing inputs")
+            }
+            BooleanGate::Inv => {
+                let inp = inputs.next().expect("Empty input").clone();
                 if party_id == 0 {
                     !inp
                 } else {
@@ -169,7 +305,7 @@ impl<R: CryptoRng + Rng> XorSharing<R> {
 
 impl<R: CryptoRng + Rng> Sharing for XorSharing<R> {
     type Plain = bool;
-    type Shared = BitVec;
+    type Shared = BitVec<usize>;
 
     fn share(&mut self, input: Self::Shared) -> [Self::Shared; 2] {
         let rand = rand_bitvec(input.len(), &mut self.rng);
@@ -183,8 +319,19 @@ impl<R: CryptoRng + Rng> Sharing for XorSharing<R> {
     }
 }
 
+impl Default for Msg {
+    fn default() -> Self {
+        Self::AndLayer {
+            size: 0,
+            e: vec![],
+            d: vec![],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::circuit::ExecutableCircuit;
     use crate::common::BitVec;
     use crate::private_test_utils::{execute_circuit, TestChannel};
     use crate::secret::Secret;
@@ -196,7 +343,12 @@ mod tests {
         (a & false).output();
 
         let circ = CircuitBuilder::<BooleanGate, u32>::global_into_circuit();
-        let out = execute_circuit(&circ, true, TestChannel::InMemory).await?;
+        let out = execute_circuit(
+            &ExecutableCircuit::DynLayers(circ),
+            true,
+            TestChannel::InMemory,
+        )
+        .await?;
         assert_eq!(out, BitVec::<u8>::repeat(false, 1));
         Ok(())
     }

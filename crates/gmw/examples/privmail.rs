@@ -8,12 +8,12 @@ use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::Circuit;
+use gmw::circuit::ExecutableCircuit;
 use gmw::circuit::GateId;
 use gmw::common::BitVec;
-use gmw::executor::BoolGmwExecutor;
+use gmw::executor::{BoolGmwExecutor, Message};
 use gmw::mul_triple::insecure_provider::InsecureMTProvider;
-use gmw::protocols::boolean_gmw;
+use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
 use gmw::CircuitBuilder;
 use mpc_channel::sub_channels_for;
@@ -56,7 +56,7 @@ fn priv_mail_search(
     modifier_chain_share: &str,
     mails: &[Mail],
     duplication_factor: usize,
-) -> (BitVec, Vec<GateId>) {
+) -> (BitVec<usize>, Vec<GateId>) {
     debug!(%modifier_chain_share);
     let (mut input, modifier_chain_input) = base64_string_to_input(modifier_chain_share, 1);
     let modifier_chain_share_input: Vec<_> = modifier_chain_input.into_iter().flatten().collect();
@@ -105,7 +105,10 @@ fn priv_mail_search(
             }
         }
     }
-    let out_ids = search_results.into_iter().map(Secret::output).collect();
+    let out_ids = search_results
+        .into_iter()
+        .map(Secret::into_output)
+        .collect();
     (input, out_ids)
 }
 
@@ -162,13 +165,17 @@ fn create_comparison_circuit(
     res
 }
 
-fn base64_string_to_input(input: &str, duplication_factor: usize) -> (BitVec, Vec<[Secret; 8]>) {
+fn base64_string_to_input(
+    input: &str,
+    duplication_factor: usize,
+) -> (BitVec<usize>, Vec<[Secret; 8]>) {
     let decoded = base64::decode(input).expect("Decode base64 input");
     let duplicated = decoded.repeat(duplication_factor);
     let shares = (0..duplicated.len())
         .map(|_| inputs(8).try_into().unwrap())
         .collect();
     let input = BitVec::from_vec(duplicated);
+    let input = BitVec::from_iter(input);
     (input, shares)
 }
 
@@ -209,7 +216,8 @@ async fn main() -> anyhow::Result<()> {
         args.duplication_factor,
     );
 
-    let circuit: Circuit<_> = CircuitBuilder::global_into_circuit();
+    let circuit: ExecutableCircuit<_, _> =
+        ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
     // if args.save_circuit {
     //     circuit.save_dot("privmail.dot")?;
     // }
@@ -226,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let (mut sender, mut receiver) =
-        sub_channels_for!(&mut sender, &mut receiver, 16, boolean_gmw::Msg).await?;
+        sub_channels_for!(&mut sender, &mut receiver, 16, Message<BooleanGmw>).await?;
 
     let output = executor.execute(input, &mut sender, &mut receiver).await?;
     info!(

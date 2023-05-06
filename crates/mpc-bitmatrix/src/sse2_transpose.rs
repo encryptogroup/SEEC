@@ -24,7 +24,7 @@ pub(crate) fn transpose<T: Storage>(input: &[T], nrows: usize, ncols: usize) -> 
     assert!(nrows >= 16, "nrows must be >= 16");
     assert_eq!(
         ncols * nrows,
-        input.len() * mem::size_of::<T>() * 8,
+        mem::size_of_val(input) * 8,
         "input.len() does not match nrows/ncols"
     );
     let mut output = vec![T::zero(); input.len()];

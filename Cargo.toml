@@ -6,6 +6,8 @@ members = ["crates/*"]
 [workspace.dependencies]
 # Use a workspace.forked remoc version which changes the default options for bincode to use varint encoding
 remoc = { git = "https://github.com/robinhundt/remoc", rev = "c052a35b2e8fe78daeb06f4686b1d3f29dab7005", default-features = false, features = ["rch", "codec-bincode"]}
+clap = { version = "4.2.2", features = ["derive"]}
 
-[profile.release]
+[profile.debug-release]
+inherits = "release"
 debug = 1

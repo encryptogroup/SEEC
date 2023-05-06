@@ -1,10 +1,10 @@
 use anyhow::Result;
-use gmw::circuit::DefaultIdx;
+use gmw::circuit::{DefaultIdx, ExecutableCircuit};
 
 use gmw::common::BitVec;
 use gmw::private_test_utils::{execute_circuit, init_tracing, TestChannel};
 use gmw::secret::{inputs, low_depth_reduce};
-use gmw::{BooleanGate, Circuit, CircuitBuilder};
+use gmw::{BooleanGate, CircuitBuilder};
 
 #[tokio::test]
 async fn and_tree() -> Result<()> {
@@ -24,7 +24,8 @@ async fn and_tree() -> Result<()> {
     let inputs_1 = BitVec::repeat(true, input_count);
 
     let exp_output: BitVec = BitVec::repeat(true, 1);
-    let and_tree: Circuit<BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
+    let and_tree: ExecutableCircuit<BooleanGate, DefaultIdx> =
+        ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
     let out = execute_circuit(&and_tree, [inputs_0, inputs_1], TestChannel::Tcp).await?;
     assert_eq!(exp_output, out);
     Ok(())
