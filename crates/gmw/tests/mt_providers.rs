@@ -8,8 +8,10 @@ use tokio::task::spawn_blocking;
 
 use gmw::common::BitVec;
 use gmw::executor::Executor;
-use gmw::mul_triple::trusted_provider::{TrustedMTProviderClient, TrustedMTProviderServer};
-use gmw::mul_triple::trusted_seed_provider;
+use gmw::mul_triple::boolean;
+use gmw::mul_triple::boolean::trusted_provider::{
+    TrustedMTProviderClient, TrustedMTProviderServer,
+};
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use mpc_channel::{sub_channel, tcp};
@@ -64,7 +66,7 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
     let _guard = init_tracing();
     let tp_addr = ("127.0.0.1", 7749);
     let _mt_server = tokio::spawn(async move {
-        trusted_seed_provider::TrustedMTProviderServer::start(tp_addr)
+        boolean::trusted_seed_provider::TrustedMTProviderServer::start(tp_addr)
             .await
             .unwrap()
     });
@@ -75,11 +77,17 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
         .await??,
     );
     let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
-    let mt_provider_1 =
-        trusted_seed_provider::TrustedMTProviderClient::new("some_id".into(), sender, receiver);
+    let mt_provider_1 = boolean::trusted_seed_provider::TrustedMTProviderClient::new(
+        "some_id".into(),
+        sender,
+        receiver,
+    );
     let (sender, _, receiver, _) = tcp::connect(tp_addr).await?;
-    let mt_provider_2 =
-        trusted_seed_provider::TrustedMTProviderClient::new("some_id".into(), sender, receiver);
+    let mt_provider_2 = boolean::trusted_seed_provider::TrustedMTProviderClient::new(
+        "some_id".into(),
+        sender,
+        receiver,
+    );
     let mut ex1 = Executor::<BooleanGmw, _>::new(&circuit, 0, mt_provider_1).await?;
     let mut ex2 = Executor::<BooleanGmw, _>::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);

@@ -14,7 +14,7 @@ use gmw::circuit::builder::CircuitBuilder;
 use gmw::circuit::{ExecutableCircuit, GateId};
 use gmw::common::BitVec;
 use gmw::executor::{BoolGmwExecutor, Message};
-use gmw::mul_triple::ot_ext::OtMTProvider;
+use gmw::mul_triple::boolean::ot_ext::OtMTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
 use gmw::sub_circuit;

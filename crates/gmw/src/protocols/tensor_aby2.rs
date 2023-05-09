@@ -2,7 +2,8 @@ use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{DefaultIdx, ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{Executor, GateOutputs, Message, ScGateOutputs};
-use crate::mul_triple::{MTProvider, MulTriples};
+use crate::mul_triple::boolean::MulTriples;
+use crate::mul_triple::MTProvider;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
     boolean_gmw, Dimension, DynDim, FunctionDependentSetup, Gate, Protocol, SetupStorage,

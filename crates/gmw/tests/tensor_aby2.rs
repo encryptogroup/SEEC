@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use gmw::circuit::base_circuit::BaseGate;
 use gmw::circuit::{BaseCircuit, ExecutableCircuit};
 use gmw::executor::{Executor, GateOutputs};
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::tensor_aby2::{
     AbySetupProvider, BoolTensorAby2, BooleanGate, DeltaShareStorage, DeltaSharing, PartialShare,

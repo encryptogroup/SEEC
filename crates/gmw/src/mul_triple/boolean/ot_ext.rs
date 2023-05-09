@@ -1,14 +1,14 @@
 use crate::common::BitVec;
-use crate::mul_triple::{MTProvider, MulTriples};
+use crate::mul_triple::boolean::MulTriples;
+use crate::mul_triple::MTProvider;
+use crate::utils::rand_bitvec;
 use async_trait::async_trait;
 use num_integer::Integer;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use remoc::RemoteSend;
+use std::fmt::Debug;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
-
-use crate::utils::rand_bitvec;
-use std::fmt::Debug;
 
 pub struct OtMTProvider<RNG, S: ExtROTSender, R: ExtROTReceiver> {
     rng: RNG,
@@ -54,25 +54,25 @@ where
 
         let amount = Integer::next_multiple_of(&amount, &8);
 
-        let (ch_sender1, ch_receiver1) =
+        let (ch_sender1, mut ch_receiver1) =
             mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
-        let (ch_sender2, ch_receiver2) =
+        let (ch_sender2, mut ch_receiver2) =
             mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
 
-        let send = self
-            .ot_sender
-            .send_random(amount, &mut sender_rng, ch_sender1, ch_receiver2);
+        let send =
+            self.ot_sender
+                .send_random(amount, &mut sender_rng, &ch_sender1, &mut ch_receiver2);
 
         let a_i = rand_bitvec(amount, &mut receiver_rng);
         let receive = self.ot_receiver.receive_random(
             a_i.as_bitslice(),
             &mut receiver_rng,
-            ch_sender2,
-            ch_receiver1,
+            &ch_sender2,
+            &mut ch_receiver1,
         );
 
         let (send_ots, recv_ots) = tokio::try_join!(send, receive).unwrap();
@@ -103,7 +103,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::mul_triple::boolean::ot_ext::OtMTProvider;
+    use crate::mul_triple::MTProvider;
     use crate::private_test_utils::init_tracing;
     use rand::rngs::OsRng;
     use zappot::ot_ext;

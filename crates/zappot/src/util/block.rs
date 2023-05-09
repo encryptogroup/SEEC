@@ -90,6 +90,18 @@ impl Distribution<Block> for Standard {
     }
 }
 
+impl From<u8> for Block {
+    fn from(val: u8) -> Self {
+        Self { data: val.into() }
+    }
+}
+
+impl From<u16> for Block {
+    fn from(val: u16) -> Self {
+        Self { data: val.into() }
+    }
+}
+
 impl From<u32> for Block {
     fn from(val: u32) -> Self {
         Self { data: val.into() }

@@ -53,8 +53,6 @@ where
     P: Protocol + Default,
     Idx: GateIdx,
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
-    P::Msg: Default,
-    P::SimdMsg: Default,
 {
     pub async fn new<
         FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>,
@@ -79,8 +77,6 @@ where
     P: Protocol,
     Idx: GateIdx,
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
-    P::Msg: Default,
-    P::SimdMsg: Default,
 {
     pub async fn new_with_state<
         FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>,
@@ -499,6 +495,7 @@ mod tests {
     use crate::circuit::{BaseCircuit, DefaultIdx, ExecutableCircuit};
     use crate::common::BitVec;
     use crate::private_test_utils::{create_and_tree, execute_circuit, init_tracing, TestChannel};
+    use crate::protocols::boolean_gmw::BooleanGmw;
     use crate::protocols::ScalarDim;
     use crate::secret::{inputs, Secret};
     use crate::{BooleanGate, Circuit, CircuitBuilder};
@@ -516,7 +513,7 @@ mod tests {
         circuit.add_wired_gate(Base(BaseGate::Output(ScalarDim)), &[and_2]);
 
         let inputs = [BitVec::repeat(true, 2), BitVec::repeat(false, 2)];
-        let out = execute_circuit(
+        let out = execute_circuit::<BooleanGmw, _, _>(
             &ExecutableCircuit::DynLayers(circuit.into()),
             inputs,
             TestChannel::InMemory,
@@ -537,7 +534,7 @@ mod tests {
             bits
         };
         let inputs_1 = !inputs_0.clone();
-        let out = execute_circuit(
+        let out = execute_circuit::<BooleanGmw, _, _>(
             &ExecutableCircuit::DynLayers(and_tree.into()),
             [inputs_0, inputs_1],
             TestChannel::InMemory,
@@ -573,7 +570,7 @@ mod tests {
         let adder: Circuit<BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
 
         debug!("Into circuit");
-        let out = execute_circuit(
+        let out = execute_circuit::<BooleanGmw, _, _>(
             &ExecutableCircuit::StaticLayers(adder.precompute_layers()),
             [inputs_0, inputs_1],
             TestChannel::InMemory,

@@ -33,12 +33,12 @@ async fn sender(args: Args) -> Vec<[Block; 2]> {
         mpc_channel::tcp::listen::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
-    let (ch_sender, ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
+    let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
         .await
         .expect("Establishing sub channel");
     // Perform the random ots
     sender
-        .send_random(args.num_ots, &mut rng, ch_sender, ch_receiver)
+        .send_random(args.num_ots, &mut rng, &ch_sender, &mut ch_receiver)
         .await
         .expect("Failed to generate ROTs")
 }
@@ -54,7 +54,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
         mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
-    let (ch_sender, ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
+    let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
         .await
         .expect("Establishing sub channel");
 
@@ -66,7 +66,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
 
     // Perform the random ots
     let ots = receiver
-        .receive_random(&choices, &mut rng, ch_sender, ch_receiver)
+        .receive_random(&choices, &mut rng, &ch_sender, &mut ch_receiver)
         .await
         .expect("Failed to generate ROTs");
     (ots, choices)

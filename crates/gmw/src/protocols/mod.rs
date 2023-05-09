@@ -4,13 +4,16 @@ use crate::common::{BitSlice, BitVec};
 use crate::executor::{GateOutputs, ScGateOutputs};
 use async_trait::async_trait;
 use bitvec::store::BitStore;
+use num_traits::{Pow, WrappingAdd, WrappingMul, WrappingSub};
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
+use zappot::util::Block;
 
 pub mod aby2;
+pub mod arithmetic_gmw;
 pub mod boolean_gmw;
 pub mod tensor_aby2;
 
@@ -172,6 +175,24 @@ impl<T: BitStore> ShareStorage<bool> for BitVec<T> {
     }
 }
 
+impl<R: Ring> ShareStorage<R> for Vec<R> {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn repeat(val: R, len: usize) -> Self {
+        vec![val; len]
+    }
+
+    fn set(&mut self, idx: usize, val: R) {
+        self[idx] = val;
+    }
+
+    fn get(&self, idx: usize) -> R {
+        self[idx].clone()
+    }
+}
+
 pub trait SetupStorage: Default + Sized + Send + Sync {
     fn len(&self) -> usize;
     /// Split of the last `count` mul triples.
@@ -194,7 +215,7 @@ pub trait Sharing {
 
     fn share(&mut self, input: Self::Shared) -> [Self::Shared; 2];
 
-    fn reconstruct(&mut self, shares: [Self::Shared; 2]) -> Self::Shared;
+    fn reconstruct(shares: [Self::Shared; 2]) -> Self::Shared;
 }
 
 pub trait Dimension:
@@ -248,3 +269,43 @@ impl DynDim {
         }
     }
 }
+
+// This doesn't really capture a Ring in the mathematic sense, but is enough for our purposes
+pub trait Ring:
+    WrappingAdd
+    + WrappingSub
+    + WrappingMul
+    + Pow<u32, Output = Self>
+    + Share
+    + Ord
+    + Eq
+    + RemoteSend
+    + 'static
+    + Sized
+{
+    const BITS: usize;
+    const BYTES: usize;
+    const MAX: Self;
+
+    fn from_block(b: Block) -> Self;
+}
+
+macro_rules! impl_ring {
+    ($($typ:ty),+) => {
+        $(
+        impl Ring for $typ {
+            const BITS: usize = { Self::BYTES * 8 };
+            const BYTES: usize = { mem::size_of::<Self>() };
+            const MAX: Self = <$typ>::MAX;
+
+            fn from_block(b: Block) -> Self {
+                let bytes = b.to_le_bytes();
+                let truncated: [u8; Self::BYTES] = bytes[..Self::BYTES].try_into().unwrap();
+                Self::from_le_bytes(truncated)
+            }
+        }
+        )*
+    };
+}
+
+impl_ring!(u8, u16, u32, u64, u128);

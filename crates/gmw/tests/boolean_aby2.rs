@@ -2,7 +2,7 @@ use gmw::common::BitVec;
 use gmw::executor::Executor;
 
 use gmw::circuit::ExecutableCircuit;
-use gmw::mul_triple::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::aby2::{AbySetupProvider, BooleanAby2, DeltaSharing, ShareType};
 use gmw::Circuit;
