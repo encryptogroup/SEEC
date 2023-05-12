@@ -1,7 +1,6 @@
-use gmw::common::BitVec;
-use gmw::executor::Executor;
-
 use gmw::circuit::ExecutableCircuit;
+use gmw::common::BitVec;
+use gmw::executor::{Executor, Input};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::aby2::{AbySetupProvider, BooleanAby2, DeltaSharing, ShareType};
@@ -70,12 +69,14 @@ async fn eval_8_bit_adder() -> anyhow::Result<()> {
 
     let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(16);
 
-    let (out1, out2) = tokio::try_join!(
-        ex1.execute(inp1, &mut ch1.0, &mut ch1.1),
-        ex2.execute(inp2, &mut ch2.0, &mut ch2.1),
+    let (out0, out1) = tokio::try_join!(
+        ex1.execute(Input::Scalar(inp1), &mut ch1.0, &mut ch1.1),
+        ex2.execute(Input::Scalar(inp2), &mut ch2.0, &mut ch2.1),
     )?;
 
-    let out_bits: BitVec = DeltaSharing::reconstruct(out1, out2);
+    let out0 = out0.into_scalar().unwrap();
+    let out1 = out1.into_scalar().unwrap();
+    let out_bits: BitVec = DeltaSharing::reconstruct(out0, out1);
     assert_eq!(BitVec::from_element(42_u8), out_bits);
 
     Ok(())

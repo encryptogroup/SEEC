@@ -1,5 +1,5 @@
 use crate::circuit::{ExecutableCircuit, GateIdx};
-use crate::executor::{Executor, Message};
+use crate::executor::{Executor, Input, Message};
 use crate::mul_triple::{boolean, ErasedError, MTProvider};
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{Gate, Protocol, Share, ShareStorage};
@@ -7,7 +7,10 @@ use crate::CircuitBuilder;
 use anyhow::{anyhow, Context};
 use mpc_channel::util::{Phase, RunResult, Statistics};
 use mpc_channel::{sub_channels_for, Channel, Receiver};
+use rand::distributions::{Distribution, Standard};
 use rand::rngs::OsRng;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use serde::Serialize;
 use std::error::Error;
 use std::fmt::Debug;
@@ -74,6 +77,7 @@ pub struct BenchResult {
 impl<P, Idx> BenchParty<P, Idx>
 where
     P: BenchProtocol,
+    Standard: Distribution<<<P as Protocol>::Gate as Gate>::Share>,
     Idx: GateIdx,
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
 {
@@ -114,6 +118,11 @@ where
     /// Sets the metadata of the `BenchResult` that is returned by `bench()`
     pub fn metadata(mut self, meta: String) -> Self {
         self.meta = meta;
+        self
+    }
+
+    pub fn sleep_after_phase(mut self, sleep: Duration) -> Self {
+        self.sleep_after_phase = sleep;
         self
     }
 
@@ -183,15 +192,24 @@ where
                 .await
                 .context("Failed to create executor")?;
 
-            let fake_inp = P::ShareStorage::repeat(Default::default(), circ.input_count());
+            let mut rng = ChaCha8Rng::seed_from_u64(42 * self.id as u64);
+            let fake_inp = match circ.simd_size(0) {
+                None => Input::Scalar(P::ShareStorage::random(circ.input_count(), &mut rng)),
+                Some(size) => Input::Simd(vec![
+                    P::ShareStorage::random(size.get(), &mut rng);
+                    circ.input_count()
+                ]),
+            };
 
-            statistics
+            let output = statistics
                 .record(
                     Phase::Online,
                     executor.execute(fake_inp, &mut exec_ch.0, &mut exec_ch.1),
                 )
                 .await
                 .context("Failed to execute circuit")?;
+
+            tracing::debug!(id = self.id, ?output);
 
             res.push(statistics.into_run_result());
         }

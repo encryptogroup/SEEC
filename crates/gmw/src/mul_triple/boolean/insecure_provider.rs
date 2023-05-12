@@ -2,6 +2,8 @@
 use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
 use async_trait::async_trait;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use std::convert::Infallible;
 
 /// An insecure [`MTProvider`] which simply returns [`MulTriples::zeros`]. **Do not use in
@@ -20,6 +22,9 @@ impl MTProvider for InsecureMTProvider {
     }
 
     async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
-        Ok(MulTriples::zeros(amount))
+        Ok(MulTriples::random(
+            amount,
+            &mut ChaCha8Rng::seed_from_u64(42),
+        ))
     }
 }

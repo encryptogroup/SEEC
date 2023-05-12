@@ -13,7 +13,7 @@ use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
-use gmw::executor::{Executor, Message};
+use gmw::executor::{Executor, Input, Message};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::mul_triple::MTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
@@ -77,7 +77,11 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     let (mut sender, mut receiver) =
         sub_channels_for!(&mut sender, &mut receiver, 8, Message<BooleanGmw>).await?;
     // Execute the circuit and await its result (in the form of a BitVec)
-    let output = executor.execute(inputs, &mut sender, &mut receiver).await?;
+    let output = executor
+        .execute(Input::Scalar(inputs), &mut sender, &mut receiver)
+        .await?
+        .into_scalar()
+        .unwrap();
 
     assert_eq!(exec_circuit.output_count(), output.len());
     // As there is only one output gate, we simply return the first element

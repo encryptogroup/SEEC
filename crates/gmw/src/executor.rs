@@ -28,17 +28,20 @@ pub struct Executor<'c, P: Protocol, Idx> {
 }
 
 pub struct GateOutputs<Shares> {
-    data: Vec<ScGateOutputs<Shares>>,
+    data: Vec<Input<Shares>>,
     // Used as a sanity check in debug builds. Stores for which gates we have set the output,
     // so that we can check if an output is set before accessing it.
     #[cfg(debug_assertions)]
     output_set: HashSet<SubCircuitGate<usize>>,
 }
 
-pub enum ScGateOutputs<Shares> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Input<Shares> {
     Scalar(Shares),
     Simd(Vec<Shares>),
 }
+
+pub type Output<Shares> = Input<Shares>;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ExecutorMsg<Msg, SimdMsg> {
@@ -114,20 +117,27 @@ where
     #[tracing::instrument(skip_all, fields(party_id = self.party_id), err)]
     pub async fn execute(
         &mut self,
-        inputs: P::ShareStorage,
+        inputs: Input<P::ShareStorage>,
         sender: &mut Sender<Message<P>>,
         receiver: &mut Receiver<Message<P>>,
-    ) -> Result<P::ShareStorage, ExecutorError> {
+    ) -> Result<Output<P::ShareStorage>, ExecutorError> {
         info!("Executing circuit");
+        debug!(?inputs);
         let now = Instant::now();
+        let inp_len = match &inputs {
+            Input::Scalar(shares) => shares.len(),
+            Input::Simd(shares) => shares.len(),
+        };
+
         assert_eq!(
             self.circuit.input_count(),
-            inputs.len(),
+            inp_len,
             "Length of inputs must be equal to circuit input size"
         );
         let mut setup_storage = mem::take(&mut self.setup_storage);
         let mut layer_count = 0;
         let mut interactive_count = 0;
+        let main_is_simd = self.circuit.simd_size(0).is_some();
         // TODO provide the option to calculate next layer  during and communication
         //  take care to not block tokio threads -> use tokio rayon
         for layer in self.circuit.layer_iter() {
@@ -148,41 +158,85 @@ where
                             .input_gates()
                             .binary_search(&sc_gate_id.gate_id)
                             .expect("Input gate not contained in input_gates");
-                        let output = base_gate.evaluate_non_interactive(
-                            self.party_id,
-                            iter::once(inputs.get(inp_idx)),
-                        );
-                        trace!(
-                            ?output,
-                            sc_gate_id = %sc_gate_id,
-                            "Evaluated {:?} gate",
-                            gate
-                        );
-                        self.set_gate_output(sc_gate_id, output);
-                    }
-                    Some(base_gate @ BaseGate::SubCircuitInput(_)) => {
-                        let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
-                        if simd_size.is_none() {
-                            let inputs = self.inputs(parents);
-                            let output = base_gate.evaluate_non_interactive(self.party_id, inputs);
+                        if main_is_simd {
+                            let output = base_gate.evaluate_non_interactive_simd(
+                                self.party_id,
+                                iter::once(
+                                    &inputs.as_simd().expect("main circ is simd but input not")
+                                        [inp_idx],
+                                ),
+                            );
+                            trace!(
+                                ?output,
+                                sc_gate_id = %sc_gate_id,
+                                "Evaluated SIMD {:?} gate",
+                                gate
+                            );
+                            self.gate_outputs.set_simd(sc_gate_id, output);
+                        } else {
+                            let output = base_gate.evaluate_non_interactive(
+                                self.party_id,
+                                iter::once(
+                                    inputs
+                                        .as_scalar()
+                                        .expect("main circ is scalar but input is simd")
+                                        .get(inp_idx),
+                                ),
+                            );
                             trace!(
                                 ?output,
                                 sc_gate_id = %sc_gate_id,
                                 "Evaluated {:?} gate",
                                 gate
                             );
-                            self.set_gate_output(sc_gate_id, output);
-                        } else {
-                            let inputs = self.inputs(parents);
-                            let simd_output = base_gate.evaluate_sc_input_simd(inputs);
-                            trace!(
-                                ?simd_output,
-                                sc_gate_id = %sc_gate_id,
-                                "Evaluated SIMD {:?} gate",
-                                gate
-                            );
-                            self.gate_outputs.set_simd(sc_gate_id, simd_output);
-                            continue;
+                            self.gate_outputs.set(sc_gate_id, output);
+                        }
+                    }
+                    Some(base_gate @ BaseGate::SubCircuitInput(_)) => {
+                        let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
+                        match (main_is_simd, simd_size.is_some()) {
+                            (true, true) => {
+                                // simd to siimd
+                                let inputs = self.simd_inputs(parents);
+                                let simd_output =
+                                    base_gate.evaluate_non_interactive_simd(self.party_id, inputs);
+                                trace!(
+                                    ?simd_output,
+                                    sc_gate_id = %sc_gate_id,
+                                    "Evaluated SIMD {:?} gate",
+                                    gate
+                                );
+                                self.gate_outputs.set_simd(sc_gate_id, simd_output);
+                            }
+                            (false, true) => {
+                                // non-simd to simd
+                                let inputs = self.inputs(parents);
+                                let output = base_gate.evaluate_sc_input_simd(inputs);
+                                trace!(
+                                    ?output,
+                                    sc_gate_id = %sc_gate_id,
+                                    "Evaluated {:?} gate",
+                                    gate
+                                );
+                                self.gate_outputs.set_simd(sc_gate_id, output);
+                            }
+                            (false, false) => {
+                                // non-simd to non-simd
+                                let inputs = self.inputs(parents);
+                                let simd_output =
+                                    base_gate.evaluate_non_interactive(self.party_id, inputs);
+                                trace!(
+                                    ?simd_output,
+                                    sc_gate_id = %sc_gate_id,
+                                    "Evaluated {:?} gate",
+                                    gate
+                                );
+                                self.gate_outputs.set(sc_gate_id, simd_output);
+                            }
+                            (true, false) => {
+                                // simd to non-simd is illegal
+                                return Err(ExecutorError::IllegalCircuit);
+                            }
                         }
                     }
                     Some(base_gate @ BaseGate::ConnectToMainFromSimd(_)) => {
@@ -210,7 +264,7 @@ where
                                 "Evaluated {:?} gate",
                                 gate
                             );
-                            self.set_gate_output(sc_gate_id, output);
+                            self.gate_outputs.set(sc_gate_id, output);
                         } else {
                             let inputs = self.simd_inputs(parents);
                             let output = gate.evaluate_non_interactive_simd(self.party_id, inputs);
@@ -357,12 +411,19 @@ where
             interactive_count,
             execution_time_s = now.elapsed().as_secs_f32()
         );
-        let output_iter = self
-            .circuit
-            .output_gates()
-            .iter()
-            .map(|id| self.gate_outputs.get(SubCircuitGate::new(0, *id)));
-        Ok(FromIterator::from_iter(output_iter))
+
+        let out_iter = self.circuit.output_gates().iter();
+        if main_is_simd {
+            let output_iter = out_iter.map(|id| {
+                self.gate_outputs
+                    .get_simd(SubCircuitGate::new(0, *id))
+                    .clone()
+            });
+            Ok(Input::Simd(output_iter.collect()))
+        } else {
+            let output_iter = out_iter.map(|id| self.gate_outputs.get(SubCircuitGate::new(0, *id)));
+            Ok(Input::Scalar(output_iter.collect()))
+        }
     }
 
     pub fn gate_outputs(&self) -> &GateOutputs<P::ShareStorage> {
@@ -392,33 +453,50 @@ where
     {
         parent_ids.map(move |parent_id| self.gate_outputs.get_simd(parent_id))
     }
-
-    fn set_gate_output(&mut self, id: SubCircuitGate<Idx>, output: <P::Gate as Gate>::Share) {
-        self.gate_outputs.set(id, output);
-    }
 }
 
 impl<Shares> GateOutputs<Shares> {
-    pub fn get_sc(&self, id: CircuitId) -> &ScGateOutputs<Shares> {
+    pub fn get_sc(&self, id: CircuitId) -> &Input<Shares> {
         &self.data[id as usize]
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &ScGateOutputs<Shares>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Input<Shares>> {
         self.data.iter()
     }
 }
 
-impl<Shares> ScGateOutputs<Shares> {
+impl<Shares> Input<Shares> {
     pub fn as_scalar(&self) -> Option<&Shares> {
         match self {
-            ScGateOutputs::Scalar(scalar) => Some(scalar),
-            ScGateOutputs::Simd(_) => None,
+            Input::Scalar(scalar) => Some(scalar),
+            Input::Simd(_) => None,
+        }
+    }
+
+    pub fn as_simd(&self) -> Option<&Vec<Shares>> {
+        match self {
+            Input::Scalar(_) => None,
+            Input::Simd(shares) => Some(shares),
+        }
+    }
+
+    pub fn into_scalar(self) -> Option<Shares> {
+        match self {
+            Input::Scalar(scalar) => Some(scalar),
+            Input::Simd(_) => None,
+        }
+    }
+
+    pub fn into_simd(self) -> Option<Vec<Shares>> {
+        match self {
+            Input::Scalar(_) => None,
+            Input::Simd(shares) => Some(shares),
         }
     }
 }
 
 impl<Shares: Clone> GateOutputs<Shares> {
-    pub fn new(data: Vec<ScGateOutputs<Shares>>) -> Self {
+    pub fn new(data: Vec<Input<Shares>>) -> Self {
         Self {
             data,
             #[cfg(debug_assertions)]
@@ -443,8 +521,8 @@ impl<Shares: Clone> GateOutputs<Shares> {
         Shares: ShareStorage<Share>,
     {
         match &self.data[id.circuit_id as usize] {
-            ScGateOutputs::Scalar(data) => data.get(id.gate_id.as_usize()),
-            ScGateOutputs::Simd(_) => {
+            Input::Scalar(data) => data.get(id.gate_id.as_usize()),
+            Input::Simd(_) => {
                 panic!("Called GateOutputs::get({id:?}) for Simd circ")
             }
         }
@@ -461,10 +539,10 @@ impl<Shares: Clone> GateOutputs<Shares> {
 
     pub fn get_simd_unchecked<Idx: GateIdx>(&self, id: SubCircuitGate<Idx>) -> &Shares {
         match &self.data[id.circuit_id as usize] {
-            ScGateOutputs::Scalar(_) => {
+            Input::Scalar(_) => {
                 panic!("Called GateOutputs::get_simd({id:?}) for scalar circ")
             }
-            ScGateOutputs::Simd(data) => &data[id.gate_id.as_usize()],
+            Input::Simd(data) => &data[id.gate_id.as_usize()],
         }
     }
 
@@ -475,8 +553,8 @@ impl<Shares: Clone> GateOutputs<Shares> {
         #[cfg(debug_assertions)]
         self.output_set.insert(id.into_usize());
         match &mut self.data[id.circuit_id as usize] {
-            ScGateOutputs::Scalar(data) => data.set(id.gate_id.as_usize(), val),
-            ScGateOutputs::Simd(_) => {
+            Input::Scalar(data) => data.set(id.gate_id.as_usize(), val),
+            Input::Simd(_) => {
                 panic!("Called GateOutputs::set for Simd circ")
             }
         }
@@ -486,10 +564,10 @@ impl<Shares: Clone> GateOutputs<Shares> {
         #[cfg(debug_assertions)]
         self.output_set.insert(id.into_usize());
         match &mut self.data[id.circuit_id as usize] {
-            ScGateOutputs::Scalar(_) => {
+            Input::Scalar(_) => {
                 panic!("Called GateOutputs::set_simd for scalar circ")
             }
-            ScGateOutputs::Simd(data) => {
+            Input::Simd(data) => {
                 data[id.gate_id.as_usize()] = val;
             }
         }

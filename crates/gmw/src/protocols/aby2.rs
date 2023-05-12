@@ -1,7 +1,7 @@
 use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
-use crate::executor::{Executor, GateOutputs, ScGateOutputs};
+use crate::executor::{Executor, GateOutputs, Input};
 use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
 use crate::protocols::boolean_gmw::BooleanGmw;
@@ -157,7 +157,7 @@ impl Protocol for BooleanAby2 {
             // Okay to use the default value, as they will be overwritten in the next step
             .map(|(gate_count, simd_size)| {
                 assert_eq!(None, simd_size, "SIMD not supported for ABY2 protocol");
-                ScGateOutputs::Scalar(DeltaShareStorage::repeat(Default::default(), gate_count))
+                Input::Scalar(DeltaShareStorage::repeat(Default::default(), gate_count))
             })
             .collect();
         let mut storage = GateOutputs::new(storage);
@@ -659,10 +659,14 @@ where
                 .await
                 .expect("Executor::new in AbySetupProvider");
         executor
-            .execute(circ_inputs, &mut self.sender, &mut self.receiver)
+            .execute(
+                Input::Scalar(circ_inputs),
+                &mut self.sender,
+                &mut self.receiver,
+            )
             .await
             .unwrap();
-        let ScGateOutputs::Scalar(executor_gate_outputs) = executor.gate_outputs().get_sc(0) else {
+        let Input::Scalar(executor_gate_outputs) = executor.gate_outputs().get_sc(0) else {
             panic!("SIMD not supported for ABY2");
         };
 

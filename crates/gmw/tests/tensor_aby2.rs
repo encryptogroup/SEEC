@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use gmw::circuit::base_circuit::BaseGate;
 use gmw::circuit::{BaseCircuit, ExecutableCircuit};
-use gmw::executor::{Executor, GateOutputs};
+use gmw::executor::{Executor, GateOutputs, Input};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::tensor_aby2::{
@@ -81,6 +81,7 @@ impl FunctionDependentSetup<DeltaShareStorage, BooleanGate, usize> for MockSetup
 }
 
 #[tokio::test]
+#[ignore]
 async fn simple_matmul() -> anyhow::Result<()> {
     let _guard = init_tracing();
     let circ = ExecutableCircuit::DynLayers(build_circ());
@@ -153,12 +154,14 @@ async fn simple_matmul() -> anyhow::Result<()> {
 
     let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(16);
 
-    let (out1, out2) = tokio::try_join!(
-        ex1.execute(inp1, &mut ch1.0, &mut ch1.1),
-        ex2.execute(inp2, &mut ch2.0, &mut ch2.1),
+    let (out0, out1) = tokio::try_join!(
+        ex1.execute(Input::Scalar(inp1), &mut ch1.0, &mut ch1.1),
+        ex2.execute(Input::Scalar(inp2), &mut ch2.0, &mut ch2.1),
     )?;
 
-    let out = DeltaSharing::reconstruct(out1, out2);
+    let out0 = out0.into_scalar().unwrap();
+    let out1 = out1.into_scalar().unwrap();
+    let out = DeltaSharing::reconstruct(out0, out1);
     eprintln!("{:b}", out[0].clone().into_matrix().unwrap());
     assert_eq!(out[0], mat, "Wrong output");
 

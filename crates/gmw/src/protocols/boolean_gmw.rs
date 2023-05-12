@@ -5,7 +5,7 @@ use crate::evaluate::and;
 use crate::mul_triple::boolean::MulTriple;
 use crate::mul_triple::boolean::MulTriples;
 use crate::protocols::{Gate, Protocol, ScalarDim, SetupStorage, Share, Sharing};
-use crate::utils::rand_bitvec;
+use crate::utils::{rand_bitvec, BitVecExt};
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
@@ -62,7 +62,7 @@ impl Protocol for BooleanGmw {
     ) -> Self::Msg {
         trace!("compute_msg");
         let (d, e): (BitVec<usize>, BitVec<usize>) = interactive_gates
-            .zip(mul_triples.iter())
+            .zip(mul_triples.iter().rev())
             .map(|(gate, mt): (BooleanGate, MulTriple)| {
                 // TODO debug_assert?
                 assert!(matches!(gate, BooleanGate::And));
@@ -88,7 +88,7 @@ impl Protocol for BooleanGmw {
         _interactive_gates: impl Iterator<Item = Self::Gate>,
         _gate_outputs: impl Iterator<Item = &'e BitVec<usize>>,
         inputs: impl Iterator<Item = &'e BitVec<usize>>,
-        preprocessing_data: &mut Self::SetupStorage,
+        mul_triples: &mut Self::SetupStorage,
     ) -> Self::SimdMsg {
         let mut simd_sizes = vec![];
         let mut d = BitVec::new();
@@ -101,10 +101,10 @@ impl Protocol for BooleanGmw {
             e.extend_from_bitslice(x);
             d.extend_from_bitslice(y);
         });
-        let mts = preprocessing_data.slice(..d.len());
+        let mts = mul_triples.slice(mul_triples.len() - d.len()..);
 
-        d ^= mts.a();
-        e ^= mts.b();
+        d.fast_bit_xor_mut(&mts.a().to_bitvec());
+        e.fast_bit_xor_mut(&mts.b().to_bitvec());
 
         SimdMsg {
             packed_data: Msg::AndLayer {
@@ -135,12 +135,12 @@ impl Protocol for BooleanGmw {
         } = other_msg;
         assert_eq!(size, resp_size, "Message have unequal size");
         // Remove the mul_triples used in compute_msg
-        let mul_triples = mul_triples.remove_first(size);
+        let mul_triples = mul_triples.split_off_last(size);
         d.into_iter()
             .zip(e)
             .zip(BitVec::from_vec(resp_d))
             .zip(BitVec::from_vec(resp_e))
-            .zip(mul_triples.iter())
+            .zip(mul_triples.iter().rev())
             .map(|((((d, e), d_resp), e_resp), mt)| {
                 let d = [d, d_resp];
                 let e = [e, e_resp];
@@ -183,15 +183,18 @@ impl Protocol for BooleanGmw {
         );
         let total_size = simd_sizes.iter().copied().sum::<u32>() as usize;
         // Remove the mul_triples used in compute_msg
-        let mts = mul_triples.remove_first(total_size);
-        let d = own_d ^ resp_d;
-        let e = own_e ^ resp_e;
+        let mts = mul_triples.split_off_last(total_size);
+        let d = own_d.fast_bit_xor(&resp_d);
+        let e = own_e.fast_bit_xor(&resp_e);
         let mut res = if party_id == 0 {
-            d.clone() & e.clone()
+            d.clone().fast_bit_and(&e)
         } else {
             BitVec::repeat(false, total_size)
         };
-        res ^= d & mts.b() ^ e & mts.a() & mts.a() ^ mts.c();
+        res.fast_bit_xor_mut(&d.fast_bit_and(mts.b()))
+            .fast_bit_xor_mut(&e.fast_bit_and(mts.a()))
+            .fast_bit_xor_mut(mts.c());
+        // res ^= d & mts.b ^ e & mts.a ^ mts.c;
         let mut res = res.as_bitslice();
         simd_sizes
             .iter()
@@ -266,10 +269,11 @@ impl Gate for BooleanGate {
         match self {
             BooleanGate::Base(base) => base.evaluate_non_interactive_simd(party_id, inputs),
             BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
-            BooleanGate::Xor => {
-                inputs.next().expect("Missing inputs").clone()
-                    ^ inputs.next().expect("Missing inputs")
-            }
+            BooleanGate::Xor => inputs
+                .next()
+                .expect("Missing inputs")
+                .clone()
+                .fast_bit_xor(inputs.next().expect("Missing inputs")),
             BooleanGate::Inv => {
                 let inp = inputs.next().expect("Empty input").clone();
                 if party_id == 0 {

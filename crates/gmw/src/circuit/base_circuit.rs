@@ -470,14 +470,12 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
         mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
     ) -> <Self::Share as Share>::SimdShare {
         match self {
-            BaseGate::Output(_) | BaseGate::Input(_) | BaseGate::ConnectToMain(_) => {
-                todo!("Implement this for main circ SIMD support")
-            }
-            BaseGate::SubCircuitInput(_) | BaseGate::ConnectToMainFromSimd(_) => {
-                panic!(
-                    "Gate::evaluate_non_interactive_simd  cant evaluate SubCircuitInput \
-                    and ConnectToMainSimd, call respective evaluate methods"
-                );
+            BaseGate::Output(_)
+            | BaseGate::Input(_)
+            | BaseGate::ConnectToMain(_)
+            | BaseGate::SubCircuitInput(_)
+            | BaseGate::ConnectToMainFromSimd(_) => {
+                inputs.next().expect("Missing input to {self:?}").clone()
             }
             BaseGate::SubCircuitOutput(_) => {
                 inputs.next().expect("Missing input to {self:?}").clone()

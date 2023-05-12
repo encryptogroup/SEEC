@@ -16,7 +16,7 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::base_circuit::Load;
 use gmw::circuit::{BaseCircuit, ExecutableCircuit};
 use gmw::common::BitVec;
-use gmw::executor::{Executor, Message};
+use gmw::executor::{Executor, Input, Message};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::mul_triple::boolean::trusted_seed_provider::TrustedMTProviderClient;
 use gmw::protocols::boolean_gmw::BooleanGmw;
@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
     let _out = comm_stats
         .record(
             Phase::Online,
-            executor.execute(input, &mut sender, &mut receiver),
+            executor.execute(Input::Scalar(input), &mut sender, &mut receiver),
         )
         .await?;
 

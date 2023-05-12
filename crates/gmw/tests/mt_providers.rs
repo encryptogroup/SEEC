@@ -4,10 +4,8 @@ use aes::Aes128;
 use bitvec::order::Msb0;
 use gmw::circuit::dyn_layers::Circuit;
 use gmw::circuit::ExecutableCircuit;
-use tokio::task::spawn_blocking;
-
 use gmw::common::BitVec;
-use gmw::executor::Executor;
+use gmw::executor::{Executor, Input};
 use gmw::mul_triple::boolean;
 use gmw::mul_triple::boolean::trusted_provider::{
     TrustedMTProviderClient, TrustedMTProviderServer,
@@ -15,6 +13,7 @@ use gmw::mul_triple::boolean::trusted_provider::{
 use gmw::private_test_utils::init_tracing;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use mpc_channel::{sub_channel, tcp};
+use tokio::task::spawn_blocking;
 
 // Test the TrustedMTProvider by executing the aes circuit with the provided mts
 #[tokio::test]
@@ -42,8 +41,8 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
         sub_channel(&mut t1.0, &mut t1.2, 8),
         sub_channel(&mut t2.0, &mut t2.2, 8)
     )?;
-    let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.1);
-    let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.1);
+    let h1 = ex1.execute(Input::Scalar(input_a), &mut t1.0, &mut t1.1);
+    let h2 = ex2.execute(Input::Scalar(input_b), &mut t2.0, &mut t2.1);
     let out = futures::try_join!(h1, h2)?;
 
     let exp_output: bitvec::vec::BitVec<u8, Msb0> = {
@@ -54,8 +53,9 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
 
         bitvec::vec::BitVec::from_slice(block.as_slice())
     };
-
-    assert_eq!(exp_output, out.0 ^ out.1);
+    let out0 = out.0.into_scalar().unwrap();
+    let out1 = out.1.into_scalar().unwrap();
+    assert_eq!(exp_output, out0 ^ out1);
 
     Ok(())
 }
@@ -97,8 +97,8 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
         sub_channel(&mut t1.0, &mut t1.2, 8),
         sub_channel(&mut t2.0, &mut t2.2, 8)
     )?;
-    let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.1);
-    let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.1);
+    let h1 = ex1.execute(Input::Scalar(input_a), &mut t1.0, &mut t1.1);
+    let h2 = ex2.execute(Input::Scalar(input_b), &mut t2.0, &mut t2.1);
     let out = futures::try_join!(h1, h2)?;
 
     let exp_output: bitvec::vec::BitVec<u8, Msb0> = {
@@ -110,7 +110,9 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
         bitvec::vec::BitVec::from_slice(block.as_slice())
     };
 
-    assert_eq!(exp_output, out.0 ^ out.1);
+    let out0 = out.0.into_scalar().unwrap();
+    let out1 = out.1.into_scalar().unwrap();
+    assert_eq!(exp_output, out0 ^ out1);
 
     Ok(())
 }
