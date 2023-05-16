@@ -14,6 +14,11 @@ impl MTProvider for InsecureMTProvider {
     type Output = MulTriples;
     type Error = Infallible;
 
+    async fn precompute_mts(&mut self, _amount: usize) -> Result<(), Infallible> {
+        // Nothing to do
+        Ok(())
+    }
+
     async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
         Ok(MulTriples::zeros(amount))
     }

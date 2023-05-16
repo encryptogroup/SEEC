@@ -48,6 +48,12 @@ impl<R: Ring> MulTriples<R> {
                 c: c.clone(),
             })
     }
+
+    pub fn extend_from_mts(&mut self, other: &Self) {
+        self.a.extend_from_slice(&other.a);
+        self.b.extend_from_slice(&other.b);
+        self.c.extend_from_slice(&other.c);
+    }
 }
 
 impl<R> MulTriple<R> {

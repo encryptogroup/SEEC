@@ -1,6 +1,6 @@
 use crate::mul_triple::arithmetic::MulTriples;
 use crate::mul_triple::MTProvider;
-use crate::protocols::Ring;
+use crate::protocols::{Ring, SetupStorage};
 use async_trait::async_trait;
 use bitvec::slice::BitSlice;
 use bitvec::store::BitStore;
@@ -11,7 +11,7 @@ use rand::distributions::{Distribution, Standard};
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use remoc::RemoteSend;
 use std::fmt::Debug;
-use std::marker::PhantomData;
+use std::mem;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
 use zappot::util::Block;
@@ -22,7 +22,7 @@ pub struct OtMTProvider<R, RNG, OtS: ExtROTSender, OtR: ExtROTReceiver> {
     ot_receiver: OtR,
     ch_sender: mpc_channel::Sender<mpc_channel::Receiver<OtS::Msg>>,
     ch_receiver: mpc_channel::Receiver<mpc_channel::Receiver<OtS::Msg>>,
-    phantom: PhantomData<R>,
+    precomputed_mts: Option<MulTriples<R>>,
 }
 
 impl<R: Ring, RNG: RngCore + CryptoRng + Send, OtS: ExtROTSender, OtR: ExtROTReceiver>
@@ -41,13 +41,12 @@ impl<R: Ring, RNG: RngCore + CryptoRng + Send, OtS: ExtROTSender, OtR: ExtROTRec
             ot_receiver,
             ch_sender,
             ch_receiver,
-            phantom: PhantomData,
+            precomputed_mts: None,
         }
     }
 }
 
-#[async_trait]
-impl<R, RNG, OtS, OtR> MTProvider for OtMTProvider<R, RNG, OtS, OtR>
+impl<R, RNG, OtS, OtR> OtMTProvider<R, RNG, OtS, OtR>
 where
     R: Ring + From<u8> + BitStore + Pod,
     <R as BitStore>::Unalias: Pod,
@@ -59,10 +58,7 @@ where
     OtR: ExtROTReceiver + Send,
     OtR::Msg: RemoteSend + Debug,
 {
-    type Output = MulTriples<R>;
-    type Error = ();
-
-    async fn request_mts(&mut self, mut amount: usize) -> Result<Self::Output, Self::Error> {
+    async fn compute_mts(&mut self, mut amount: usize) -> Result<MulTriples<R>, ()> {
         let mut sender_rng = AesRng::from_rng(&mut self.rng).unwrap();
         let mut receiver_rng = AesRng::from_rng(&mut self.rng).unwrap();
 
@@ -135,6 +131,43 @@ where
             b: b_i,
             c: c_i,
         })
+    }
+}
+
+#[async_trait]
+impl<R, RNG, OtS, OtR> MTProvider for OtMTProvider<R, RNG, OtS, OtR>
+where
+    R: Ring + From<u8> + BitStore + Pod,
+    <R as BitStore>::Unalias: Pod,
+    Block: From<R>,
+    Standard: Distribution<R>,
+    RNG: RngCore + CryptoRng + Send,
+    OtS: ExtROTSender<Msg = OtR::Msg> + Send,
+    OtS::Msg: RemoteSend + Debug,
+    OtR: ExtROTReceiver + Send,
+    OtR::Msg: RemoteSend + Debug,
+{
+    type Output = MulTriples<R>;
+    type Error = ();
+
+    async fn precompute_mts(&mut self, amount: usize) -> Result<(), ()> {
+        let mts = self.compute_mts(amount).await?;
+        self.precomputed_mts = Some(mts);
+        Ok(())
+    }
+
+    async fn request_mts(&mut self, amount: usize) -> Result<Self::Output, Self::Error> {
+        match &mut self.precomputed_mts {
+            Some(mts) if mts.len() >= amount => Ok(mts.split_off_last(amount)),
+            Some(mts) => {
+                let additional_needed = amount - mts.len();
+                let mut precomputed = mem::take(mts);
+                let additional_mts = self.compute_mts(additional_needed).await?;
+                precomputed.extend_from_mts(&additional_mts);
+                Ok(precomputed)
+            }
+            None => self.compute_mts(amount).await,
+        }
     }
 }
 

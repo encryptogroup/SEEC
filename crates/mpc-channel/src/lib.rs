@@ -48,8 +48,8 @@ pub enum CommunicationError {
 pub fn channel<T: RemoteSend, const BUFFER: usize>(
     local_buffer: usize,
 ) -> (
-    mpsc::Sender<T, remoc::codec::Bincode, BUFFER>,
-    mpsc::Receiver<T, remoc::codec::Bincode, BUFFER>,
+    mpsc::Sender<T, codec::Bincode, BUFFER>,
+    mpsc::Receiver<T, codec::Bincode, BUFFER>,
 ) {
     let (sender, receiver) = mpsc::channel(local_buffer);
     let sender = sender.set_buffer::<BUFFER>();

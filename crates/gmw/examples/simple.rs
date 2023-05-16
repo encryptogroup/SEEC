@@ -15,6 +15,7 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
 use gmw::executor::{Executor, Message};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::MTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::inputs;
 use gmw::CircuitBuilder;
@@ -49,8 +50,9 @@ fn build_circuit() {
 async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // Create a new insecure MTProvider. This will simply provide both parties with multiplication
     // triples consisting of zeros. The sha256 and trusted_party_mts examples show how to use
-    // a trusted provider.
-    let mt_provider = InsecureMTProvider::default();
+    // a trusted provider. This example also shows how to use dynamic dispatch for the MTProvider.
+    let mt_provider: Box<dyn MTProvider<Output = _, Error = _> + Send> =
+        Box::<InsecureMTProvider>::default();
     // Create a new Executor for the circuit. It's important that the party_id is either 0 or 1,
     // as otherwise wrong results might be computed. In the future, there might be support for more
     // than two parties

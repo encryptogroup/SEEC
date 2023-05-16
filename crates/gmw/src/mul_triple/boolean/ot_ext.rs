@@ -1,12 +1,15 @@
 use crate::common::BitVec;
 use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
+use crate::protocols::SetupStorage;
 use crate::utils::rand_bitvec;
 use async_trait::async_trait;
 use num_integer::Integer;
 use rand::{CryptoRng, RngCore, SeedableRng};
 use remoc::RemoteSend;
 use std::fmt::Debug;
+use std::mem;
+use thiserror::Error;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
 
@@ -16,6 +19,12 @@ pub struct OtMTProvider<RNG, S: ExtROTSender, R: ExtROTReceiver> {
     ot_receiver: R,
     ch_sender: mpc_channel::Sender<mpc_channel::Receiver<S::Msg>>,
     ch_receiver: mpc_channel::Receiver<mpc_channel::Receiver<S::Msg>>,
+    precomputed_mts: Option<MulTriples>,
+}
+
+#[derive(Error, Debug)]
+pub enum Error {
+    // TODO
 }
 
 impl<RNG: RngCore + CryptoRng + Send, S: ExtROTSender, R: ExtROTReceiver> OtMTProvider<RNG, S, R> {
@@ -32,12 +41,12 @@ impl<RNG: RngCore + CryptoRng + Send, S: ExtROTSender, R: ExtROTReceiver> OtMTPr
             ot_receiver,
             ch_sender,
             ch_receiver,
+            precomputed_mts: None,
         }
     }
 }
 
-#[async_trait]
-impl<RNG, S, R> MTProvider for OtMTProvider<RNG, S, R>
+impl<RNG, S, R> OtMTProvider<RNG, S, R>
 where
     RNG: RngCore + CryptoRng + Send,
     S: ExtROTSender<Msg = R::Msg> + Send,
@@ -45,10 +54,7 @@ where
     R: ExtROTReceiver + Send,
     R::Msg: RemoteSend + Debug,
 {
-    type Output = MulTriples;
-    type Error = ();
-
-    async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
+    async fn compute_mts(&mut self, amount: usize) -> Result<MulTriples, Error> {
         let mut sender_rng = AesRng::from_rng(&mut self.rng).unwrap();
         let mut receiver_rng = AesRng::from_rng(&mut self.rng).unwrap();
 
@@ -98,6 +104,39 @@ where
             .collect();
 
         Ok(MulTriples::from_raw(a_i, b_i, c_i))
+    }
+}
+
+#[async_trait]
+impl<RNG, S, R> MTProvider for OtMTProvider<RNG, S, R>
+where
+    RNG: RngCore + CryptoRng + Send,
+    S: ExtROTSender<Msg = R::Msg> + Send,
+    S::Msg: RemoteSend + Debug,
+    R: ExtROTReceiver + Send,
+    R::Msg: RemoteSend + Debug,
+{
+    type Output = MulTriples;
+    type Error = Error;
+
+    async fn precompute_mts(&mut self, amount: usize) -> Result<(), Self::Error> {
+        let mts = self.compute_mts(amount).await?;
+        self.precomputed_mts = Some(mts);
+        Ok(())
+    }
+
+    async fn request_mts(&mut self, amount: usize) -> Result<MulTriples, Self::Error> {
+        match &mut self.precomputed_mts {
+            Some(mts) if mts.len() >= amount => Ok(mts.split_off_last(amount)),
+            Some(mts) => {
+                let additional_needed = amount - mts.len();
+                let mut precomputed = mem::take(mts);
+                let additional_mts = self.compute_mts(additional_needed).await?;
+                precomputed.extend_from_mts(&additional_mts);
+                Ok(precomputed)
+            }
+            None => self.compute_mts(amount).await,
+        }
     }
 }
 

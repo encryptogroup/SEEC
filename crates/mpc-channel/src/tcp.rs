@@ -9,8 +9,10 @@ use remoc::{ConnectError, RemoteSend};
 use std::fmt::Debug;
 use std::io;
 use std::net::Ipv4Addr;
+use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+use tokio::time::Instant;
 use tracing::info;
 
 #[derive(thiserror::Error, Debug)]
@@ -40,6 +42,39 @@ pub async fn connect<T: RemoteSend>(
     let stream = TcpStream::connect(remote_addr).await?;
     info!("Established connection to remote");
     establish_remoc_connection(stream).await
+}
+
+#[tracing::instrument(err)]
+/// Connect to remote and retry upon failure for `timout` time
+pub async fn connect_with_timeout<T: RemoteSend>(
+    remote_addr: impl ToSocketAddrs + Debug,
+    timeout: Duration,
+) -> Result<TrackingChannel<T>, Error> {
+    info!("Connecting to remote with timeout {timeout:?}");
+    let mut wait = Duration::from_millis(10);
+    let exp_wait_factor = 1.2;
+    let start = Instant::now();
+    let mut last_err = None;
+    while start.elapsed() < timeout {
+        let stream = match TcpStream::connect(&remote_addr).await {
+            Ok(stream) => stream,
+            Err(err) => {
+                last_err = Some(err.into());
+                tokio::time::sleep(wait).await;
+                wait = Duration::from_millis((wait.as_millis() as f64 * exp_wait_factor) as u64);
+                continue;
+            }
+        };
+        info!("Established connection to remote");
+        match establish_remoc_connection(stream).await {
+            Ok(ch) => return Ok(ch),
+            Err(err) => {
+                last_err = Some(err);
+                continue;
+            }
+        }
+    }
+    Err(last_err.unwrap())
 }
 
 #[tracing::instrument(err)]

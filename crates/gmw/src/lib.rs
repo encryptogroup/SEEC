@@ -7,6 +7,8 @@ pub use gmw_macros::sub_circuit;
 pub use parse::bristol;
 pub use protocols::boolean_gmw::BooleanGate;
 
+#[cfg(feature = "bench-api")]
+pub mod bench;
 pub mod circuit;
 pub mod common;
 pub mod errors;

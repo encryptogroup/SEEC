@@ -242,6 +242,23 @@ pub trait FunctionDependentSetup<ShareStorage, G, Idx> {
     ) -> Result<Self::Output, Self::Error>;
 }
 
+#[async_trait]
+impl<ShareStorage: Sync, G: Send + Sync, Idx: Sync, Out>
+    FunctionDependentSetup<ShareStorage, G, Idx>
+    for Box<dyn FunctionDependentSetup<ShareStorage, G, Idx, Output = Out, Error = ()> + Send>
+{
+    type Output = Out;
+    type Error = ();
+
+    async fn setup(
+        &mut self,
+        shares: &GateOutputs<ShareStorage>,
+        circuit: &ExecutableCircuit<G, Idx>,
+    ) -> Result<Self::Output, Self::Error> {
+        self.setup(shares, circuit).await
+    }
+}
+
 #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct ScalarDim;
 

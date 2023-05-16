@@ -5,43 +5,36 @@
 //! It also demonstrates how to use the [`Statistics`] API to track the communication of
 //! different phases and write it to a file.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
+use gmw::bench::BenchParty;
 use gmw::circuit::base_circuit::Load;
 use gmw::circuit::{BaseCircuit, ExecutableCircuit};
-use gmw::common::BitVec;
-use gmw::executor::{Executor, Message};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::mul_triple::boolean::ot_ext::OtMTProvider;
-use gmw::mul_triple::boolean::trusted_seed_provider::TrustedMTProviderClient;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::BooleanGate;
-use mpc_channel::sub_channels_for;
-use mpc_channel::util::{Phase, Statistics};
-use rand::rngs::OsRng;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{stdout, BufWriter, Write};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
-use zappot::ot_ext;
 
 #[derive(Parser, Debug)]
 struct Args {
-    /// Id of this party
+    /// Id of this party. If not provided, both parties will be spawned within this process.
     #[clap(long)]
-    id: usize,
+    id: Option<usize>,
 
-    /// Address of server to bind or connect to
+    /// Address of server to bind or connect to. Localhost if not provided
     #[clap(long)]
-    server: SocketAddr,
-
-    /// Optional address of trusted server providing MTs
-    #[clap(long)]
-    mt_provider: Option<SocketAddr>,
+    server: Option<SocketAddr>,
 
     /// Skips the MT generation
+    #[clap(long)]
     skip_setup: bool,
+
+    #[clap(long, default_value = "1")]
+    repeat: usize,
 
     /// Sha256 as a bristol circuit
     #[clap(
@@ -56,72 +49,38 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _guard = init_tracing()?;
     let args = Args::parse();
+    let _guard = init_tracing(&args.circuit)?;
+    let circ_name = args
+        .circuit
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     let circuit: ExecutableCircuit<BooleanGate, _> = ExecutableCircuit::DynLayers(
         BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into(),
-    );
-
-    let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
-        0 => mpc_channel::tcp::listen(args.server).await?,
-        1 => mpc_channel::tcp::connect(args.server).await?,
-        illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
-    };
-
-    // Initialize the communication statistics tracker with the counters for the main channel
-    let mut comm_stats = Statistics::new(bytes_written, bytes_read).without_unaccounted(true);
-
-    let ((mut sender, mut receiver), (ot_sender, ot_receiver)) = sub_channels_for!(
-        &mut sender,
-        &mut receiver,
-        8,
-        Message<BooleanGmw>,
-        mpc_channel::Receiver<ot_ext::ExtOTMsg>,
     )
-    .await?;
+    .precompute_layers();
 
-    let mut executor: Executor<BooleanGmw, _> = match (args.skip_setup, args.mt_provider) {
-        (true, _) => {
-            let mt_provider = InsecureMTProvider::default();
-            Executor::new(&circuit, args.id, mt_provider).await?
-        }
-        (false, Some(addr)) => {
-            let (mt_sender, bytes_written, mt_receiver, bytes_read) =
-                mpc_channel::tcp::connect(addr).await?;
-            // Set the counters for the helper channel
-            comm_stats.set_helper(bytes_written, bytes_read);
-            let mt_provider =
-                TrustedMTProviderClient::new("unique-id".into(), mt_sender, mt_receiver);
-            // As the MTs are generated when the Executor is created, we record the communication
-            // with the `record_helper` method and a custom category
-            comm_stats
-                .record_helper(
-                    Phase::Custom("Helper-Mts"),
-                    Executor::new(&circuit, args.id, mt_provider),
-                )
-                .await?
-        }
-        (false, None) => {
-            let mt_provider = OtMTProvider::new(
-                OsRng,
-                ot_ext::Sender::default(),
-                ot_ext::Receiver::default(),
-                ot_sender,
-                ot_receiver,
-            );
-            comm_stats
-                .record(Phase::Mts, Executor::new(&circuit, args.id, mt_provider))
-                .await?
-        }
+    let create_party = |id, circ| {
+        BenchParty::<BooleanGmw, u32>::new(id)
+            .explicit_circuit(circ)
+            .repeat(args.repeat)
+            .insecure_setup(args.skip_setup)
+            .metadata(circ_name.clone())
     };
 
-    let input = BitVec::repeat(false, 768);
-    let _out = comm_stats
-        .record(
-            Phase::Online,
-            executor.execute(input, &mut sender, &mut receiver),
-        )
-        .await?;
+    let results = if let Some(id) = args.id {
+        let party = create_party(id, circuit);
+        party.bench().await.context("Failed to run benchmark")?
+    } else {
+        let party0 = create_party(0, circuit.clone());
+        let party1 = create_party(1, circuit);
+        let bench0 = tokio::spawn(party0.bench());
+        let bench1 = tokio::spawn(party1.bench());
+        let (res0, _res1) = tokio::try_join!(bench0, bench1).context("Failed to join parties")?;
+        res0.context("Failed to run benchmark")?
+    };
 
     // Depending on whether a --stats file is set, create a file writer or stdout
     let mut writer: Box<dyn Write> = match args.stats {
@@ -133,16 +92,19 @@ async fn main() -> Result<()> {
     };
     // serde_json is used to write the statistics in json format. `.csv` is currently not
     // supported.
-    let mut res = comm_stats.into_run_result();
-    res.add_metadata("circuit", "sha256.rs");
-    serde_json::to_writer_pretty(&mut writer, &res)?;
+    serde_json::to_writer_pretty(&mut writer, &results)?;
     writeln!(writer)?;
 
     Ok(())
 }
 
-pub fn init_tracing() -> Result<tracing_appender::non_blocking::WorkerGuard> {
-    let log_writer = BufWriter::new(File::create("sha256.log")?);
+pub fn init_tracing(circ: &Path) -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    let mut log_file = circ
+        .file_stem()
+        .unwrap_or(OsStr::new("bristol_circ"))
+        .to_os_string();
+    log_file.push(".log");
+    let log_writer = BufWriter::new(File::create(log_file)?);
     let (non_blocking, appender_guard) = tracing_appender::non_blocking(log_writer);
     tracing_subscriber::fmt()
         .json()
