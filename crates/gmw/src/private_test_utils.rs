@@ -205,10 +205,9 @@ pub async fn execute_bristol<I: IntoInput<XorSharing<ThreadRng>>>(
 ) -> Result<BitVec<usize>> {
     let path = bristol_file.as_ref().to_path_buf();
     let now = Instant::now();
-    let bc = spawn_blocking(move || {
-        BaseCircuit::<BooleanGate, usize>::load_bristol(path, Load::Circuit)
-    })
-    .await??;
+    let bc =
+        spawn_blocking(move || BaseCircuit::<BooleanGate, u32>::load_bristol(path, Load::Circuit))
+            .await??;
     info!(
         parsing_time = %now.elapsed().as_millis(),
         "Parsing bristol time (ms)"

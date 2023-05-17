@@ -37,7 +37,7 @@ async fn eval_8_bit_adder() -> anyhow::Result<()> {
     let delta_provider1 = AbySetupProvider::new(0, InsecureMTProvider, ch1.0, ch1.1);
     let delta_provider2 = AbySetupProvider::new(1, InsecureMTProvider, ch2.0, ch2.1);
 
-    let (mut ex1, mut ex2): (Executor<BooleanAby2, usize>, Executor<BooleanAby2, usize>) =
+    let (mut ex1, mut ex2): (Executor<BooleanAby2, u32>, Executor<BooleanAby2, u32>) =
         tokio::try_join!(
             Executor::new_with_state(state1, &circ, 0, delta_provider1),
             Executor::new_with_state(state2, &circ, 1, delta_provider2)

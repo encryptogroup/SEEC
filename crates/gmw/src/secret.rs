@@ -25,7 +25,7 @@ pub struct Secret<P = BooleanGmw, Idx = DefaultIdx> {
     protocol: PhantomData<P>,
 }
 
-impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
+impl<P, Idx: GateIdx> Secret<P, Idx> {
     /// Create a Secret from raw parts. This method should not be needed in most cases.
     /// The user needs to ensure that the global CircuitBuilder has a circuit and gate with the
     /// corresponding id's.
@@ -37,7 +37,9 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
             protocol: PhantomData,
         }
     }
+}
 
+impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
     /// Note: Do not use while holding mutable borrow of self.circuit as it will panic!
     pub fn from_const(circuit_id: CircuitId, constant: bool) -> Self {
         let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
@@ -297,9 +299,12 @@ impl<'a, Idx: GateIdx> Not for &'a Secret<BooleanGmw, Idx> {
     }
 }
 
-impl<Idx: GateIdx + Debug> Debug for Secret<BooleanGmw, Idx> {
+impl<P, Idx: GateIdx> Debug for Secret<P, Idx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Secret for output of gate {:?}", self.output_of)
+        f.debug_struct("Secret")
+            .field("circuit_id", &self.circuit_id)
+            .field("output_of", &self.output_of)
+            .finish()
     }
 }
 

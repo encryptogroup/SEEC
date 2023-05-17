@@ -53,7 +53,7 @@ struct Args {
 async fn main() -> Result<()> {
     let _guard = init_tracing()?;
     let args = Args::parse();
-    let circuit: ExecutableCircuit<BooleanGate, _> = ExecutableCircuit::DynLayers(
+    let circuit: ExecutableCircuit<BooleanGate, u32> = ExecutableCircuit::DynLayers(
         BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into(),
     );
 
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
             )
             .await?
     } else {
-        let mt_provider = InsecureMTProvider::default();
+        let mt_provider = InsecureMTProvider;
         comm_stats
             .record(
                 Phase::FunctionDependentSetup,

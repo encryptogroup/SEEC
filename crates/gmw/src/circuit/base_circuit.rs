@@ -266,6 +266,10 @@ impl<G, Idx, W> BaseCircuit<G, Idx, W> {
         &self.sub_circuit_input_gates
     }
 
+    pub fn sub_circuit_input_count(&self) -> usize {
+        self.sub_circuit_input_gates.len()
+    }
+
     pub fn output_count(&self) -> usize {
         self.output_gates.len()
     }
@@ -293,8 +297,7 @@ pub enum Load {
     SubCircuit,
 }
 
-// TODO it's probably fine to use u32 for bristol circuits and this will reduce their in-memory size
-impl<Share, G> BaseCircuit<G, usize>
+impl<Share, G, Idx: GateIdx> BaseCircuit<G, Idx>
 where
     Share: Clone,
     G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
@@ -310,7 +313,7 @@ where
         // We treat the output wires of the bristol::Gates as their GateIds. Unfortunately,
         // the output wires are not given in ascending order, so we need to save a mapping
         // of wire ids to GateIds
-        let mut wire_mapping = vec![GateId::from(0_usize); bristol.header.wires];
+        let mut wire_mapping = vec![GateId::default(); bristol.header.wires];
         let (input_gate, output_gate) = match load {
             Load::Circuit => (BaseGate::Input(ScalarDim), BaseGate::Output(ScalarDim)),
             Load::SubCircuit => (
@@ -376,7 +379,7 @@ impl<G: Gate, Idx: GateIdx> Default for BaseCircuit<G, Idx> {
 
 impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Circuit")
+        f.debug_struct("BaseCircuit")
             .field("input_count", &self.input_count())
             .field(
                 "sub_circuit_input_gates",
@@ -388,6 +391,7 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
                 "sub_circuit_output_gates",
                 &self.sub_circuit_output_gates().len(),
             )
+            .field("simd_size", &self.simd_size)
             .finish()
     }
 }
@@ -914,7 +918,7 @@ mod tests {
         let aes_text =
             fs::read_to_string("test_resources/bristol-circuits/AES-non-expanded.txt").unwrap();
         let parsed = bristol::circuit(&aes_text).unwrap();
-        let converted: BaseCircuit<BooleanGate, usize> =
+        let converted: BaseCircuit<BooleanGate, u32> =
             BaseCircuit::from_bristol(parsed.clone(), Load::Circuit).unwrap();
         assert_eq!(
             parsed.header.gates + converted.input_count() + converted.output_count(),

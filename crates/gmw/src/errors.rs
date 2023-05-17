@@ -7,6 +7,8 @@ use thiserror::Error;
 pub enum ExecutorError {
     #[error("Received out of order message during execution")]
     OutOfOrderMessage,
+    #[error("Unable to perform function dependent setup")]
+    Setup,
 }
 
 #[derive(Error, Debug)]

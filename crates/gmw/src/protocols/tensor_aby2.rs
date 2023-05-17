@@ -1,5 +1,5 @@
 use crate::circuit::base_circuit::BaseGate;
-use crate::circuit::{DefaultIdx, ExecutableCircuit, GateIdx};
+use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{Executor, GateOutputs, Message, ScGateOutputs};
 use crate::mul_triple::boolean::MulTriples;
@@ -396,11 +396,11 @@ impl BooleanGate {
         }
     }
 
-    fn setup_data_circ(
+    fn setup_data_circ<Idx: GateIdx>(
         &self,
-        input_shares: &[Vec<Secret>],
-        _setup_sub_circ_cache: &mut AHashMap<Vec<Secret>, Secret>,
-    ) -> Vec<Secret> {
+        input_shares: &[Vec<Secret<BooleanGmw, Idx>>],
+        _setup_sub_circ_cache: &mut AHashMap<Vec<Secret<BooleanGmw, Idx>>, Secret<BooleanGmw, Idx>>,
+    ) -> Vec<Secret<BooleanGmw, Idx>> {
         // TODO return SmallVec here?
         match self {
             BooleanGate::And2 => {
@@ -893,7 +893,7 @@ impl<Mtp> AbySetupProvider<Mtp> {
 }
 
 #[async_trait]
-impl<MtpErr, Mtp> FunctionDependentSetup<DeltaShareStorage, BooleanGate, usize>
+impl<MtpErr, Mtp, Idx: GateIdx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx>
     for AbySetupProvider<Mtp>
 where
     MtpErr: Debug,
@@ -905,9 +905,9 @@ where
     async fn setup(
         &mut self,
         shares: &GateOutputs<DeltaShareStorage>,
-        circuit: &ExecutableCircuit<BooleanGate, usize>,
+        circuit: &ExecutableCircuit<BooleanGate, Idx>,
     ) -> Result<Self::Output, Self::Error> {
-        let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate> = CircuitBuilder::new();
+        let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate, Idx> = CircuitBuilder::new();
         let old = circ_builder.install();
         let total_inputs = circuit
             .interactive_iter()
@@ -917,7 +917,8 @@ where
         let mut circ_inputs = BitVec::with_capacity(total_inputs);
         // Block is needed as otherwise !Send types are held over .await
         let setup_outputs: Vec<Vec<_>> = {
-            let mut input_sw_map: AHashMap<_, Vec<Secret>> = AHashMap::with_capacity(total_inputs);
+            let mut input_sw_map: AHashMap<_, Vec<Secret<_, Idx>>> =
+                AHashMap::with_capacity(total_inputs);
             let mut setup_outputs = Vec::with_capacity(circuit.interactive_count());
             let mut setup_sub_circ_cache = AHashMap::with_capacity(total_inputs);
             for (gate, _gate_id, parents) in circuit.interactive_with_parents_iter() {
@@ -947,10 +948,10 @@ where
                 .collect()
         };
 
-        let setup_data_circ: ExecutableCircuit<boolean_gmw::BooleanGate, _> =
+        let setup_data_circ: ExecutableCircuit<boolean_gmw::BooleanGate, Idx> =
             ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
         old.install();
-        let mut executor: Executor<BooleanGmw, DefaultIdx> =
+        let mut executor: Executor<BooleanGmw, Idx> =
             Executor::new(&setup_data_circ, self.party_id, &mut self.mt_provider)
                 .await
                 .expect("Executor::new in AbySetupProvider");

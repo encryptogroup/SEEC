@@ -261,7 +261,7 @@ async fn encrypt(
     input.extend_from_bitslice(shared_file);
 
     let mut executor: Executor<BooleanGmw, usize> =
-        Executor::new(&exec_circ, args.id, InsecureMTProvider::default()).await?;
+        Executor::new(&exec_circ, args.id, InsecureMTProvider).await?;
     Ok(executor
         .execute(input, &mut executor_channel.0, &mut executor_channel.1)
         .await?)

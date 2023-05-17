@@ -28,7 +28,7 @@ struct Args {
 /// Example of the sender side
 async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
     // Create a secure RNG to use in the protocol
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     // Create the ot extension sender. A base OT **receiver** is passed as an argument and used
     // to create the base_ots
     let mut sender = Sender::new(base_ot::Receiver);
@@ -53,7 +53,7 @@ async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
 /// Example of the receiver side
 async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create a secure RNG to use in the protocol
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     // Create the ot extension receiver. A base OT **sender** is passed as an argument and used
     // to create the base_ots
     let mut receiver = Receiver::new(base_ot::Sender);

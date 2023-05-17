@@ -102,12 +102,12 @@ pub struct Statistics {
 #[derive(Debug, Default, Serialize)]
 pub struct RunResult {
     meta: Metadata,
-    communication: IndexMap<Phase, CountPair>,
-    time: IndexMap<Phase, u128>,
+    communication_bytes: IndexMap<Phase, CountPair>,
+    time_ms: IndexMap<Phase, u128>,
 }
 
-trait SerializableMetadata: erased_serde::Serialize + Debug {}
-impl<T: ?Sized + erased_serde::Serialize + Debug> SerializableMetadata for T {}
+trait SerializableMetadata: erased_serde::Serialize + Debug + Send {}
+impl<T: ?Sized + erased_serde::Serialize + Debug + Send> SerializableMetadata for T {}
 
 erased_serde::serialize_trait_object!(SerializableMetadata);
 
@@ -325,7 +325,7 @@ impl Statistics {
         self
     }
 
-    /// If `record_as_last` is set to true (default is false), at the beginning of each phase,
+    /// If `record_as_prev` is set to true (default is false), at the beginning of each phase,
     /// every unaccounted communication is recorded as the previous phase. If communication
     /// occurs before the first phase, it is still recorded as unaccounted.
     pub fn without_unaccounted(mut self, record_as_prev: bool) -> Self {
@@ -422,8 +422,8 @@ impl Statistics {
             .unzip();
         RunResult {
             meta: Default::default(),
-            communication,
-            time,
+            communication_bytes: communication,
+            time_ms: time,
         }
     }
 }
@@ -440,7 +440,7 @@ impl RunResult {
     /// run_res.add_metadata("Description", "Lorem Ipsum");
     /// run_res.add_metadata("other-data", vec![1, 2, 3]);
     /// ```
-    pub fn add_metadata<V: Serialize + Debug + 'static>(&mut self, key: &str, value: V) {
+    pub fn add_metadata<V: Serialize + Debug + Send + 'static>(&mut self, key: &str, value: V) {
         self.meta.custom.insert(key.to_string(), Box::new(value));
     }
 }

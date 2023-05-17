@@ -159,7 +159,7 @@ impl<G, Idx, W> Circuit<G, Idx, W> {
     }
 }
 
-impl<Share, G> Circuit<G, usize>
+impl<Share, G> Circuit<G, u32>
 where
     Share: Clone,
     G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,

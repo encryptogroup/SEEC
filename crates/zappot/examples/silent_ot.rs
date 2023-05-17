@@ -32,7 +32,7 @@ struct Args {
 #[tracing::instrument(skip(args))]
 async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
     // Create a secure RNG to use in the protocol
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     // Create the ot extension sender. A base OT **receiver** is passed as an argument and used
     // to create the base_ots
     // Create a channel by listening on a socket address. Once another party connect, this
@@ -69,7 +69,7 @@ async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
 #[tracing::instrument(skip(args))]
 async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create a secure RNG to use in the protocol
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     let (mut base_sender, _, mut base_receiver, _) =
         mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await

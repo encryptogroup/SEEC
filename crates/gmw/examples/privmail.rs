@@ -229,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut executor = {
-        let mt_provider = InsecureMTProvider::default();
+        let mt_provider = InsecureMTProvider;
         BoolGmwExecutor::new(&circuit, args.my_id, mt_provider).await?
     };
 

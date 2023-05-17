@@ -117,14 +117,16 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
         global_builder.into_circuit()
     }
 
-    #[tracing::instrument(level = "trace", skip(self, from, to_circuit, to_gate_ids))]
-    pub(crate) fn connect_sub_circuit_gates(
+    #[tracing::instrument(level = "trace", skip(self, to_circuit, to_gate_ids))]
+    pub(crate) fn connect_sub_circuit_gates<P>(
         &mut self,
-        from: &[Secret<BooleanGmw, Idx>],
+        from: &[Secret<P, Idx>],
         to_circuit: &mut BaseCircuit<G, Idx>,
         to_circuit_id: CircuitId,
         to_gate_ids: &[GateId<Idx>],
-    ) {
+    ) where
+        P: Protocol<Gate = G>,
+    {
         let inputs: Vec<_> = from.iter().cloned().map(Into::into).collect();
 
         let from_ranges = match group_gates_iter(&inputs) {
@@ -203,11 +205,14 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
     }
 
     #[tracing::instrument(level = "trace", skip(self, inputs))]
-    pub fn connect_sub_circuit(
+    pub fn connect_sub_circuit<P>(
         &mut self,
-        inputs: &[Secret<BooleanGmw, Idx>],
+        inputs: &[Secret<P, Idx>],
         sc_id: CircuitId,
-    ) -> Vec<Secret<BooleanGmw, Idx>> {
+    ) -> Vec<Secret<P, Idx>>
+    where
+        P: Protocol<Gate = G>,
+    {
         trace!(to = sc_id, ?inputs);
         let circuit = self
             .circuits
@@ -223,93 +228,6 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
             .iter()
             .map(|gate_id| Secret::from_parts(sc_id, *gate_id))
             .collect()
-
-        // let circuit = self
-        //     .circuits
-        //     .get(sc_id as usize)
-        //     .expect("SubCircuit not added")
-        //     .clone();
-        // let circuit = circuit.lock();
-        // let to_circuit_id = sc_id;
-        // let inputs: Vec<_> = inputs.iter().cloned().map(Into::into).collect();
-        // let inputs = &inputs[..];
-
-        // let from_ranges = match group_gates_iter(inputs) {
-        //     None => return vec![],
-        //     Some(iter) => iter,
-        // };
-        //
-        // let to_input_ids = circuit.sub_circuit_input_gates();
-        // let to_are_consecutive = to_input_ids
-        //     .iter()
-        //     .zip(to_input_ids.iter().skip(1))
-        //     .all(|(prev, next)| prev.0 + Idx::one() == next.0);
-        //
-        // let mut inputs = inputs.iter().copied();
-        // // TODO this will use range connections even when the groups are only one elem big
-        // //  we should probably iterate over the groups, check their size and then decide
-        // //  if it should be a range conn or one-to-one
-        // if to_are_consecutive && !to_input_ids.is_empty() {
-        //     // to an from are consecutive gates
-        //     debug!("Adding range sub circuit");
-        //
-        //     let _to_ids_iter = to_input_ids.iter();
-        //     let mut inputs_connected = 0;
-        //
-        //     // type inference issue
-        //     for (first_from, group) in from_ranges.into_iter() {
-        //         let (count, last_in_grp) = group.fold((0, None), |(count, _last), eob| {
-        //             let left = match eob {
-        //                 EitherOrBoth::Both(left, _) | EitherOrBoth::Left(left) => *left,
-        //                 EitherOrBoth::Right(_) => unreachable!("Left is always longer"),
-        //             };
-        //             (count + 1, Some(left))
-        //         });
-        //
-        //         let last_in_grp = last_in_grp.expect("Empty from group");
-        //
-        //         let from_range = RangeInclusive::new(first_from, last_in_grp);
-        //         let to_ids = &to_input_ids[inputs_connected..inputs_connected + count];
-        //         inputs_connected += count;
-        //         let to_range = RangeInclusive::new(
-        //             SubCircuitGate::new(to_circuit_id, to_ids[0]),
-        //             SubCircuitGate::new(to_circuit_id, *to_ids.last().unwrap()),
-        //         );
-        //         assert_eq!(
-        //             from_range.end().gate_id.0 - from_range.start().gate_id.0,
-        //             to_range.end().gate_id.0 - to_range.start().gate_id.0
-        //         );
-        //         trace!(?from_range, ?to_range, "connecting ranges");
-        //         self.connections
-        //             .range_connections
-        //             .outgoing
-        //             .insert(from_range.clone(), to_range.clone());
-        //         self.connections
-        //             .range_connections
-        //             .incoming
-        //             .insert(to_range, from_range);
-        //     }
-        // } else {
-        //     debug!(
-        //         // from_are_consecutive,
-        //         to_are_consecutive,
-        //         "Adding one to one connections"
-        //     );
-        //     let connections = to_input_ids.iter().flat_map(|to_input_id| {
-        //         let input_count = circuit.get_gate(*to_input_id).input_size();
-        //         let inputs_for_gate: SmallVec<[_; 2]> =
-        //             (0..input_count).map(|_| inputs.next().unwrap()).collect();
-        //         inputs_for_gate
-        //             .into_iter()
-        //             .map(move |sc_gate| (sc_gate, SubCircuitGate::new(to_circuit_id, *to_input_id)))
-        //     });
-        //     self.connect_circuits_unchecked(connections);
-        // };
-        // circuit
-        //     .sub_circuit_output_gates()
-        //     .iter()
-        //     .map(|gate_id| Secret::from_parts(to_circuit_id, *gate_id))
-        //     .collect()
     }
 
     /// Connections maps tuples of (SubCircuit, In/OutGate) to (SubCircuit, InputGate)
@@ -679,8 +597,8 @@ impl<Idx: GateIdx, const N: usize> SubCircuitInput for &[[Secret<BooleanGmw, Idx
     }
 }
 
-impl<Idx: GateIdx> From<Secret<BooleanGmw, Idx>> for SubCircuitGate<Idx> {
-    fn from(share: Secret<BooleanGmw, Idx>) -> Self {
+impl<P: Protocol, Idx: GateIdx> From<Secret<P, Idx>> for SubCircuitGate<Idx> {
+    fn from(share: Secret<P, Idx>) -> Self {
         SubCircuitGate {
             circuit_id: share.circuit_id,
             gate_id: share.output_of,

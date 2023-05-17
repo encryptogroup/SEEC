@@ -16,6 +16,11 @@ impl<R: Ring> MTProvider for InsecureMTProvider<R> {
     type Output = MulTriples<R>;
     type Error = Infallible;
 
+    async fn precompute_mts(&mut self, _amount: usize) -> Result<(), Infallible> {
+        // Nothing to do
+        Ok(())
+    }
+
     async fn request_mts(&mut self, amount: usize) -> Result<Self::Output, Self::Error> {
         Ok(MulTriples::zeros(amount))
     }

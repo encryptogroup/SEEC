@@ -11,6 +11,9 @@ pub mod ot_ext;
 pub mod trusted_provider;
 pub mod trusted_seed_provider;
 
+pub use insecure_provider::InsecureMTProvider;
+pub use ot_ext::OtMTProvider;
+
 /// Efficient storage of multiple triples.
 ///
 /// This struct is a container for multiple multiplication triples, where the components
@@ -120,6 +123,12 @@ impl MulTriples {
 
     pub fn c(&self) -> &BitSlice<usize> {
         &self.c
+    }
+
+    pub fn extend_from_mts(&mut self, other: &Self) {
+        self.a.extend_from_bitslice(&other.a);
+        self.b.extend_from_bitslice(&other.b);
+        self.c.extend_from_bitslice(&other.c);
     }
 }
 

@@ -11,7 +11,7 @@ use tracing::{debug, info, trace};
 use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::builder::SubCircuitGate;
 use crate::circuit::{CircuitId, DefaultIdx, ExecutableCircuit, GateIdx};
-use crate::errors::{CircuitError, ExecutorError};
+use crate::errors::ExecutorError;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
     FunctionDependentSetup, Gate, Protocol, Share, ShareOf, ShareStorage, SimdShareOf,
@@ -55,15 +55,19 @@ where
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
 {
     pub async fn new<
-        FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>,
+        FDError, // this little hack is needed to work around https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
+        FDSetup: FunctionDependentSetup<
+                P::ShareStorage,
+                P::Gate,
+                Idx,
+                Output = P::SetupStorage,
+                Error = FDError,
+            > + Send,
     >(
         circuit: &'c ExecutableCircuit<P::Gate, Idx>,
         party_id: usize,
         setup: FDSetup,
-    ) -> Result<Executor<'c, P, Idx>, CircuitError>
-    where
-        FDSetup::Error: Debug,
-    {
+    ) -> Result<Executor<'c, P, Idx>, ExecutorError> {
         Self::new_with_state(P::default(), circuit, party_id, setup).await
     }
 }
@@ -79,18 +83,25 @@ where
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
 {
     pub async fn new_with_state<
-        FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>,
+        FDError,
+        FDSetup: FunctionDependentSetup<
+                P::ShareStorage,
+                P::Gate,
+                Idx,
+                Output = P::SetupStorage,
+                Error = FDError,
+            > + Send,
     >(
         mut protocol_state: P,
         circuit: &'c ExecutableCircuit<P::Gate, Idx>,
         party_id: usize,
         mut setup: FDSetup,
-    ) -> Result<Executor<'c, P, Idx>, CircuitError>
-    where
-        FDSetup::Error: Debug,
-    {
+    ) -> Result<Executor<'c, P, Idx>, ExecutorError> {
         let gate_outputs = protocol_state.setup_gate_outputs(party_id, circuit);
-        let setup_storage = setup.setup(&gate_outputs, circuit).await.unwrap();
+        let setup_storage = setup
+            .setup(&gate_outputs, circuit)
+            .await
+            .map_err(|_| ExecutorError::Setup)?;
         Ok(Self {
             circuit,
             protocol_state,
@@ -227,7 +238,7 @@ where
 
             let (scalar, simd) = layer.split_simd();
 
-            let scalar_gate_iter = layer.interactive_gates().flatten().cloned();
+            let scalar_gate_iter = scalar.interactive_gates().flatten().cloned();
             // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
             // over .await
             let scalar_msg = {
