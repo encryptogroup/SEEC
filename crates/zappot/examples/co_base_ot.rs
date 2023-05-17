@@ -25,7 +25,7 @@ struct Args {
 /// Example of the sender side
 async fn sender(args: Args) -> Vec<[Block; 2]> {
     // Create a secure RNG to use in the protocol
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     let mut sender = Sender::new();
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
@@ -46,7 +46,7 @@ async fn sender(args: Args) -> Vec<[Block; 2]> {
 /// Example of the receiver side
 async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create a secure RNG to use in the protocol
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     // Create the receiver. The struct holds no state
     let mut receiver = Receiver::new();
     // Connect to the sender on the listened on port
