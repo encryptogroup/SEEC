@@ -54,7 +54,9 @@ where
     R: ExtROTReceiver + Send,
     R::Msg: RemoteSend + Debug,
 {
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn compute_mts(&mut self, amount: usize) -> Result<MulTriples, Error> {
+        tracing::debug!("Computing MTs via OT");
         let mut sender_rng = AesRng::from_rng(&mut self.rng).unwrap();
         let mut receiver_rng = AesRng::from_rng(&mut self.rng).unwrap();
 

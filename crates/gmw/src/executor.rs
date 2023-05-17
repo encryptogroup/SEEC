@@ -238,7 +238,7 @@ where
 
             let (scalar, simd) = layer.split_simd();
 
-            let scalar_gate_iter = layer.interactive_gates().flatten().cloned();
+            let scalar_gate_iter = scalar.interactive_gates().flatten().cloned();
             // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
             // over .await
             let scalar_msg = {

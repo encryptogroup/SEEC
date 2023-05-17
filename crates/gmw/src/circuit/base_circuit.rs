@@ -266,6 +266,10 @@ impl<G, Idx, W> BaseCircuit<G, Idx, W> {
         &self.sub_circuit_input_gates
     }
 
+    pub fn sub_circuit_input_count(&self) -> usize {
+        self.sub_circuit_input_gates.len()
+    }
+
     pub fn output_count(&self) -> usize {
         self.output_gates.len()
     }
@@ -375,7 +379,7 @@ impl<G: Gate, Idx: GateIdx> Default for BaseCircuit<G, Idx> {
 
 impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Circuit")
+        f.debug_struct("BaseCircuit")
             .field("input_count", &self.input_count())
             .field(
                 "sub_circuit_input_gates",
@@ -387,6 +391,7 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
                 "sub_circuit_output_gates",
                 &self.sub_circuit_output_gates().len(),
             )
+            .field("simd_size", &self.simd_size)
             .finish()
     }
 }
