@@ -111,6 +111,17 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
         op(builder)
     }
 
+    pub fn with_global_main_circ_mut<R, F>(f: F) -> R
+    where
+        F: FnOnce(&mut BaseCircuit<G, Idx>) -> R,
+    {
+        Self::with_global(|builder| {
+            let main_circ = builder.get_main_circuit();
+            let mut main_circ = main_circ.lock();
+            f(&mut *main_circ)
+        })
+    }
+
     pub fn global_into_circuit() -> Circuit<G, Idx> {
         let mut global_builder = Self::with_global(|builder| mem::take(builder));
         global_builder.clear_caches();

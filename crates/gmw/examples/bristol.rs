@@ -96,18 +96,19 @@ fn compile(compile_args: CompileArgs) -> Result<()> {
         Some(size) => {
             bc.set_simd_size(size);
             let circ_input_size = bc.sub_circuit_input_count();
-            let inputs = inputs::<u32>(circ_input_size * size.get());
+            let inputs = inputs::<u32>(circ_input_size);
             let bc = bc.into_shared();
 
             let (output, circ_id) = CircuitBuilder::with_global(|builder| {
+                builder.get_main_circuit().lock().set_simd_size(size);
                 let circ_id = builder.push_circuit(bc);
-                let mut output = vec![];
-                for chunk in inputs.chunks_exact(circ_input_size) {
-                    output = builder.connect_sub_circuit(chunk, circ_id);
-                }
+                let output = builder.connect_sub_circuit(&inputs, circ_id);
                 (output, circ_id)
             });
-            output.connect_simd_to_main(circ_id, size.get());
+            let main = output.connect_to_main(circ_id);
+            main.iter().for_each(|s| {
+                s.output();
+            });
             let circ = CircuitBuilder::global_into_circuit();
             ExecutableCircuit::DynLayers(circ)
         }

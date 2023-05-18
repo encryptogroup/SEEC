@@ -22,9 +22,9 @@ pub use ot_ext::OtMTProvider;
 /// [`MulTriple`]. Prefer this type over `Vec<MulTriple>`.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MulTriples {
-    a: BitVec<usize>,
-    b: BitVec<usize>,
-    c: BitVec<usize>,
+    pub a: BitVec<usize>,
+    pub b: BitVec<usize>,
+    pub c: BitVec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +89,7 @@ impl MulTriples {
     }
 
     /// Provides an iterator over the multiplication triples in the form of [`MulTriple`]s.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = MulTriple> + '_ {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = MulTriple> + DoubleEndedIterator + '_ {
         self.slice(..).iter()
     }
 
@@ -113,15 +113,15 @@ impl MulTriples {
         }
     }
 
-    pub fn a(&self) -> &BitSlice<usize> {
+    pub fn a(&self) -> &BitVec<usize> {
         &self.a
     }
 
-    pub fn b(&self) -> &BitSlice<usize> {
+    pub fn b(&self) -> &BitVec<usize> {
         &self.b
     }
 
-    pub fn c(&self) -> &BitSlice<usize> {
+    pub fn c(&self) -> &BitVec<usize> {
         &self.c
     }
 
@@ -134,7 +134,7 @@ impl MulTriples {
 
 impl<'a> MulTriplesSlice<'a> {
     /// Provides an iterator over the multiplication triples in the form of [`MulTriple`]s.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = MulTriple> + 'a {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = MulTriple> + DoubleEndedIterator + 'a {
         self.a
             .iter()
             .by_vals()

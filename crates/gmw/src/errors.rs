@@ -9,6 +9,8 @@ pub enum ExecutorError {
     OutOfOrderMessage,
     #[error("Unable to perform function dependent setup")]
     Setup,
+    #[error("Circuit is malformed and not executable")]
+    IllegalCircuit,
 }
 
 #[derive(Error, Debug)]

@@ -1,10 +1,12 @@
 use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::{BitSlice, BitVec};
-use crate::executor::{GateOutputs, ScGateOutputs};
+use crate::executor::{GateOutputs, Input};
 use async_trait::async_trait;
 use bitvec::store::BitStore;
 use num_traits::{Pow, WrappingAdd, WrappingMul, WrappingSub};
+use rand::distributions::{Distribution, Standard};
+use rand::{Rng, RngCore};
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -82,10 +84,8 @@ pub trait Protocol: Send + Sync {
         let data = circuit
             .gate_counts()
             .map(|(count, simd_size)| match simd_size {
-                None => {
-                    ScGateOutputs::Scalar(Self::ShareStorage::repeat(Default::default(), count))
-                }
-                Some(simd_size) => ScGateOutputs::Simd(vec![
+                None => Input::Scalar(Self::ShareStorage::repeat(Default::default(), count)),
+                Some(simd_size) => Input::Simd(vec![
                     // TODO: Default here instead of allocating?
                     Self::ShareStorage::repeat(
                         Default::default(),
@@ -154,6 +154,13 @@ pub trait ShareStorage<Share>:
 
     fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    fn random<Rng: RngCore>(size: usize, rng: &mut Rng) -> Self
+    where
+        Standard: Distribution<Share>,
+    {
+        rng.sample_iter(Standard).take(size).collect()
     }
 }
 

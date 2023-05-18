@@ -20,7 +20,7 @@ use crate::circuit::base_circuit::{BaseGate, Load};
 use crate::circuit::ExecutableCircuit;
 use crate::circuit::{BaseCircuit, BooleanGate, GateIdx};
 use crate::common::BitVec;
-use crate::executor::Executor;
+use crate::executor::{Executor, Input};
 use crate::mul_triple::MTProvider;
 use crate::mul_triple::{arithmetic, boolean};
 use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
@@ -239,8 +239,8 @@ where
     let (out1, out2) = match channel {
         TestChannel::InMemory => {
             let (mut t1, mut t2) = mpc_channel::in_memory::new_pair(2);
-            let h1 = ex1.execute(input_a, &mut t1.0, &mut t1.1);
-            let h2 = ex2.execute(input_b, &mut t2.0, &mut t2.1);
+            let h1 = ex1.execute(Input::Scalar(input_a), &mut t1.0, &mut t1.1);
+            let h2 = ex2.execute(Input::Scalar(input_b), &mut t2.0, &mut t2.1);
             futures::try_join!(h1, h2)?
         }
         TestChannel::Tcp => {
@@ -250,8 +250,8 @@ where
                 sub_channel(&mut t1.0, &mut t1.2, 2),
                 sub_channel(&mut t2.0, &mut t2.2, 2)
             )?;
-            let h1 = ex1.execute(input_a, &mut sub_t1.0, &mut sub_t1.1);
-            let h2 = ex2.execute(input_b, &mut sub_t2.0, &mut sub_t2.1);
+            let h1 = ex1.execute(Input::Scalar(input_a), &mut sub_t1.0, &mut sub_t1.1);
+            let h2 = ex2.execute(Input::Scalar(input_b), &mut sub_t2.0, &mut sub_t2.1);
             let out = futures::try_join!(h1, h2)?;
             info!(
                 bytes_sent = t1.1.get(),
@@ -262,6 +262,7 @@ where
         }
     };
     info!(exec_time = %now.elapsed().as_millis(), "Execution time (ms)");
-
+    let out1 = out1.into_scalar().unwrap();
+    let out2 = out2.into_scalar().unwrap();
     Ok(S::reconstruct([out1, out2]))
 }

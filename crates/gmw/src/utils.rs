@@ -5,7 +5,7 @@ use rand::{CryptoRng, Fill, Rng};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
-use std::ops::RangeInclusive;
+use std::ops::{BitAndAssign, BitXorAssign, RangeInclusive};
 use std::{array, mem};
 
 pub(crate) struct ByAddress<'a, T: ?Sized>(pub(crate) &'a T);
@@ -92,4 +92,40 @@ where
     let mut bv = BitVec::from_vec(buf);
     bv.truncate(size);
     bv
+}
+
+pub(crate) trait BitVecExt: Sized {
+    fn fast_bit_xor_mut(&mut self, other: &Self) -> &mut Self;
+    fn fast_bit_and_mut(&mut self, other: &Self) -> &mut Self;
+
+    fn fast_bit_xor(mut self, other: &Self) -> Self {
+        self.fast_bit_xor_mut(other);
+        self
+    }
+    fn fast_bit_and(mut self, other: &Self) -> Self {
+        self.fast_bit_and_mut(other);
+        self
+    }
+}
+
+impl<T: BitStore + Copy + BitXorAssign + BitAndAssign> BitVecExt for BitVec<T> {
+    fn fast_bit_xor_mut(&mut self, other: &Self) -> &mut Self {
+        self.as_raw_mut_slice()
+            .iter_mut()
+            .zip(other.as_raw_slice())
+            .for_each(|(a, b)| {
+                *a ^= *b;
+            });
+        self
+    }
+
+    fn fast_bit_and_mut(&mut self, other: &Self) -> &mut Self {
+        self.as_raw_mut_slice()
+            .iter_mut()
+            .zip(other.as_raw_slice())
+            .for_each(|(a, b)| {
+                *a &= *b;
+            });
+        self
+    }
 }

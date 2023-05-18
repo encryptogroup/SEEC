@@ -13,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::builder::CircuitBuilder;
 use gmw::circuit::{ExecutableCircuit, GateId};
 use gmw::common::BitVec;
-use gmw::executor::{BoolGmwExecutor, Message};
+use gmw::executor::{BoolGmwExecutor, Input, Message};
 use gmw::mul_triple::boolean::ot_ext::OtMTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
@@ -240,7 +240,9 @@ async fn main() -> anyhow::Result<()> {
         BoolGmwExecutor::new(&circuit, args.my_id, mt_provider).await?
     };
 
-    let output = executor.execute(input, &mut ch2.0, &mut ch2.1).await?;
+    let output = executor
+        .execute(Input::Scalar(input), &mut ch2.0, &mut ch2.1)
+        .await?;
     info!(
         my_id = %args.my_id,
         output = ?output,

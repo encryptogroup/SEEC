@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 use gmw::circuit::ExecutableCircuit;
 use gmw::circuit::GateId;
 use gmw::common::BitVec;
-use gmw::executor::{BoolGmwExecutor, Message};
+use gmw::executor::{BoolGmwExecutor, Input, Message};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::protocols::boolean_gmw::BooleanGmw;
 use gmw::secret::{inputs, low_depth_reduce, Secret};
@@ -236,7 +236,9 @@ async fn main() -> anyhow::Result<()> {
     let (mut sender, mut receiver) =
         sub_channels_for!(&mut sender, &mut receiver, 16, Message<BooleanGmw>).await?;
 
-    let output = executor.execute(input, &mut sender, &mut receiver).await?;
+    let output = executor
+        .execute(Input::Scalar(input), &mut sender, &mut receiver)
+        .await?;
     info!(
         my_id = %args.my_id,
         output = ?output,

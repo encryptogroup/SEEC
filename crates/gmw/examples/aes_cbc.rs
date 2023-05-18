@@ -27,7 +27,7 @@ use tracing_subscriber::EnvFilter;
 
 use gmw::circuit::{static_layers, BaseCircuit, ExecutableCircuit};
 use gmw::common::{BitSlice, BitVec};
-use gmw::executor::{Executor, Message};
+use gmw::executor::{Executor, Input, Message, Output};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use gmw::protocols::boolean_gmw::{BooleanGmw, XorSharing};
 use gmw::protocols::Sharing;
@@ -79,7 +79,7 @@ struct ExecuteArgs {
     input_blocks: Option<usize>,
 
     /// Validate the encryption by sending key and iv in plain
-    #[arg(long)]
+    #[arg(long, conflicts_with = "ctr")]
     validate: bool,
 
     #[arg(long)]
@@ -202,7 +202,17 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
                 anyhow::bail!("Received wrong message. Expected IvKeyShare")
             };
 
-            let ciphertext = XorSharing::<ThreadRng>::reconstruct([out, shared_out]);
+            let ciphertext = match (out, shared_out) {
+                (Output::Scalar(out), Output::Scalar(shared_out)) => {
+                    XorSharing::<ThreadRng>::reconstruct([out, shared_out])
+                }
+                (Output::Simd(out), Output::Simd(shared_out)) => out
+                    .into_iter()
+                    .zip(shared_out)
+                    .flat_map(|(a, b)| XorSharing::<ThreadRng>::reconstruct([a, b]))
+                    .collect(),
+                _ => unreachable!("Non compatible output"),
+            };
 
             if args.validate {
                 let Msg::PlainIvKey {iv, key} = sharing_channel.1.recv().await
@@ -248,7 +258,7 @@ async fn encrypt(
     shared_file: &BitSlice<usize>,
     shared_key: &BitSlice<usize>,
     shared_iv: &BitSlice<usize>,
-) -> Result<BitVec<usize>> {
+) -> Result<Output<BitVec<usize>>> {
     let exec_circ: static_layers::Circuit<_, _> = bincode::deserialize_from(BufReader::new(
         File::open(&args.circuit).context("Failed to open circuit file")?,
     ))?;
@@ -263,7 +273,11 @@ async fn encrypt(
     let mut executor: Executor<BooleanGmw, usize> =
         Executor::new(&exec_circ, args.id, InsecureMTProvider).await?;
     Ok(executor
-        .execute(input, &mut executor_channel.0, &mut executor_channel.1)
+        .execute(
+            Input::Scalar(input),
+            &mut executor_channel.0,
+            &mut executor_channel.1,
+        )
         .await?)
 }
 
@@ -274,7 +288,7 @@ enum Msg {
         key: BitVec<usize>,
     },
     ShareInput(BitVec<usize>),
-    ReconstructAesCiphertext(BitVec<usize>),
+    ReconstructAesCiphertext(Output<BitVec<usize>>),
     PlainIvKey {
         iv: [usize; 2],
         key: [usize; 2],
