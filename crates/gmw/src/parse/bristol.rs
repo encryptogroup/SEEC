@@ -5,7 +5,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::multispace0;
 use nom::combinator::all_consuming;
-use nom::multi::{count, fill};
+use nom::multi::{count, fill, length_count};
 use nom::sequence::tuple;
 use nom::IResult;
 use smallvec::SmallVec;
@@ -24,9 +24,9 @@ pub struct Header {
     pub gates: usize,
     pub wires: usize,
     /// number n1 and n2 of wires in the inputs to the function given by the circuit
-    pub input_wires: [usize; 2],
+    pub input_wires: Vec<usize>,
     /// n3, number of wires in the output
-    pub output_wires: usize,
+    pub output_wires: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -40,6 +40,14 @@ impl Circuit {
     pub fn load(path: impl AsRef<Path>) -> Result<Circuit, BristolError> {
         let bristol_text = fs::read_to_string(path)?;
         circuit(&bristol_text).map_err(|err| err.to_owned().into())
+    }
+
+    pub fn total_input_wires(&self) -> usize {
+        self.header.input_wires.iter().sum()
+    }
+
+    pub fn total_output_wires(&self) -> usize {
+        self.header.output_wires.iter().sum()
     }
 }
 
@@ -61,7 +69,14 @@ fn header(i: &str) -> IResult<&str, Header> {
     let int_ws = parse::integer_ws;
     let (i, (gates, wires)) = tuple((int_ws, int_ws))(i)?;
 
-    let (i, (input_wires, output_wires)) = tuple((array(int_ws), int_ws))(i)?;
+    // for fashion format
+    let len_cnt = || length_count(int_ws, int_ws);
+    let fashion_parser = tuple((len_cnt(), len_cnt()));
+    // parser for the old bristol format
+    let basic_parser = tuple((count(int_ws, 2), count(int_ws, 1)));
+
+    let (i, (input_wires, output_wires)) = alt((fashion_parser, basic_parser))(i)?;
+
     let header = Header {
         gates,
         wires,
@@ -98,7 +113,7 @@ pub fn circuit(input: &str) -> Result<Circuit, nom::Err<nom::error::Error<&str>>
     Ok(Circuit { header, gates })
 }
 
-fn array<'a, F: 'a, O: Default + Copy, const N: usize>(
+pub fn array<'a, F: 'a, O: Default + Copy, const N: usize>(
     element: F,
 ) -> impl FnMut(&'a str) -> IResult<&'a str, [O; N]>
 where
@@ -125,8 +140,23 @@ mod tests {
             Header {
                 gates: 33616,
                 wires: 33872,
-                input_wires: [128, 128],
-                output_wires: 128
+                input_wires: vec![128, 128],
+                output_wires: vec![128]
+            },
+            parsed
+        );
+    }
+
+    #[test]
+    fn parse_fashion_header() {
+        let header_text = "135073 135841\n2 512 256\n1 256\n";
+        let parsed = header(header_text).unwrap().1;
+        assert_eq!(
+            Header {
+                gates: 135073,
+                wires: 135841,
+                input_wires: vec![512, 256],
+                output_wires: vec![256]
             },
             parsed
         );
@@ -179,5 +209,17 @@ mod tests {
         assert_eq!(33616, parsed.header.gates);
         assert_eq!(33872, parsed.header.wires);
         assert_eq!(parsed.header.gates, parsed.gates.len());
+    }
+
+    #[test]
+    fn parse_sha_bristol_fashion_circuit() {
+        let sha_text =
+            fs::read_to_string("test_resources/bristol-circuits/sha_256.bristol_fashion").unwrap();
+        let parsed = circuit(&sha_text).unwrap();
+        assert_eq!(135073, parsed.header.gates);
+        assert_eq!(135841, parsed.header.wires);
+        assert_eq!(parsed.header.gates, parsed.gates.len());
+        assert_eq!(vec![512, 256], parsed.header.input_wires);
+        assert_eq!(vec![256], parsed.header.output_wires);
     }
 }
