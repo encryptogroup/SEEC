@@ -309,7 +309,7 @@ where
             bristol.header
         );
         let mut circuit = Self::with_capacity(bristol.header.gates, bristol.header.wires);
-        let total_input_wires = bristol.header.input_wires.iter().sum();
+        let total_input_wires = bristol.total_input_wires();
         // We treat the output wires of the bristol::Gates as their GateIds. Unfortunately,
         // the output wires are not given in ascending order, so we need to save a mapping
         // of wire ids to GateIds
@@ -341,7 +341,8 @@ where
                 circuit.add_wire(*mapped_input, added_id);
             }
         }
-        let output_gates = bristol.header.wires - bristol.header.output_wires..bristol.header.wires;
+        let output_gates =
+            bristol.header.wires - bristol.total_output_wires()..bristol.header.wires;
         for output_id in &wire_mapping[output_gates] {
             let added_id = circuit.add_gate(output_gate.clone().into());
             circuit.add_wire(*output_id, added_id);
@@ -922,11 +923,8 @@ mod tests {
             parsed.header.gates + converted.input_count() + converted.output_count(),
             converted.gate_count()
         );
-        assert_eq!(
-            converted.input_count(),
-            parsed.header.input_wires.iter().sum::<usize>()
-        );
-        assert_eq!(parsed.header.output_wires, converted.output_count());
+        assert_eq!(converted.input_count(), parsed.total_input_wires());
+        assert_eq!(parsed.total_output_wires(), converted.output_count());
         // TODO comparing the wire counts is a little tricky since we have a slightly different
         //  view of what a wire is
         //  assert_eq!(parsed.header.wires, converted.wire_count());
