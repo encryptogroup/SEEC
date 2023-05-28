@@ -2,37 +2,35 @@ use aes::cipher::KeyIvInit;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
+use std::ops::Not;
 use std::path::{Path, PathBuf};
-use std::{iter, mem};
+use std::{io, iter, mem};
 
 use anyhow::{ensure, Context, Result};
 use bitvec::order::Msb0;
 use bitvec::view::BitView;
 use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut};
 use clap::{Args, Parser};
-use once_cell::sync::Lazy;
-
-use rand::rngs::ThreadRng;
-use rand::{thread_rng, Rng, SeedableRng};
-use rand_chacha::ChaChaRng;
-
-use serde::{Deserialize, Serialize};
-
+use gmw::bench::BenchParty;
 use gmw::circuit::base_circuit::Load;
-use gmw::{BooleanGate, Circuit, CircuitBuilder, SharedCircuit, SubCircuitOutput};
-use tracing::info;
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::EnvFilter;
-
-use gmw::circuit::{static_layers, BaseCircuit, ExecutableCircuit};
+use gmw::circuit::{BaseCircuit, ExecutableCircuit};
 use gmw::common::{BitSlice, BitVec};
 use gmw::executor::{Executor, Input, Message, Output};
 use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use gmw::mul_triple::MTProvider;
 use gmw::protocols::boolean_gmw::{BooleanGmw, XorSharing};
 use gmw::protocols::Sharing;
 use gmw::secret::{inputs, Secret};
-use mpc_channel::{sub_channels_for, Channel};
+use gmw::{mul_triple, BooleanGate, CircuitBuilder, SharedCircuit, SubCircuitOutput};
+use mpc_channel::{sub_channel_with, sub_channels_for, Channel};
+use once_cell::sync::Lazy;
+use rand::rngs::{OsRng, ThreadRng};
+use rand::{thread_rng, Rng, SeedableRng};
+use rand_chacha::ChaChaRng;
+use serde::{Deserialize, Serialize};
+use tracing::info;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 enum ProgArgs {
@@ -51,8 +49,9 @@ struct CompileArgs {
     #[arg(long)]
     use_sc: bool,
 
+    /// If set, circuit is stored with precomputed static layers
     #[arg(long)]
-    ctr: bool,
+    static_layers: bool,
 
     /// Output path of the compile circuit
     #[arg(default_value = "aes_circ.seec")]
@@ -67,26 +66,47 @@ struct ExecuteArgs {
     id: usize,
 
     /// Address of server to bind or connect to
-    #[arg(long)]
+    #[arg(long, default_value = "127.0.0.1:7745")]
     server: SocketAddr,
 
-    /// 16 byte key in Hex format
+    /// 16 byte key in Hex format. Ignored when using --bench
     #[arg(long, default_value = "00112233445566778899aabbccddeeff")]
     key: String,
 
     /// Size of artificial input to encrypt in blocks of 16 bytes = 128 bits
-    #[arg(long, required_if_eq("id", "1"))]
+    #[arg(long, conflicts_with = "bench")]
     input_blocks: Option<usize>,
 
     /// Validate the encryption by sending key and iv in plain
-    #[arg(long, conflicts_with = "ctr")]
+    #[arg(long, conflicts_with = "bench")]
     validate: bool,
 
+    /// Benchmark execution (ignores key)
     #[arg(long)]
-    ctr: bool,
+    bench: bool,
+
+    /// Insecure setup
+    #[arg(long)]
+    insecure_setup: bool,
 
     #[arg(default_value = "aes_circ.seec")]
     circuit: PathBuf,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum Msg {
+    ShareIvKey {
+        iv: BitVec<usize>,
+        key: BitVec<usize>,
+    },
+    ShareInput(BitVec<usize>),
+    ReconstructAesCiphertext(Output<BitVec<usize>>),
+    PlainIvKey {
+        iv: [usize; 2],
+        key: [usize; 2],
+    },
+    OtChannel(mpc_channel::Receiver<mul_triple::boolean::ot_ext::DefaultMsg>),
+    Ack,
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -95,8 +115,11 @@ async fn main() -> Result<()> {
     let args = ProgArgs::parse();
     match args {
         ProgArgs::Compile(compile_args) => {
-            compile(&compile_args).context("Failed to comile circuit")?
+            compile(&compile_args).context("Failed to compile circuit")?
         }
+        ProgArgs::Execute(exec_args) if exec_args.bench => bench_execute(&exec_args)
+            .await
+            .context("failed to execute benchmark")?,
         ProgArgs::Execute(exec_args) => execute(&exec_args)
             .await
             .context("failed to execute circuit")?,
@@ -107,9 +130,12 @@ async fn main() -> Result<()> {
 
 fn compile(args: &CompileArgs) -> Result<()> {
     let input_bits = args.input_blocks * 128;
-    let circ = build_enc_circuit(input_bits, args.use_sc, args.ctr)
-        .context("failed to construct circuit")?;
-    let circ = circ.precompute_layers();
+    let circ = build_enc_circuit(input_bits, args.use_sc).context("failed to construct circuit")?;
+    let circ = if args.static_layers {
+        circ.precompute_layers()
+    } else {
+        circ
+    };
     let out = BufWriter::new(File::create(&args.output).context("failed to create output file")?);
     bincode::serialize_into(out, &circ).context("failed to serialize circuit")?;
     Ok(())
@@ -122,9 +148,27 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
-    let (mut sharing_channel, executor_channel) =
+    let (mut main_channel, executor_channel) =
         sub_channels_for!(&mut sender, &mut receiver, 8, Msg, Message<BooleanGmw>).await?;
     let mut sharing = XorSharing::new(ChaChaRng::from_rng(thread_rng()).context("Sharing RNG")?);
+
+    let ot_channel = if args.insecure_setup.not() {
+        let sub_channel = sub_channel_with(
+            &mut main_channel.0,
+            &mut main_channel.1,
+            128,
+            Msg::OtChannel,
+            |msg| match msg {
+                Msg::OtChannel(receiver) => Some(receiver),
+                _ => None,
+            },
+        )
+        .await
+        .context("failed to create ot sub_channel")?;
+        Some(sub_channel)
+    } else {
+        None
+    };
 
     match args.id {
         0 => {
@@ -144,35 +188,36 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
 
             let [key_share0, key_share1] = sharing.share(msb_key);
             let [iv_share0, iv_share1] = sharing.share(msb_iv);
-            sharing_channel
+            main_channel
                 .0
                 .send(Msg::ShareIvKey {
                     iv: iv_share1,
                     key: key_share1,
                 })
                 .await?;
-            let Msg::ShareInput(input_share) = sharing_channel.1.recv().await?.ok_or(anyhow::anyhow!("Remote closed"))? else {
+            let Msg::ShareInput(input_share) = main_channel.1.recv().await?.ok_or(anyhow::anyhow!("Remote closed"))? else {
                 anyhow::bail!("Received wrong message. Expected ShareInput")
             };
 
             let out = encrypt(
                 args,
                 executor_channel,
+                ot_channel,
                 &input_share,
                 &key_share0,
                 &iv_share0,
             )
             .await?;
 
-            sharing_channel
+            main_channel
                 .0
                 .send(Msg::ReconstructAesCiphertext(out.clone()))
                 .await?;
             if args.validate {
-                sharing_channel.0.send(Msg::PlainIvKey { iv, key }).await?;
+                main_channel.0.send(Msg::PlainIvKey { iv, key }).await?;
             }
             // Try to recv Ack but ignore errors
-            let _ = sharing_channel.1.recv().await;
+            let _ = main_channel.1.recv().await;
 
             info!(
                 bytes_written = bytes_written.get(),
@@ -185,18 +230,23 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
             bytemuck::cast_slice_mut(&mut padded_data_usize).clone_from_slice(&padded_data);
             let padded_file_data = BitVec::from_vec(padded_data_usize);
             let [input_share0, input_share1] = sharing.share(padded_file_data);
-            sharing_channel
-                .0
-                .send(Msg::ShareInput(input_share1))
-                .await?;
-            let Msg::ShareIvKey {iv: iv_share, key: key_share } = sharing_channel.1.recv().await
+            main_channel.0.send(Msg::ShareInput(input_share1)).await?;
+            let Msg::ShareIvKey {iv: iv_share, key: key_share } = main_channel.1.recv().await
                 .context("Receiving IvKeyShare")?
                 .ok_or(anyhow::anyhow!("Remote closed"))? else {
                 anyhow::bail!("Received wrong message. Expected IvKeyShare")
             };
-            let out = encrypt(args, executor_channel, &input_share0, &key_share, &iv_share).await?;
+            let out = encrypt(
+                args,
+                executor_channel,
+                ot_channel,
+                &input_share0,
+                &key_share,
+                &iv_share,
+            )
+            .await?;
 
-            let Msg::ReconstructAesCiphertext(shared_out) = sharing_channel.1.recv().await
+            let Msg::ReconstructAesCiphertext(shared_out) = main_channel.1.recv().await
                 .context("Receiving ciphertext share")?
                 .ok_or(anyhow::anyhow!("Remote closed"))? else {
                 anyhow::bail!("Received wrong message. Expected IvKeyShare")
@@ -215,7 +265,7 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
             };
 
             if args.validate {
-                let Msg::PlainIvKey {iv, key} = sharing_channel.1.recv().await
+                let Msg::PlainIvKey {iv, key} = main_channel.1.recv().await
                     .context("Reconstructing Iv/Key")?
                     .ok_or(anyhow::anyhow!("Remote closed"))? else {
                     anyhow::bail!("Received wrong message. Expected ReconstructIvKey")
@@ -223,7 +273,7 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
                 validate(iv, key, &data, &ciphertext)?;
             }
 
-            sharing_channel.0.send(Msg::Ack).await?;
+            main_channel.0.send(Msg::Ack).await?;
 
             let encoded = hex::encode(bytemuck::cast_slice(ciphertext.as_raw_slice()));
             info!(
@@ -234,6 +284,27 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
         }
         _ => unreachable!(),
     };
+    Ok(())
+}
+
+async fn bench_execute(args: &ExecuteArgs) -> Result<()> {
+    let exec_circ: ExecutableCircuit<BooleanGate, usize> = bincode::deserialize_from(
+        BufReader::new(File::open(&args.circuit).context("Failed to open circuit file")?),
+    )?;
+
+    let p = BenchParty::<BooleanGmw, usize>::new(args.id)
+        .explicit_circuit(exec_circ)
+        .precompute_layers(false)
+        .server(args.server)
+        .insecure_setup(args.insecure_setup);
+    let res = p
+        .bench()
+        .await
+        .context("failed to run benchmark for aes-cbc")?;
+    println!(
+        "{}",
+        serde_json::to_string(&res).context("failed to serialize bench results to json")?
+    );
     Ok(())
 }
 
@@ -255,23 +326,30 @@ fn get_data(args: &ExecuteArgs) -> Result<(Vec<u8>, Vec<u8>)> {
 async fn encrypt(
     args: &ExecuteArgs,
     mut executor_channel: Channel<Message<BooleanGmw>>,
+    ot_channel: Option<Channel<mul_triple::boolean::ot_ext::DefaultMsg>>,
     shared_file: &BitSlice<usize>,
     shared_key: &BitSlice<usize>,
     shared_iv: &BitSlice<usize>,
 ) -> Result<Output<BitVec<usize>>> {
-    let exec_circ: static_layers::Circuit<_, _> = bincode::deserialize_from(BufReader::new(
-        File::open(&args.circuit).context("Failed to open circuit file")?,
-    ))?;
-    let exec_circ = ExecutableCircuit::StaticLayers(exec_circ);
+    let exec_circ: ExecutableCircuit<BooleanGate, usize> = bincode::deserialize_from(
+        BufReader::new(File::open(&args.circuit).context("Failed to open circuit file")?),
+    )?;
 
     let mut input = shared_key.to_bitvec();
-    if !args.ctr {
-        input.extend_from_bitslice(shared_iv);
-    }
+    input.extend_from_bitslice(shared_iv);
     input.extend_from_bitslice(shared_file);
 
-    let mut executor: Executor<BooleanGmw, usize> =
-        Executor::new(&exec_circ, args.id, InsecureMTProvider).await?;
+    let mtp = match ot_channel {
+        None => InsecureMTProvider.into_dyn(),
+        Some(ot_channel) => mul_triple::boolean::ot_ext::OtMTProvider::new_with_default_ot_ext(
+            OsRng,
+            ot_channel.0,
+            ot_channel.1,
+        )
+        .into_dyn(),
+    };
+
+    let mut executor: Executor<BooleanGmw, usize> = Executor::new(&exec_circ, args.id, mtp).await?;
     Ok(executor
         .execute(
             Input::Scalar(input),
@@ -281,69 +359,29 @@ async fn encrypt(
         .await?)
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-enum Msg {
-    ShareIvKey {
-        iv: BitVec<usize>,
-        key: BitVec<usize>,
-    },
-    ShareInput(BitVec<usize>),
-    ReconstructAesCiphertext(Output<BitVec<usize>>),
-    PlainIvKey {
-        iv: [usize; 2],
-        key: [usize; 2],
-    },
-    Ack,
-}
-
 fn build_enc_circuit(
     data_size_bits: usize,
     use_sc: bool,
-    ctr_mode: bool,
-) -> Result<Circuit<BooleanGate, usize>> {
+) -> Result<ExecutableCircuit<BooleanGate, usize>> {
     assert_eq!(
         data_size_bits % 128,
         0,
         "data_size must be multiple of 128 bits"
     );
-    if ctr_mode {
-        let key_size = 128;
-        let key = inputs(key_size);
-        let _data = inputs::<usize>(data_size_bits);
-        let blocks = data_size_bits / 128;
+    let key_size = 128;
+    let iv_size = 128;
+    let key = inputs(key_size);
+    let iv = inputs(iv_size);
+    let data = inputs(data_size_bits);
 
-        let simd_ctr: Vec<_> = (0..blocks)
-            .map(|ctr| {
-                let bits: BitVec = BitVec::from_slice(&(ctr as u128).to_le_bytes());
-                let ctr: Vec<_> = bits.iter().map(|bit| Secret::from_const(0, *bit)).collect();
-                ctr
-            })
-            .collect();
+    let mut chaining_state = iv;
+    data.chunks_exact(128)
+        .for_each(|chunk| aes_cbc_chunk(&key, chunk, &mut chaining_state, use_sc));
 
-        let simd_ctr_enc = aes128_simd(&key, &simd_ctr);
-        simd_ctr_enc.iter().flatten().for_each(|s| {
-            s.output();
-        });
-        // data.chunks_exact(128).enumerate().for_each(|(ctr, chunk)| {
-        //
-        //     let enc_ctr = aes128(&key, &ctr, use_sc);
-        //     enc_ctr.into_iter().zip(chunk).for_each(|(mask, data)| {
-        //         (mask ^ data).output();
-        //     })
-        // });
-    } else {
-        let key_size = 128;
-        let iv_size = 128;
-        let key = inputs(key_size);
-        let iv = inputs(iv_size);
-        let data = inputs(data_size_bits);
-
-        let mut chaining_state = iv;
-        data.chunks_exact(128)
-            .for_each(|chunk| aes_cbc_chunk(&key, chunk, &mut chaining_state, use_sc));
-    }
-
-    Ok(CircuitBuilder::<BooleanGate, usize>::global_into_circuit())
+    Ok(ExecutableCircuit::DynLayers(CircuitBuilder::<
+        BooleanGate,
+        usize,
+    >::global_into_circuit()))
 }
 
 fn aes_cbc_chunk(
@@ -404,33 +442,6 @@ fn aes128(
     }
 }
 
-fn aes128_simd(
-    key: &[Secret<BooleanGmw, usize>],
-    chunks: &[Vec<Secret<BooleanGmw, usize>>],
-) -> Vec<Vec<Secret<BooleanGmw, usize>>> {
-    let mut aes_circ = BaseCircuit::<BooleanGate, usize>::load_bristol(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test_resources/bristol-circuits/AES-non-expanded.txt"),
-        Load::SubCircuit,
-    )
-    .expect("Loading Aes circuit");
-    let simd_size = NonZeroUsize::new(chunks.len()).unwrap();
-    aes_circ.set_simd_size(simd_size);
-    let aes_circ = aes_circ.into_shared();
-
-    let (output, circ_id) = CircuitBuilder::with_global(|builder| {
-        let circ_id = builder.push_circuit(aes_circ);
-        let mut output = vec![];
-        for chunk in chunks {
-            assert_eq!(128, chunk.len(), "Data chunk must be 128 bits");
-            let inp = [chunk, key].concat();
-            output = builder.connect_sub_circuit(&inp, circ_id);
-        }
-        (output, circ_id)
-    });
-    output.connect_simd_to_main(circ_id, simd_size.get())
-}
-
 fn validate(
     plain_iv: [usize; 2],
     plain_key: [usize; 2],
@@ -454,6 +465,7 @@ fn validate(
 
 pub fn init_tracing() {
     tracing_subscriber::fmt()
+        .with_writer(io::stderr)
         .with_env_filter(
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::INFO.into())

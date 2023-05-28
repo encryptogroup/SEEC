@@ -56,9 +56,9 @@ struct ExecuteArgs {
     #[clap(long)]
     server: Option<SocketAddr>,
 
-    /// Skips the MT generation
+    /// Performs insecure setup by randomly generating MTs based on fixed seed (no OTs)
     #[clap(long)]
-    skip_setup: bool,
+    insecure_setup: bool,
 
     #[clap(long, default_value = "1")]
     repeat: usize,
@@ -143,7 +143,7 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
         BenchParty::<BooleanGmw, u32>::new(id)
             .explicit_circuit(circ)
             .repeat(execute_args.repeat)
-            .insecure_setup(execute_args.skip_setup)
+            .insecure_setup(execute_args.insecure_setup)
             .metadata(circ_name.clone())
     };
 

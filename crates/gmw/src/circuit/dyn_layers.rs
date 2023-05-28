@@ -133,15 +133,11 @@ impl<G: Gate, Idx: GateIdx, W: Wire> Circuit<G, Idx, W> {
 
 impl<G, Idx, W> Circuit<G, Idx, W> {
     pub fn interactive_count(&self) -> usize {
-        self.circuits
-            .iter()
-            .map(|circ| circ.interactive_count())
-            .sum()
+        self.iter_circs().map(|circ| circ.interactive_count()).sum()
     }
 
     pub fn interactive_count_times_simd(&self) -> usize {
-        self.circuits
-            .iter()
+        self.iter_circs()
             .map(|circ| {
                 circ.interactive_count() * circ.simd_size().map(NonZeroUsize::get).unwrap_or(1)
             })

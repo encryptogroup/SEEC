@@ -18,6 +18,20 @@ pub trait MTProvider {
     async fn precompute_mts(&mut self, amount: usize) -> Result<(), Self::Error>;
 
     async fn request_mts(&mut self, amount: usize) -> Result<Self::Output, Self::Error>;
+
+    fn into_dyn(
+        self,
+    ) -> Box<
+        dyn MTProvider<Output = Self::Output, Error = Box<dyn Error + Send + Sync>>
+            + Send
+            + 'static,
+    >
+    where
+        Self: Sized + Send + 'static,
+        Self::Error: Error + Send + Sync + 'static,
+    {
+        Box::new(ErasedError(self))
+    }
 }
 
 pub struct ErasedError<MTP>(pub MTP);
