@@ -150,8 +150,7 @@ impl<G: Gate, Idx: GateIdx> ExecutableCircuit<G, Idx> {
     pub fn gate_counts(&self) -> impl Iterator<Item = (usize, Option<NonZeroUsize>)> + '_ {
         match self {
             ExecutableCircuit::DynLayers(circ) => Either::Left(
-                circ.circuits
-                    .iter()
+                circ.iter_circs()
                     .map(|bc| (bc.gate_count(), bc.simd_size())),
             ),
             ExecutableCircuit::StaticLayers(circ) => Either::Right(circ.gate_counts()),

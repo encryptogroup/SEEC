@@ -247,7 +247,7 @@ impl<G: Gate, Idx: GateIdx> super::dyn_layers::Circuit<G, Idx> {
             layers: vec![],
             cross_circuit_incoming: self.connections.clone_incoming(),
         };
-        let mut layer_ptrs = vec![0; self.circuits.len()];
+        let mut layer_ptrs = vec![0; self.circ_map.len()];
         let mut splits = HashMap::default();
 
         for layer in layer_iter {

@@ -21,11 +21,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::{iter, mem};
 
-pub struct Sender<BaseOT> {
+pub struct Sender<BaseOT = base_ot::Receiver> {
     base_ot: BaseOT,
 }
 
-pub struct Receiver<BaseOT> {
+pub struct Receiver<BaseOT = base_ot::Sender> {
     base_ot: BaseOT,
 }
 
@@ -369,13 +369,13 @@ impl<BaseOt> Receiver<BaseOt> {
     }
 }
 
-impl Default for Sender<base_ot::Receiver> {
+impl Default for Sender {
     fn default() -> Self {
         Sender::new(base_ot::Receiver)
     }
 }
 
-impl Default for Receiver<base_ot::Sender> {
+impl Default for Receiver {
     fn default() -> Self {
         Receiver::new(base_ot::Sender)
     }
