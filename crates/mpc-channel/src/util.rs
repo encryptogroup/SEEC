@@ -3,12 +3,12 @@ use bytes::Bytes;
 use futures::{Sink, Stream};
 use indexmap::IndexMap;
 use pin_project::pin_project;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
 use std::io::{Error, IoSlice};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, DivAssign};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -99,11 +99,12 @@ pub struct Statistics {
     sleep_after_phase: Duration,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RunResult {
-    meta: Metadata,
-    communication_bytes: IndexMap<Phase, CountPair>,
-    time_ms: IndexMap<Phase, u128>,
+    #[serde(skip_deserializing)]
+    pub meta: Metadata,
+    pub communication_bytes: IndexMap<Phase, CountPair>,
+    pub time_ms: IndexMap<Phase, u128>,
 }
 
 trait SerializableMetadata: erased_serde::Serialize + Debug + Send {}
@@ -113,10 +114,10 @@ erased_serde::serialize_trait_object!(SerializableMetadata);
 
 #[derive(Debug, Default, Serialize)]
 pub struct Metadata {
-    custom: IndexMap<String, Box<dyn SerializableMetadata>>,
+    data: IndexMap<String, Box<dyn SerializableMetadata>>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
 /// Categories for recorded communication. The `Custom` variant can be used to label the
 /// communication with a user chosen string.
 pub enum Phase {
@@ -126,7 +127,7 @@ pub enum Phase {
     Mts,
     Online,
     Unaccounted,
-    Custom(&'static str),
+    Custom(String),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -135,10 +136,10 @@ struct CounterPair {
     recv: Counter,
 }
 
-#[derive(Default, Debug, Clone, Copy, Serialize)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CountPair {
-    sent: usize,
-    rcvd: usize,
+    pub sent: usize,
+    pub rcvd: usize,
 }
 
 impl<AsyncWriter> TrackingWriter<AsyncWriter> {
@@ -398,8 +399,8 @@ impl Statistics {
             unaccounted += helper.reset();
         }
         let mut recorded = self.recorded.lock().unwrap();
-        let phase = match (self.unaccounted_as_previous, self.prev_phase) {
-            (true, Some(phase)) => phase,
+        let phase = match (self.unaccounted_as_previous, &self.prev_phase) {
+            (true, Some(phase)) => phase.clone(),
             _ => Phase::Unaccounted,
         };
         let phase_entry = recorded.entry(phase).or_default();
@@ -418,7 +419,7 @@ impl Statistics {
         let recorded = self.recorded.into_inner().unwrap();
         let (communication, time) = recorded
             .into_iter()
-            .map(|(phase, (comm, time))| ((phase, comm), (phase, time.as_millis())))
+            .map(|(phase, (comm, time))| ((phase.clone(), comm), (phase, time.as_millis())))
             .unzip();
         RunResult {
             meta: Default::default(),
@@ -441,7 +442,79 @@ impl RunResult {
     /// run_res.add_metadata("other-data", vec![1, 2, 3]);
     /// ```
     pub fn add_metadata<V: Serialize + Debug + Send + 'static>(&mut self, key: &str, value: V) {
-        self.meta.custom.insert(key.to_string(), Box::new(value));
+        self.meta.data.insert(key.to_string(), Box::new(value));
+    }
+
+    pub fn total_bytes_sent(&self) -> usize {
+        self.communication_bytes.values().map(|val| val.sent).sum()
+    }
+
+    pub fn total_bytes_recv(&self) -> usize {
+        self.communication_bytes.values().map(|val| val.rcvd).sum()
+    }
+
+    pub fn setup_ms(&self) -> u128 {
+        let phases = [
+            Phase::Ots,
+            Phase::Mts,
+            Phase::FunctionIndependentSetup,
+            Phase::FunctionDependentSetup,
+        ];
+        phases
+            .into_iter()
+            .map(|phase| self.time_ms.get(&phase).copied().unwrap_or_default())
+            .sum()
+    }
+
+    pub fn online_ms(&self) -> u128 {
+        self.time_ms
+            .get(&Phase::Online)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Calculate mean, loses metadata information.
+    pub fn mean(data: &[Self]) -> Self {
+        let mut res = Self::default();
+        for val in data {
+            for (k, v) in &val.communication_bytes {
+                *res.communication_bytes.entry(k.clone()).or_default() += *v;
+            }
+            for (k, v) in &val.time_ms {
+                *res.time_ms.entry(k.clone()).or_default() += *v;
+            }
+        }
+        for comm in res.communication_bytes.values_mut() {
+            *comm /= data.len();
+        }
+        for time in res.time_ms.values_mut() {
+            *time /= data.len() as u128;
+        }
+        res
+    }
+}
+
+impl Clone for RunResult {
+    fn clone(&self) -> Self {
+        let meta = self
+            .meta
+            .data
+            .iter()
+            .map(|(k, v)| {
+                let json = serde_json::to_string(v)?;
+                let json_val: serde_json::Value = serde_json::from_str(&json)?;
+                Ok((
+                    k.clone(),
+                    Box::new(json_val) as Box<dyn SerializableMetadata>,
+                ))
+            })
+            .collect::<Result<IndexMap<_, _>, serde_json::Error>>()
+            .unwrap_or_default();
+        Self {
+            meta: Metadata { data: meta },
+            communication_bytes: self.communication_bytes.clone(),
+            time_ms: self.time_ms.clone(),
+        }
     }
 }
 
@@ -461,48 +534,9 @@ impl AddAssign for CountPair {
     }
 }
 
-// custom Serialize implementation which uses the value of Custom(inner) as the variant name
-impl Serialize for Phase {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match *self {
-            Phase::FunctionIndependentSetup => Serializer::serialize_unit_variant(
-                serializer,
-                "Phase",
-                0u32,
-                "FunctionIndependentSetup",
-            ),
-            Phase::FunctionDependentSetup => Serializer::serialize_unit_variant(
-                serializer,
-                "Phase",
-                1u32,
-                "FunctionDependentSetup",
-            ),
-            Phase::Ots => Serializer::serialize_unit_variant(serializer, "Phase", 2u32, "Ots"),
-            Phase::Mts => Serializer::serialize_unit_variant(serializer, "Phase", 3u32, "Mts"),
-            Phase::Online => {
-                Serializer::serialize_unit_variant(serializer, "Phase", 4u32, "Online")
-            }
-            Phase::Unaccounted => {
-                Serializer::serialize_unit_variant(serializer, "Phase", 5u32, "Unaccounted")
-            }
-            Phase::Custom(inner) => {
-                Serializer::serialize_unit_variant(serializer, "Phase", 6u32, inner)
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::util::Phase;
-
-    #[test]
-    fn phase_serialization() {
-        let phase = Phase::Custom("something");
-        let serialized = serde_json::to_string(&phase).unwrap();
-        assert_eq!("\"something\"", serialized);
+impl DivAssign<usize> for CountPair {
+    fn div_assign(&mut self, rhs: usize) {
+        self.sent /= rhs;
+        self.rcvd /= rhs;
     }
 }

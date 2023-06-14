@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
         // with the `record_helper` method and a custom category
         comm_stats
             .record_helper(
-                Phase::Custom("Helper-Mts"),
+                Phase::Custom("Helper-Mts".into()),
                 Executor::new(&circuit, args.id, mt_provider),
             )
             .await?
