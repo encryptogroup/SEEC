@@ -22,24 +22,6 @@ pub fn sub_channels_for(input: TokenStream) -> TokenStream {
     let field_idents: Vec<_> = (0..sub_types.len())
         .map(|idx| format_ident!("remote_receiver_{}", idx))
         .collect();
-    let recv_struct_gen_args: Vec<_> = (0..sub_types.len())
-        .map(|idx| format_ident!("T{}", idx))
-        .collect();
-
-    let struct_name = format_ident!("__mpc_channel_macros__internal_Receivers");
-    let serde_bound: String = recv_struct_gen_args
-        .iter()
-        .map(|arg| format!("{arg}: ::remoc::RemoteSend,"))
-        .collect();
-    let receivers_struct = quote! {
-        #[derive(::serde::Serialize, ::serde::Deserialize)]
-        #[serde(bound = #serde_bound)]
-        struct #struct_name<#(#recv_struct_gen_args),*> {
-            #(
-                #field_idents: ::mpc_channel::Receiver<#recv_struct_gen_args>
-            ),*
-        }
-    };
 
     let sub_sender_idents: Vec<_> = (0..sub_types.len())
         .map(|idx| format_ident!("sub_sender_{}", idx))
@@ -47,21 +29,19 @@ pub fn sub_channels_for(input: TokenStream) -> TokenStream {
 
     let output = quote! {
         {
-            #receivers_struct
-
             async {
                 #(
                 let (#sub_sender_idents, #field_idents) = ::mpc_channel::channel::<#sub_types, 128>(#local_buffer);
                 )*
 
-                let receivers = #struct_name {
+                let receivers = (
                     #(#field_idents),*
-                };
+                );
                 #sender.send(receivers).await?;
                 let msg = #receiver.recv().await?.ok_or(::mpc_channel::CommunicationError::RemoteClosed)?;
-                let #struct_name {
+                let (
                     #(#field_idents),*
-                } = msg;
+                ) = msg;
                 Ok::<_, ::mpc_channel::CommunicationError>((#((#sub_sender_idents, #field_idents)),*))
             }
         }
