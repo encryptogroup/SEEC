@@ -82,4 +82,10 @@ impl<R: Default + Send + Sync> SetupStorage for MulTriples<R> {
         let c = self.c.split_off(split_at);
         Self { a, b, c }
     }
+
+    fn append(&mut self, mut other: Self) {
+        self.a.append(&mut other.a);
+        self.b.append(&mut other.b);
+        self.c.append(&mut other.c);
+    }
 }

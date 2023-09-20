@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::error::Error;
 use std::fmt::Debug;
 use std::iter::repeat;
 use std::ops::{BitXor, Not};
@@ -146,6 +147,7 @@ pub struct AbySetupProvider<Mtp> {
     mt_provider: Mtp,
     sender: mpc_channel::Sender<AbySetupMsg>,
     receiver: mpc_channel::Receiver<AbySetupMsg>,
+    setup_data: Option<SetupData>,
 }
 
 impl Protocol for BoolTensorAby2 {
@@ -245,7 +247,7 @@ impl BooleanGate {
                 panic!("called on non interactive gate")
             }
             BooleanGate::And2 => {
-                let TensorShare::Scalar(a) = inputs.next().expect("Empty input") else { 
+                let TensorShare::Scalar(a) = inputs.next().expect("Empty input") else {
                     panic!("non-scalar input to scalar gate");
                 };
                 let TensorShare::Scalar(b) = inputs.next().expect("Insufficient input") else {
@@ -255,9 +257,9 @@ impl BooleanGate {
                 let PartialShare::Scalar(priv_delta) = preprocessing_data
                     .eval_shares
                     .pop()
-                    .expect("Missing delta_ab_share") else {
+                    .expect("Missing delta_ab_share")
+                else {
                     panic!("non-scalar EvalShare to scalar gate");
-
                 };
                 let TensorShare::Scalar(output_share) = output_share else {
                     panic!("non-scalar input to scalar gate");
@@ -285,7 +287,8 @@ impl BooleanGate {
                 let PartialShare::Matrix(gamma_delta) = preprocessing_data
                     .eval_shares
                     .pop()
-                    .expect("Missing gamma_delta share") else {
+                    .expect("Missing gamma_delta share")
+                else {
                     panic!("non-matrix EvalShare to MatMul gate");
                 };
                 let TensorShare::Matrix(output_share) = output_share else {
@@ -629,6 +632,10 @@ impl SetupStorage for SetupData {
             eval_shares: self.eval_shares.split_off(self.len() - count),
         }
     }
+
+    fn append(&mut self, mut other: Self) {
+        self.eval_shares.append(&mut other.eval_shares);
+    }
 }
 
 impl Share {
@@ -888,7 +895,12 @@ impl<Mtp> AbySetupProvider<Mtp> {
             mt_provider,
             sender,
             receiver,
+            setup_data: None,
         }
+    }
+
+    pub fn setup_data(&self) -> Option<&SetupData> {
+        self.setup_data.as_ref()
     }
 }
 
@@ -896,7 +908,7 @@ impl<Mtp> AbySetupProvider<Mtp> {
 impl<MtpErr, Mtp, Idx: GateIdx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx>
     for AbySetupProvider<Mtp>
 where
-    MtpErr: Debug,
+    MtpErr: Error + Send + Sync + Debug + 'static,
     Mtp: MTProvider<Output = MulTriples, Error = MtpErr> + Send,
 {
     type Output = SetupData;
@@ -906,7 +918,7 @@ where
         &mut self,
         shares: &GateOutputs<DeltaShareStorage>,
         circuit: &ExecutableCircuit<BooleanGate, Idx>,
-    ) -> Result<Self::Output, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate, Idx> = CircuitBuilder::new();
         let old = circ_builder.install();
         let total_inputs = circuit
@@ -964,7 +976,7 @@ where
             .await
             .unwrap();
         let Input::Scalar(executor_gate_outputs) = executor.gate_outputs().get_sc(0) else {
-           panic!("No SIMD support for BoolTensorAby2") 
+            panic!("No SIMD support for BoolTensorAby2")
         };
         let eval_shares = circuit
             .interactive_iter()
@@ -989,7 +1001,12 @@ where
                 _ => unreachable!(),
             })
             .collect();
-        Ok(SetupData::from_raw(eval_shares))
+        self.setup_data = Some(SetupData::from_raw(eval_shares));
+        Ok(())
+    }
+
+    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+        Ok(self.setup_data.as_mut().unwrap().split_off_last(count))
     }
 }
 

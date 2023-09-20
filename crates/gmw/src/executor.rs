@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
+use std::error::Error;
 use std::fmt::Debug;
+use std::future::Future;
 use std::time::Instant;
 use std::{iter, mem};
 
 use mpc_channel::{Receiver, Sender};
-use tracing::{debug, info, trace};
+use tracing::{debug, error, info, trace};
 
 use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::builder::SubCircuitGate;
@@ -14,8 +16,9 @@ use crate::circuit::{CircuitId, DefaultIdx, ExecutableCircuit, GateIdx};
 use crate::errors::ExecutorError;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
-    FunctionDependentSetup, Gate, Protocol, Share, ShareOf, ShareStorage, SimdShareOf,
+    ErasedError, FunctionDependentSetup, Gate, Protocol, Share, ShareOf, ShareStorage, SimdShareOf,
 };
+use crate::utils::BoxError;
 
 pub type BoolGmwExecutor<'c> = Executor<'c, BooleanGmw, DefaultIdx>;
 
@@ -24,8 +27,19 @@ pub struct Executor<'c, P: Protocol, Idx> {
     protocol_state: P,
     gate_outputs: GateOutputs<P::ShareStorage>,
     party_id: usize,
-    setup_storage: P::SetupStorage,
+    setup: DynFDSetup<'c, P, Idx>,
 }
+
+pub type DynFDSetup<'c, P, Idx> = Box<
+    dyn FunctionDependentSetup<
+            <P as Protocol>::ShareStorage,
+            <P as Protocol>::Gate,
+            Idx,
+            Output = <P as Protocol>::SetupStorage,
+            Error = BoxError,
+        > + Send
+        + 'c,
+>;
 
 pub struct GateOutputs<Shares> {
     data: Vec<Input<Shares>>,
@@ -57,21 +71,24 @@ where
     Idx: GateIdx,
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
 {
-    pub async fn new<
-        FDError, // this little hack is needed to work around https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
-        FDSetup: FunctionDependentSetup<
-                P::ShareStorage,
-                P::Gate,
-                Idx,
-                Output = P::SetupStorage,
-                Error = FDError,
-            > + Send,
+    // for some reason the manual future desugaring is needed here...
+    // the send problem of async is so annoying...
+    #[allow(clippy::manual_async_fn)]
+    pub fn new<
+        // FDError, // this little hack is needed to work around https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
+        FDSetup,
     >(
         circuit: &'c ExecutableCircuit<P::Gate, Idx>,
         party_id: usize,
         setup: FDSetup,
-    ) -> Result<Executor<'c, P, Idx>, ExecutorError> {
-        Self::new_with_state(P::default(), circuit, party_id, setup).await
+    ) -> impl Future<Output = Result<Executor<'c, P, Idx>, ExecutorError>> + Send
+    where
+        FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>
+            + Send
+            + 'c,
+        FDSetup::Error: Error + Send + Sync + 'static,
+    {
+        async move { Self::new_with_state(P::default(), circuit, party_id, setup).await }
     }
 }
 
@@ -85,32 +102,31 @@ where
     Idx: GateIdx,
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
 {
-    pub async fn new_with_state<
-        FDError,
-        FDSetup: FunctionDependentSetup<
-                P::ShareStorage,
-                P::Gate,
-                Idx,
-                Output = P::SetupStorage,
-                Error = FDError,
-            > + Send,
-    >(
+    pub async fn new_with_state<FDSetup>(
         mut protocol_state: P,
         circuit: &'c ExecutableCircuit<P::Gate, Idx>,
         party_id: usize,
         mut setup: FDSetup,
-    ) -> Result<Executor<'c, P, Idx>, ExecutorError> {
+    ) -> Result<Executor<'c, P, Idx>, ExecutorError>
+    where
+        // FDError: Error + Send + Sync + 'static,
+        FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>
+            + Send
+            + 'c,
+        FDSetup::Error: Error + Send + Sync + 'static,
+    {
         let gate_outputs = protocol_state.setup_gate_outputs(party_id, circuit);
-        let setup_storage = setup
+        setup
             .setup(&gate_outputs, circuit)
             .await
-            .map_err(|_| ExecutorError::Setup)?;
+            .map_err(|err| ExecutorError::Setup(BoxError::from_err(err)))?;
+        let setup = Box::new(ErasedError(setup));
         Ok(Self {
             circuit,
             protocol_state,
             gate_outputs,
             party_id,
-            setup_storage,
+            setup,
         })
     }
 
@@ -134,7 +150,6 @@ where
             inp_len,
             "Length of inputs must be equal to circuit input size"
         );
-        let mut setup_storage = mem::take(&mut self.setup_storage);
         let mut layer_count = 0;
         let mut interactive_count = 0;
         let main_is_simd = self.circuit.simd_size(0).is_some();
@@ -280,7 +295,7 @@ where
                 };
             }
 
-            let layer_int_cnt = layer.interactive_count();
+            let layer_int_cnt = layer.interactive_count_times_simd();
             if layer_int_cnt == 0 {
                 trace!("Layer has no interactive gates. Current layer count {layer_count:?}");
                 // If the layer does not contain and gates we continue
@@ -289,6 +304,12 @@ where
             // Only count layers with and gates
             layer_count += 1;
             interactive_count += layer_int_cnt;
+
+            let mut setup_storage = self
+                .setup
+                .request_setup_output(layer_int_cnt)
+                .await
+                .unwrap();
 
             let (scalar, simd) = layer.split_simd();
 
@@ -343,6 +364,18 @@ where
                 simd: simd_msg.clone(),
             };
             sender.send(msg).await.ok().unwrap();
+            for gate in simd.freeable_simd_gates() {
+                match &mut self.gate_outputs.data[gate.circuit_id as usize] {
+                    Input::Scalar(_) => {
+                        error!("BUG in freeable_simd_gates, please report this.")
+                    }
+                    Input::Simd(shares) => {
+                        // take the vec element, which is likely some kind of vec
+                        // for a simd share, and thus, free it
+                        mem::take(&mut shares[gate.gate_id.as_usize()]);
+                    }
+                }
+            }
             debug!("Sending interactive gates layer");
             let ExecutorMsg {
                 scalar: resp_scalar,
@@ -431,7 +464,8 @@ where
     }
 
     pub fn setup_storage(&self) -> &P::SetupStorage {
-        &self.setup_storage
+        // &self.setup_storage
+        todo!()
     }
 
     fn inputs<'s, 'p>(

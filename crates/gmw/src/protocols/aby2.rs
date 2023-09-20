@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::error::Error;
 use std::fmt::Debug;
 use std::ops::Not;
 
@@ -94,6 +95,7 @@ pub struct AbySetupProvider<Mtp> {
     mt_provider: Mtp,
     sender: mpc_channel::Sender<AbySetupMsg>,
     receiver: mpc_channel::Receiver<AbySetupMsg>,
+    setup_data: Option<SetupData>,
 }
 
 impl Protocol for BooleanAby2 {
@@ -485,6 +487,10 @@ impl SetupStorage for SetupData {
             eval_shares: self.eval_shares.split_off(self.len() - count),
         }
     }
+
+    fn append(&mut self, mut other: Self) {
+        self.eval_shares.append(&mut other.eval_shares);
+    }
 }
 
 impl Share {
@@ -593,6 +599,7 @@ impl<Mtp> AbySetupProvider<Mtp> {
             mt_provider,
             sender,
             receiver,
+            setup_data: None,
         }
     }
 }
@@ -601,7 +608,7 @@ impl<Mtp> AbySetupProvider<Mtp> {
 impl<MtpErr, Mtp, Idx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx>
     for AbySetupProvider<Mtp>
 where
-    MtpErr: Debug,
+    MtpErr: Error + Send + Sync + Debug + 'static,
     Mtp: MTProvider<Output = MulTriples, Error = MtpErr> + Send,
     Idx: GateIdx,
 {
@@ -612,7 +619,7 @@ where
         &mut self,
         shares: &GateOutputs<DeltaShareStorage>,
         circuit: &ExecutableCircuit<BooleanGate, Idx>,
-    ) -> Result<Self::Output, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate, Idx> = CircuitBuilder::new();
         let old = circ_builder.install();
         let total_inputs: usize = circuit
@@ -687,6 +694,15 @@ where
                 _ => unreachable!(),
             })
             .collect();
-        Ok(SetupData::from_raw(eval_shares))
+        self.setup_data = Some(SetupData::from_raw(eval_shares));
+        Ok(())
+    }
+
+    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+        Ok(self
+            .setup_data
+            .as_mut()
+            .expect("setup must be called before request_setup_output")
+            .split_off_last(count))
     }
 }

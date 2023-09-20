@@ -19,14 +19,18 @@ use rayon::prelude::*;
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::sync::{Arc, Mutex};
 use std::{iter, mem};
 
 pub struct Sender<BaseOT = base_ot::Receiver> {
     base_ot: BaseOT,
+    base_rngs: Option<Arc<Mutex<Vec<AesRng>>>>,
+    base_choices: Option<BitVec>,
 }
 
 pub struct Receiver<BaseOT = base_ot::Sender> {
     base_ot: BaseOT,
+    base_rngs: Option<Arc<Mutex<Vec<[AesRng; 2]>>>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,6 +41,47 @@ pub enum ExtOTMsg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
     BaseOTChannel(mpc_channel::Receiver<BaseOTMsg>),
     URow(usize, Vec<u8>),
     Correlated(Vec<u8>),
+}
+
+impl<BaseOT> Sender<BaseOT>
+where
+    BaseOT: BaseROTReceiver + Send,
+    BaseOT::Msg: RemoteSend + Debug,
+{
+    pub async fn perform_base_ots<RNG: RngCore + CryptoRng + Send>(
+        &mut self,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<<Self as ExtROTSender>::Msg>,
+        receiver: &mut mpc_channel::Receiver<<Self as ExtROTSender>::Msg>,
+    ) -> Result<(), Error<<Self as ExtROTSender>::Msg>> {
+        if let (Some(_), Some(_)) = (&self.base_rngs, &self.base_choices) {
+            return Ok(());
+        }
+
+        let (base_sender, base_remote_receiver) = channel(BASE_OT_COUNT);
+        sender
+            .send(ExtOTMsg::BaseOTChannel(base_remote_receiver))
+            .await?;
+        let msg = receiver.recv().await?.ok_or(Error::UnexpectedTermination)?;
+        let mut base_receiver = match msg {
+            ExtOTMsg::BaseOTChannel(receiver) => receiver,
+            _ => return Err(Error::WrongOrder(msg)),
+        };
+        let rand_choices: BitVec = {
+            let mut bv = bitvec![0; BASE_OT_COUNT];
+            rng.fill(bv.as_raw_mut_slice());
+            bv
+        };
+        let base_ots = self
+            .base_ot
+            .receive_random(&rand_choices, rng, &base_sender, &mut base_receiver)
+            .await
+            .map_err(|err| Error::BaseOT(Box::new(err)))?;
+        let base_rngs = base_ots.into_iter().map(AesRng::from_seed).collect();
+        self.base_rngs = Some(Arc::new(Mutex::new(base_rngs)));
+        self.base_choices = Some(rand_choices);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -63,41 +108,23 @@ where
             0,
             "Number of OT extensions must be multiple of 8"
         );
-        let (base_ots, choices) = {
-            let (base_sender, base_remote_receiver) = channel(BASE_OT_COUNT);
-            sender
-                .send(ExtOTMsg::BaseOTChannel(base_remote_receiver))
-                .await?;
-            let msg = receiver.recv().await?.ok_or(Error::UnexpectedTermination)?;
-            let mut base_receiver = match msg {
-                ExtOTMsg::BaseOTChannel(receiver) => receiver,
-                _ => return Err(Error::WrongOrder(msg)),
-            };
-            let rand_choices: BitVec = {
-                let mut bv = bitvec![0; BASE_OT_COUNT];
-                rng.fill(bv.as_raw_mut_slice());
-                bv
-            };
-            let base_ots = self
-                .base_ot
-                .receive_random(&rand_choices, rng, &base_sender, &mut base_receiver)
-                .await
-                .map_err(|err| Error::BaseOT(Box::new(err)))?;
-            (base_ots, rand_choices)
-        };
+        self.perform_base_ots(rng, sender, receiver).await?;
+        let base_ot_rngs = self.base_rngs.clone().unwrap();
+        let choices = self.base_choices.clone().unwrap();
 
         let delta: Block = (&choices)
             .try_into()
             .expect("BASE_OT_COUNT must be size of a Block");
+
         let rows = BASE_OT_COUNT;
         let cols = count / 8; // div by 8 because of u8
         let mut v_mat = spawn_compute(move || {
+            let mut base_ot_rngs = base_ot_rngs.lock().unwrap();
             let mut v_mat = vec![0_u8; rows * cols];
             v_mat
                 .chunks_exact_mut(cols)
-                .zip(base_ots)
-                .for_each(|(row, seed)| {
-                    let mut prg = AesRng::from_seed(seed);
+                .zip(&mut base_ot_rngs[..])
+                .for_each(|(row, prg)| {
                     prg.fill_bytes(row);
                 });
             v_mat
@@ -201,7 +228,44 @@ where
     }
 }
 
-// fn assert_static<T: 'static>(val: &T) {}
+impl<BaseOT> Receiver<BaseOT>
+where
+    BaseOT: BaseROTSender + Send,
+    BaseOT::Msg: RemoteSend + Debug,
+{
+    pub async fn perform_base_ots<RNG: RngCore + CryptoRng + Send>(
+        &mut self,
+        rng: &mut RNG,
+        sender: &mpc_channel::Sender<<Self as ExtROTReceiver>::Msg>,
+        receiver: &mut mpc_channel::Receiver<<Self as ExtROTReceiver>::Msg>,
+    ) -> Result<(), Error<<Self as ExtROTReceiver>::Msg>> {
+        if self.base_rngs.is_some() {
+            return Ok(());
+        }
+
+        let (base_sender, base_remote_receiver) = channel(BASE_OT_COUNT);
+        sender
+            .send(ExtOTMsg::BaseOTChannel(base_remote_receiver))
+            .await?;
+        let msg = receiver.recv().await?.ok_or(Error::UnexpectedTermination)?;
+        let mut base_receiver = match msg {
+            ExtOTMsg::BaseOTChannel(receiver) => receiver,
+            _ => return Err(Error::WrongOrder(msg)),
+        };
+        let base_ots = self
+            .base_ot
+            .send_random(BASE_OT_COUNT, rng, &base_sender, &mut base_receiver)
+            .await
+            .map_err(|err| Error::BaseOT(Box::new(err)))?;
+
+        let base_rngs = base_ots
+            .into_iter()
+            .map(|[ot0, ot1]| [AesRng::from_seed(ot0), AesRng::from_seed(ot1)])
+            .collect();
+        self.base_rngs = Some(Arc::new(Mutex::new(base_rngs)));
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl<BaseOT> ExtROTReceiver for Receiver<BaseOT>
@@ -230,21 +294,8 @@ where
             "Number of OT extensions must be multiple of 8"
         );
         let count = choices.len();
-        let base_ots = {
-            let (base_sender, base_remote_receiver) = channel(BASE_OT_COUNT);
-            sender
-                .send(ExtOTMsg::BaseOTChannel(base_remote_receiver))
-                .await?;
-            let msg = receiver.recv().await?.ok_or(Error::UnexpectedTermination)?;
-            let mut base_receiver = match msg {
-                ExtOTMsg::BaseOTChannel(receiver) => receiver,
-                _ => return Err(Error::WrongOrder(msg)),
-            };
-            self.base_ot
-                .send_random(BASE_OT_COUNT, rng, &base_sender, &mut base_receiver)
-                .await
-                .map_err(|err| Error::BaseOT(Box::new(err)))?
-        };
+        self.perform_base_ots(rng, sender, receiver).await?;
+        let base_ot_rngs = self.base_rngs.clone().unwrap();
 
         let rows = BASE_OT_COUNT;
         let cols = count / 8; // div by 8 because of u8
@@ -252,15 +303,14 @@ where
         let choices = choices.to_bitvec();
         let sender = sender.clone();
         let t_mat = spawn_compute(move || {
+            let mut base_ot_rngs = base_ot_rngs.lock().unwrap();
             let choices = cast_slice::<_, u8>(choices.as_raw_slice());
             let mut t_mat = vec![0_u8; rows * cols];
             t_mat
                 .par_chunks_exact_mut(cols)
                 .enumerate()
-                .zip(base_ots)
-                .for_each(|((idx, t_row), [s0, s1])| {
-                    let mut prg0 = AesRng::from_seed(s0);
-                    let mut prg1 = AesRng::from_seed(s1);
+                .zip(&mut base_ot_rngs[..])
+                .for_each(|((idx, t_row), [prg0, prg1])| {
                     prg0.fill_bytes(t_row);
                     let u_row = {
                         let mut row = vec![0_u8; cols];
@@ -357,6 +407,8 @@ impl<BaseOt> Sender<BaseOt> {
     pub fn new(base_ot_receiver: BaseOt) -> Self {
         Self {
             base_ot: base_ot_receiver,
+            base_rngs: None,
+            base_choices: None,
         }
     }
 }
@@ -365,6 +417,7 @@ impl<BaseOt> Receiver<BaseOt> {
     pub fn new(base_ot_sender: BaseOt) -> Self {
         Self {
             base_ot: base_ot_sender,
+            base_rngs: None,
         }
     }
 }
