@@ -545,12 +545,28 @@ pub struct ScLayerIterator<'c, G, Idx> {
 impl<'c, G: Clone, Idx: Clone> ScLayerIterator<'c, G, Idx> {
     /// Returns two iterators (scalar, simd) which only return layers from either scalar or simd
     /// sc's
-    pub(crate) fn split_simd(&self) -> (Self, Self) {
+    pub(crate) fn split_simd(self) -> (Self, Self) {
         let mut scalar = self.clone();
         scalar.skip_simd = true;
-        let mut simd = self.clone();
+        let mut simd = self;
         simd.skip_scalar = true;
         (scalar, simd)
+    }
+}
+
+impl<'c, G: Gate, Idx: GateIdx> ScLayerIterator<'c, G, Idx> {
+    pub(crate) fn interactive_count_times_simd(&self) -> usize {
+        self.clone()
+            .map(|layer| {
+                let simd_size = self
+                    .circ
+                    .get_circ(layer.sc_id)
+                    .simd_size
+                    .map(|s| s.get())
+                    .unwrap_or(1);
+                layer.interactive_count() * simd_size
+            })
+            .sum()
     }
 }
 

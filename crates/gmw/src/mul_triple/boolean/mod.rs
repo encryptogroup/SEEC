@@ -217,6 +217,12 @@ impl SetupStorage for MulTriples {
         let c = self.c.split_off(len - count);
         Self { a, b, c }
     }
+
+    fn append(&mut self, mut other: Self) {
+        self.a.append(&mut other.a);
+        self.b.append(&mut other.b);
+        self.c.append(&mut other.c);
+    }
 }
 
 #[cfg(test)]

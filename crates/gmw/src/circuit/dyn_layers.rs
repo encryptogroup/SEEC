@@ -7,6 +7,7 @@ use crate::{bristol, BooleanGate, SharedCircuit, SubCircuitGate};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::mem;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
@@ -254,18 +255,27 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for CircuitLayerIter<'a, G, Id
 }
 
 impl<G: Gate, Idx: GateIdx + Hash + PartialEq + Eq + Copy> CircuitLayer<G, Idx> {
-    pub(crate) fn split_simd(&self) -> (Self, Self) {
-        let mut scalar = Vec::with_capacity(self.sc_layers.len() / 2);
-        let mut simd = Vec::with_capacity(self.sc_layers.len() / 2);
-        self.sc_layers.iter().for_each(|(sc_id, simd_size, layer)| {
-            let target = if simd_size.is_some() {
-                &mut simd
+    pub(crate) fn interactive_count_times_simd(&self) -> usize {
+        self.sc_layers
+            .iter()
+            .map(|(_, simd, layer)| {
+                let simd = simd.map(|v| v.get()).unwrap_or(1);
+                simd * layer.interactive_len()
+            })
+            .sum()
+    }
+
+    pub(crate) fn split_simd(mut self) -> (Self, Self) {
+        let mut simd = vec![];
+        self.sc_layers.retain_mut(|(sc_id, simd_size, layer)| {
+            if simd_size.is_some() {
+                simd.push((*sc_id, *simd_size, mem::take(layer)));
+                false
             } else {
-                &mut scalar
-            };
-            target.push((*sc_id, *simd_size, layer.clone()));
+                true
+            }
         });
-        (Self { sc_layers: scalar }, Self { sc_layers: simd })
+        (self, Self { sc_layers: simd })
     }
 
     pub(crate) fn non_interactive_iter(
@@ -285,6 +295,15 @@ impl<G: Gate, Idx: GateIdx + Hash + PartialEq + Eq + Copy> CircuitLayer<G, Idx> 
             layer
                 .interactive_iter()
                 .map(|(gate, gate_idx)| (gate, SubCircuitGate::new(*sc_id, gate_idx)))
+        })
+    }
+
+    pub(crate) fn freeable_simd_gates(&self) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
+        self.sc_layers.iter().flat_map(|(sc_id, _, layer)| {
+            layer
+                .freeable_gates
+                .iter()
+                .map(|gate_idx| SubCircuitGate::new(*sc_id, *gate_idx))
         })
     }
 }

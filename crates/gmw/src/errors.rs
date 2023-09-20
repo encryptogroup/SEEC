@@ -1,6 +1,7 @@
 use remoc::rch::base;
 use std::io;
 
+use crate::utils::BoxError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -8,7 +9,7 @@ pub enum ExecutorError {
     #[error("Received out of order message during execution")]
     OutOfOrderMessage,
     #[error("Unable to perform function dependent setup")]
-    Setup,
+    Setup(#[source] BoxError),
     #[error("Circuit is malformed and not executable")]
     IllegalCircuit,
 }

@@ -3,6 +3,7 @@ use crate::util::Counter;
 use async_trait::async_trait;
 use remoc::rch::{base, mpsc};
 use remoc::{codec, RemoteSend};
+use serde::{Deserialize, Serialize};
 
 pub use mpc_channel_macros::sub_channels_for;
 
@@ -18,6 +19,9 @@ pub type Receiver<T> = mpsc::Receiver<T, codec::Bincode, 128>;
 
 pub type TrackingChannel<T> = (BaseSender<T>, Counter, BaseReceiver<T>, Counter);
 pub type Channel<T> = (Sender<T>, Receiver<T>);
+
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct SyncMsg;
 
 #[async_trait]
 pub trait SenderT<T, E> {
@@ -106,6 +110,22 @@ where
     let sub_receiver = extract_fn(msg).ok_or(CommunicationError::UnexpectedMessage)?;
     tracing::debug!("Received sub_receiver");
     Ok((sub_sender, sub_receiver))
+}
+
+pub async fn sync<SendErr, RecvErr>(
+    sender: &mut impl SenderT<SyncMsg, SendErr>,
+    receiver: &mut impl ReceiverT<SyncMsg, RecvErr>,
+) -> Result<(), CommunicationError>
+where
+    CommunicationError: From<SendErr> + From<RecvErr>,
+{
+    sender.send(SyncMsg).await?;
+    // ignore receiving a None
+    receiver.recv().await?;
+    sender.send(SyncMsg).await?;
+    // ignore receiving a None
+    let _err = receiver.recv().await;
+    Ok(())
 }
 
 #[async_trait]

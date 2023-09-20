@@ -2,21 +2,26 @@ use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::{BitSlice, BitVec};
 use crate::executor::{GateOutputs, Input};
+use crate::utils::BoxError;
 use async_trait::async_trait;
 use bitvec::store::BitStore;
+use futures::TryFutureExt;
 use num_traits::{Pow, WrappingAdd, WrappingMul, WrappingSub};
 use rand::distributions::{Distribution, Standard};
 use rand::{Rng, RngCore};
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
 use zappot::util::Block;
 
+#[cfg(feature = "aby2")]
 pub mod aby2;
 pub mod arithmetic_gmw;
 pub mod boolean_gmw;
+#[cfg(feature = "aby2")]
 pub mod tensor_aby2;
 
 pub type ShareOf<Gate> = <Gate as self::Gate>::Share;
@@ -85,14 +90,7 @@ pub trait Protocol: Send + Sync {
             .gate_counts()
             .map(|(count, simd_size)| match simd_size {
                 None => Input::Scalar(Self::ShareStorage::repeat(Default::default(), count)),
-                Some(simd_size) => Input::Simd(vec![
-                    // TODO: Default here instead of allocating?
-                    Self::ShareStorage::repeat(
-                        Default::default(),
-                        simd_size.get()
-                    );
-                    count
-                ]),
+                Some(_simd_size) => Input::Simd(vec![Default::default(); count]),
             })
             .collect();
         GateOutputs::new(data)
@@ -151,7 +149,6 @@ pub trait ShareStorage<Share>:
     fn repeat(val: Share, len: usize) -> Self;
     fn set(&mut self, idx: usize, val: Share);
     fn get(&self, idx: usize) -> Share;
-
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -205,6 +202,8 @@ pub trait SetupStorage: Default + Sized + Send + Sync {
     /// Split of the last `count` mul triples.
     fn split_off_last(&mut self, count: usize) -> Self;
 
+    fn append(&mut self, other: Self);
+
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -242,27 +241,48 @@ pub trait FunctionDependentSetup<ShareStorage, G, Idx> {
     type Output;
     type Error;
 
+    /// Called in the function-dependent setup phase
     async fn setup(
         &mut self,
         shares: &GateOutputs<ShareStorage>,
         circuit: &ExecutableCircuit<G, Idx>,
-    ) -> Result<Self::Output, Self::Error>;
+    ) -> Result<(), Self::Error>;
+
+    /// Called in the online phase for each layer. This method can be used to interleave
+    /// the setup and online phase.
+    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error>;
 }
 
+pub struct ErasedError<FDS>(pub FDS);
+
 #[async_trait]
-impl<ShareStorage: Sync, G: Send + Sync, Idx: Sync, Out>
-    FunctionDependentSetup<ShareStorage, G, Idx>
-    for Box<dyn FunctionDependentSetup<ShareStorage, G, Idx, Output = Out, Error = ()> + Send>
+impl<FDS, ShareStorage, G, Idx> FunctionDependentSetup<ShareStorage, G, Idx> for ErasedError<FDS>
+where
+    ShareStorage: Sync,
+    G: Send + Sync,
+    Idx: Sync,
+    FDS: FunctionDependentSetup<ShareStorage, G, Idx> + Send,
+    FDS::Error: Error + Send + Sync + 'static,
 {
-    type Output = Out;
-    type Error = ();
+    type Output = FDS::Output;
+    type Error = BoxError;
 
     async fn setup(
         &mut self,
         shares: &GateOutputs<ShareStorage>,
         circuit: &ExecutableCircuit<G, Idx>,
-    ) -> Result<Self::Output, Self::Error> {
-        self.setup(shares, circuit).await
+    ) -> Result<(), Self::Error> {
+        self.0
+            .setup(shares, circuit)
+            .map_err(BoxError::from_err)
+            .await
+    }
+
+    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+        self.0
+            .request_setup_output(count)
+            .map_err(BoxError::from_err)
+            .await
     }
 }
 

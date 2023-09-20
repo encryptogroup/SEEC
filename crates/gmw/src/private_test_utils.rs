@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::path::Path;
 
@@ -28,7 +29,11 @@ use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
 use crate::protocols::{Gate, Protocol, Ring, ScalarDim, Share, Sharing};
 
 pub trait ProtocolTestExt: Protocol + Default {
-    type InsecureSetup: MTProvider<Output = Self::SetupStorage> + Default + Clone + Send + Sync;
+    type InsecureSetup: MTProvider<Output = Self::SetupStorage, Error = Infallible>
+        + Default
+        + Clone
+        + Send
+        + Sync;
 }
 
 impl ProtocolTestExt for BooleanGmw {

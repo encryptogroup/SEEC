@@ -1,5 +1,6 @@
 #![allow(clippy::extra_unused_type_parameters)] // false positive in current nightly
 
+use ahash::HashMap;
 use parking_lot::lock_api::Mutex;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
@@ -496,6 +497,8 @@ pub struct BaseLayerIter<'a, G, Idx: GateIdx, W> {
     next_layer: VecDeque<NodeIndex<Idx>>,
     visited: <CircuitGraph<G, Idx, W> as Visitable>::Map,
     added_to_next: <CircuitGraph<G, Idx, W> as Visitable>::Map,
+    // only used for SIMD circuits
+    inputs_left_to_provide: HashMap<NodeIndex<Idx>, u32>,
     // (non_interactive, interactive)
     last_layer_size: (usize, usize),
     gates_produced: usize,
@@ -541,6 +544,7 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
             next_layer,
             visited,
             added_to_next,
+            inputs_left_to_provide: Default::default(),
             last_layer_size: (0, 0),
             // interactive_gates_set,
             gates_produced: 0,
@@ -581,8 +585,9 @@ pub struct CircuitLayer<G, Idx> {
     pub(crate) non_interactive_ids: Vec<GateId<Idx>>,
     pub(crate) interactive_gates: Vec<G>,
     pub(crate) interactive_ids: Vec<GateId<Idx>>,
-    // TODO add output gates here so that the CircuitLayerIter::next doesn't need to iterate
-    //  over all potential outs
+    /// SIMD Gates that can be freed after this layer
+    pub(crate) freeable_gates: Vec<GateId<Idx>>, // TODO add output gates here so that the CircuitLayerIter::next doesn't need to iterate
+                                                 //  over all potential outs
 }
 
 impl<G, Idx> CircuitLayer<G, Idx> {
@@ -592,6 +597,7 @@ impl<G, Idx> CircuitLayer<G, Idx> {
             non_interactive_ids: Vec::with_capacity(non_interactive),
             interactive_gates: Vec::with_capacity(interactive),
             interactive_ids: Vec::with_capacity(interactive),
+            freeable_gates: vec![],
         }
     }
 
@@ -690,16 +696,36 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
             // are here because they were `add_to_next_layer` but whose neighbours have not
             // had their counts decreased
             if self.visited.is_visited(&node_idx) {
+                let mut neigh_cnt = 0;
                 for neigh in graph.neighbors(node_idx) {
+                    neigh_cnt += 1;
                     self.inputs_needed_cnt[neigh.index()] -= 1;
                     let inputs_needed = self.inputs_needed_cnt[neigh.index()];
                     if inputs_needed == 0 {
                         self.add_to_visit(neigh);
                     }
                 }
+                if self.circuit.is_simd() {
+                    self.inputs_left_to_provide
+                        .entry(node_idx)
+                        .or_insert(neigh_cnt);
+                }
                 continue;
             }
             self.visited.visit(node_idx);
+
+            if self.circuit.is_simd() {
+                for neigh in graph.neighbors_directed(node_idx, Direction::Incoming) {
+                    let cnt = self
+                        .inputs_left_to_provide
+                        .get_mut(&neigh)
+                        .expect("inputs_left_to_provide must be initialize");
+                    *cnt -= 1;
+                    if *cnt == 0 {
+                        layer.freeable_gates.push(neigh.into());
+                    }
+                }
+            }
 
             let gate = graph[node_idx].clone();
             if gate.is_interactive() {
@@ -707,13 +733,19 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
                 layer.push_interactive((gate.clone(), node_idx.into()));
             } else {
                 layer.push_non_interactive((gate.clone(), node_idx.into()));
+                let mut neigh_cnt = 0;
                 for neigh in graph.neighbors(node_idx) {
+                    neigh_cnt += 1;
                     self.inputs_needed_cnt[neigh.index()] -= 1;
                     let inputs_needed = self.inputs_needed_cnt[neigh.index()];
-                    if inputs_needed > 0 {
-                        continue;
+                    if inputs_needed == 0 {
+                        self.add_to_visit(neigh)
                     }
-                    self.add_to_visit(neigh)
+                }
+                if self.circuit.is_simd() {
+                    self.inputs_left_to_provide
+                        .entry(node_idx)
+                        .or_insert(neigh_cnt);
                 }
             }
         }
@@ -742,6 +774,7 @@ impl<G, Idx: GateIdx> Default for CircuitLayer<G, Idx> {
             non_interactive_ids: vec![],
             interactive_gates: vec![],
             interactive_ids: vec![],
+            freeable_gates: vec![],
         }
     }
 }
@@ -857,6 +890,7 @@ mod tests {
             non_interactive_ids: vec![0_u32.into(), 1_u32.into(), 4_u32.into()],
             interactive_gates: vec![BooleanGate::And],
             interactive_ids: vec![3_u32.into()],
+            freeable_gates: vec![],
         };
 
         let snd_layer = CircuitLayer {
@@ -864,6 +898,7 @@ mod tests {
             non_interactive_ids: vec![5_u32.into()],
             interactive_gates: vec![BooleanGate::And],
             interactive_ids: vec![6_u32.into()],
+            freeable_gates: vec![],
         };
 
         let third_layer = CircuitLayer {
@@ -871,6 +906,7 @@ mod tests {
             non_interactive_ids: vec![2_u32.into()],
             interactive_gates: vec![],
             interactive_ids: vec![],
+            freeable_gates: vec![],
         };
 
         assert_eq!(Some(first_layer), cl_iter.next());

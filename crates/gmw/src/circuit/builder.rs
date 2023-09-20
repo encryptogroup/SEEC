@@ -123,7 +123,7 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
     }
 
     pub fn global_into_circuit() -> Circuit<G, Idx> {
-        let mut global_builder = Self::with_global(|builder| mem::take(builder));
+        let mut global_builder = Self::with_global(mem::take);
         global_builder.clear_caches();
         global_builder.into_circuit()
     }

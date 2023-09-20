@@ -13,16 +13,16 @@ use thiserror::Error;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
 
-pub type Msg<S> = mpc_channel::Receiver<<S as ExtROTSender>::Msg>;
+pub type Msg<Msg> = mpc_channel::Receiver<Msg>;
 /// Message for default ot ext
-pub type DefaultMsg = Msg<zappot::ot_ext::Sender>;
+pub type DefaultMsg = Msg<<zappot::ot_ext::Sender as ExtROTSender>::Msg>;
 
 pub struct OtMTProvider<RNG, S: ExtROTSender, R: ExtROTReceiver> {
     rng: RNG,
     ot_sender: S,
     ot_receiver: R,
-    ch_sender: mpc_channel::Sender<Msg<S>>,
-    ch_receiver: mpc_channel::Receiver<Msg<S>>,
+    ch_sender: mpc_channel::Sender<Msg<S::Msg>>,
+    ch_receiver: mpc_channel::Receiver<Msg<S::Msg>>,
     precomputed_mts: Option<MulTriples>,
 }
 
@@ -36,8 +36,8 @@ impl<RNG: RngCore + CryptoRng + Send, S: ExtROTSender, R: ExtROTReceiver> OtMTPr
         rng: RNG,
         ot_sender: S,
         ot_receiver: R,
-        ch_sender: mpc_channel::Sender<Msg<S>>,
-        ch_receiver: mpc_channel::Receiver<Msg<S>>,
+        ch_sender: mpc_channel::Sender<Msg<S::Msg>>,
+        ch_receiver: mpc_channel::Receiver<Msg<S::Msg>>,
     ) -> Self {
         Self {
             rng,

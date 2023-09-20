@@ -3,11 +3,13 @@
 use crate::circuit::ExecutableCircuit;
 use crate::executor::GateOutputs;
 use crate::protocols::FunctionDependentSetup;
+use crate::utils::{BoxError, ErasedError};
 use async_trait::async_trait;
 use std::error::Error;
 
 pub mod arithmetic;
 pub mod boolean;
+pub mod storage;
 
 /// Provides a source of multiplication triples.
 #[async_trait]
@@ -21,11 +23,7 @@ pub trait MTProvider {
 
     fn into_dyn(
         self,
-    ) -> Box<
-        dyn MTProvider<Output = Self::Output, Error = Box<dyn Error + Send + Sync>>
-            + Send
-            + 'static,
-    >
+    ) -> Box<dyn MTProvider<Output = Self::Output, Error = BoxError> + Send + 'static>
     where
         Self: Sized + Send + 'static,
         Self::Error: Error + Send + Sync + 'static,
@@ -33,8 +31,6 @@ pub trait MTProvider {
         Box::new(ErasedError(self))
     }
 }
-
-pub struct ErasedError<MTP>(pub MTP);
 
 #[async_trait]
 impl<Mtp: MTProvider + Send> MTProvider for &mut Mtp {
@@ -65,6 +61,7 @@ impl<Out, Err> MTProvider for Box<dyn MTProvider<Output = Out, Error = Err> + Se
 }
 
 // TODO I think this impl would disallow downstream crates to impl FunctionDependentSetup
+//  on second thought, this might not be the case
 #[async_trait]
 impl<ShareStorage: Sync, G: Send + Sync, Idx: Send + Sync, Mtp: MTProvider + Send>
     FunctionDependentSetup<ShareStorage, G, Idx> for Mtp
@@ -75,10 +72,13 @@ impl<ShareStorage: Sync, G: Send + Sync, Idx: Send + Sync, Mtp: MTProvider + Sen
     async fn setup(
         &mut self,
         _shares: &GateOutputs<ShareStorage>,
-        circuit: &ExecutableCircuit<G, Idx>,
-    ) -> Result<Self::Output, Self::Error> {
-        self.request_mts(circuit.interactive_count_times_simd())
-            .await
+        _circuit: &ExecutableCircuit<G, Idx>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+        self.request_mts(count).await
     }
 }
 
@@ -89,19 +89,16 @@ where
     <MTP as MTProvider>::Error: Error + Send + Sync + 'static,
 {
     type Output = MTP::Output;
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = BoxError;
 
     async fn precompute_mts(&mut self, amount: usize) -> Result<(), Self::Error> {
         self.0
             .precompute_mts(amount)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn Error + Send + Sync>)
+            .map_err(BoxError::from_err)
     }
 
     async fn request_mts(&mut self, amount: usize) -> Result<Self::Output, Self::Error> {
-        self.0
-            .request_mts(amount)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn Error + Send + Sync>)
+        self.0.request_mts(amount).await.map_err(BoxError::from_err)
     }
 }

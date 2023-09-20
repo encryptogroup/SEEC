@@ -247,6 +247,13 @@ impl<'c, G: Gate, Idx: GateIdx> ExecutableLayer<'c, G, Idx> {
         }
     }
 
+    pub fn interactive_count_times_simd(&self) -> usize {
+        match self {
+            ExecutableLayer::DynLayer(layer) => layer.interactive_count_times_simd(),
+            ExecutableLayer::StaticLayer(layer_iter) => layer_iter.interactive_count_times_simd(),
+        }
+    }
+
     pub fn interactive_iter(&self) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone + '_ {
         match self {
             ExecutableLayer::DynLayer(layer) => Either::Left(layer.interactive_iter()),
@@ -371,8 +378,16 @@ impl<'c, G: Gate, Idx: GateIdx> ExecutableLayer<'c, G, Idx> {
         }
     }
 
+    // Returns freeable SIMD gates
+    pub(crate) fn freeable_simd_gates(&self) -> impl Iterator<Item = SubCircuitGate<Idx>> + '_ {
+        match self {
+            ExecutableLayer::DynLayer(layer) => Either::Left(layer.freeable_simd_gates()),
+            ExecutableLayer::StaticLayer(_) => Either::Right(iter::empty()),
+        }
+    }
+
     /// Split layer into (scalar, simd) gates
-    pub(crate) fn split_simd(&self) -> (Self, Self) {
+    pub(crate) fn split_simd(self) -> (Self, Self) {
         match self {
             Self::DynLayer(layer) => {
                 let (scalar, simd) = layer.split_simd();

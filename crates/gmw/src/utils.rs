@@ -4,6 +4,8 @@ use num_integer::div_ceil;
 use rand::{CryptoRng, Fill, Rng};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::{BitAndAssign, BitXorAssign, RangeInclusive};
 use std::{array, mem};
@@ -127,5 +129,34 @@ impl<T: BitStore + Copy + BitXorAssign + BitAndAssign> BitVecExt for BitVec<T> {
                 *a &= *b;
             });
         self
+    }
+}
+
+pub struct ErasedError<I>(pub I);
+
+#[derive(Debug)]
+pub struct BoxError(pub Box<dyn Error + Send + Sync>);
+
+impl BoxError {
+    pub fn from_err<E: Error + Send + Sync + 'static>(err: E) -> Self {
+        Self(Box::new(err))
+    }
+}
+
+impl Display for BoxError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Error for BoxError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.0.source()
+    }
+}
+
+impl From<Box<dyn Error + Send + Sync>> for BoxError {
+    fn from(value: Box<dyn Error + Send + Sync>) -> Self {
+        Self(value)
     }
 }

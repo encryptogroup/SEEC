@@ -195,7 +195,12 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
                     key: key_share1,
                 })
                 .await?;
-            let Msg::ShareInput(input_share) = main_channel.1.recv().await?.ok_or(anyhow::anyhow!("Remote closed"))? else {
+            let Msg::ShareInput(input_share) = main_channel
+                .1
+                .recv()
+                .await?
+                .ok_or(anyhow::anyhow!("Remote closed"))?
+            else {
                 anyhow::bail!("Received wrong message. Expected ShareInput")
             };
 
@@ -231,9 +236,16 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
             let padded_file_data = BitVec::from_vec(padded_data_usize);
             let [input_share0, input_share1] = sharing.share(padded_file_data);
             main_channel.0.send(Msg::ShareInput(input_share1)).await?;
-            let Msg::ShareIvKey {iv: iv_share, key: key_share } = main_channel.1.recv().await
+            let Msg::ShareIvKey {
+                iv: iv_share,
+                key: key_share,
+            } = main_channel
+                .1
+                .recv()
+                .await
                 .context("Receiving IvKeyShare")?
-                .ok_or(anyhow::anyhow!("Remote closed"))? else {
+                .ok_or(anyhow::anyhow!("Remote closed"))?
+            else {
                 anyhow::bail!("Received wrong message. Expected IvKeyShare")
             };
             let out = encrypt(
@@ -246,9 +258,13 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
             )
             .await?;
 
-            let Msg::ReconstructAesCiphertext(shared_out) = main_channel.1.recv().await
+            let Msg::ReconstructAesCiphertext(shared_out) = main_channel
+                .1
+                .recv()
+                .await
                 .context("Receiving ciphertext share")?
-                .ok_or(anyhow::anyhow!("Remote closed"))? else {
+                .ok_or(anyhow::anyhow!("Remote closed"))?
+            else {
                 anyhow::bail!("Received wrong message. Expected IvKeyShare")
             };
 
@@ -265,9 +281,13 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
             };
 
             if args.validate {
-                let Msg::PlainIvKey {iv, key} = main_channel.1.recv().await
+                let Msg::PlainIvKey { iv, key } = main_channel
+                    .1
+                    .recv()
+                    .await
                     .context("Reconstructing Iv/Key")?
-                    .ok_or(anyhow::anyhow!("Remote closed"))? else {
+                    .ok_or(anyhow::anyhow!("Remote closed"))?
+                else {
                     anyhow::bail!("Received wrong message. Expected ReconstructIvKey")
                 };
                 validate(iv, key, &data, &ciphertext)?;

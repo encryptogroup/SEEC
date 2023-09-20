@@ -42,6 +42,10 @@ struct CompileArgs {
     #[clap(short, long)]
     log: Option<PathBuf>,
 
+    /// Use dynamic layers instead of static
+    #[clap(short, long)]
+    dyn_layers: bool,
+
     /// Circuit in bristol format
     circuit: PathBuf,
 }
@@ -59,6 +63,14 @@ struct ExecuteArgs {
     /// Performs insecure setup by randomly generating MTs based on fixed seed (no OTs)
     #[clap(long)]
     insecure_setup: bool,
+
+    /// Use MTs stored ad <FILE> generated via precompute_mts.rs
+    #[clap(long)]
+    stored_mts: Option<PathBuf>,
+
+    /// Perform setup interleaved with the online phase
+    #[clap(long)]
+    interleave_setup: bool,
 
     #[clap(long, default_value = "1")]
     repeat: usize,
@@ -114,7 +126,9 @@ fn compile(compile_args: CompileArgs) -> Result<()> {
         }
         None => ExecutableCircuit::DynLayers(bc.into()),
     };
-    circ = circ.precompute_layers();
+    if !compile_args.dyn_layers {
+        circ = circ.precompute_layers();
+    }
     let out_path = compile_args.output.with_extension("seec");
     let out = BufWriter::new(File::create(out_path).context("failed to create output file")?);
     bincode::serialize_into(out, &circ).context("failed to serialize circuit")?;
@@ -140,11 +154,15 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
     let circuit = load_circ(&execute_args).context("failed to load circuit")?;
 
     let create_party = |id, circ| {
-        BenchParty::<BooleanGmw, u32>::new(id)
+        let mut party = BenchParty::<BooleanGmw, u32>::new(id)
             .explicit_circuit(circ)
             .repeat(execute_args.repeat)
             .insecure_setup(execute_args.insecure_setup)
-            .metadata(circ_name.clone())
+            .metadata(circ_name.clone());
+        if let Some(path) = &execute_args.stored_mts {
+            party = party.stored_mts(path);
+        }
+        party
     };
 
     let results = if let Some(id) = execute_args.id {
