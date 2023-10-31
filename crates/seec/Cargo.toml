@@ -49,7 +49,7 @@ num-integer = "0.1.44"
 num-traits = "0.2.15"
 rangemap = "1.0.3"
 once_cell = "1.13.1"
-gmw-macros = {path = "../gmw-macros"}
+seec-macros = {path = "../seec-macros"}
 mpc-channel = {path = "../mpc-channel"}
 remoc = { workspace = true }
 zappot = {path = "../zappot"}

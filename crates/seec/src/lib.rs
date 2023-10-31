@@ -3,9 +3,9 @@ pub use circuit::builder::{
 };
 pub use circuit::dyn_layers::Circuit;
 pub use circuit::GateId;
-pub use gmw_macros::sub_circuit;
 pub use parse::bristol;
 pub use protocols::boolean_gmw::BooleanGate;
+pub use seec_macros::sub_circuit;
 
 #[cfg(feature = "bench-api")]
 pub mod bench;
