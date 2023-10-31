@@ -15,7 +15,6 @@ use bitvec::order::Lsb0;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
 use bytemuck::{cast, cast_slice, cast_slice_mut};
-use mpc_channel::CommunicationError;
 use ndarray::Array2;
 use num_integer::Integer;
 use num_prime::nt_funcs::next_prime;
@@ -25,6 +24,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use remoc::RemoteSend;
+use seec_channel::CommunicationError;
 use serde::{Deserialize, Serialize};
 use std::cmp::{max, min};
 use std::fmt::Debug;
@@ -83,8 +83,8 @@ pub struct QuasiCyclicConf {
 /// Message sent during SilentOT evaluation.
 pub enum Msg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
     #[serde(bound = "")]
-    BaseOTChannel(mpc_channel::Receiver<BaseOTMsg>),
-    Pprf(mpc_channel::Receiver<pprf::Msg>),
+    BaseOTChannel(seec_channel::Receiver<BaseOTMsg>),
+    Pprf(seec_channel::Receiver<pprf::Msg>),
 }
 
 pub enum ChoiceBitPacking {
@@ -112,8 +112,8 @@ impl Sender {
         num_ots: usize,
         scaler: usize,
         num_threads: usize,
-        sender: &mut mpc_channel::Sender<Msg<BaseOT::Msg>>,
-        receiver: &mut mpc_channel::Receiver<Msg<BaseOT::Msg>>,
+        sender: &mut seec_channel::Sender<Msg<BaseOT::Msg>>,
+        receiver: &mut seec_channel::Receiver<Msg<BaseOT::Msg>>,
     ) -> Self
     where
         BaseOT: BaseROTSender,
@@ -170,8 +170,8 @@ impl Sender {
     pub async fn random_silent_send<RNG>(
         self,
         rng: &mut RNG,
-        sender: mpc_channel::Sender<Msg>,
-        receiver: mpc_channel::Receiver<Msg>,
+        sender: seec_channel::Sender<Msg>,
+        receiver: seec_channel::Receiver<Msg>,
     ) -> Vec<[Block; 2]>
     where
         RNG: RngCore + CryptoRng,
@@ -196,8 +196,8 @@ impl Sender {
         mut self,
         delta: Block,
         rng: &mut RNG,
-        mut sender: mpc_channel::Sender<Msg>,
-        mut receiver: mpc_channel::Receiver<Msg>,
+        mut sender: seec_channel::Sender<Msg>,
+        mut receiver: seec_channel::Receiver<Msg>,
     ) -> Vec<Block>
     where
         RNG: RngCore + CryptoRng,
@@ -280,8 +280,8 @@ impl Receiver {
         num_ots: usize,
         scaler: usize,
         num_threads: usize,
-        sender: &mut mpc_channel::Sender<Msg<BaseOT::Msg>>,
-        receiver: &mut mpc_channel::Receiver<Msg<BaseOT::Msg>>,
+        sender: &mut seec_channel::Sender<Msg<BaseOT::Msg>>,
+        receiver: &mut seec_channel::Receiver<Msg<BaseOT::Msg>>,
     ) -> Self
     where
         BaseOT: BaseROTReceiver,
@@ -347,8 +347,8 @@ impl Receiver {
     /// user, but are the output.
     pub async fn random_silent_receive(
         self,
-        sender: mpc_channel::Sender<Msg>,
-        receiver: mpc_channel::Receiver<Msg>,
+        sender: seec_channel::Sender<Msg>,
+        receiver: seec_channel::Receiver<Msg>,
     ) -> (Vec<Block>, BitVec) {
         let conf = self.conf;
         let thread_pool = self.thread_pool.clone();
@@ -368,8 +368,8 @@ impl Receiver {
     pub async fn correlated_silent_receive(
         mut self,
         choice_bit_packing: ChoiceBitPacking,
-        mut sender: mpc_channel::Sender<Msg>,
-        mut receiver: mpc_channel::Receiver<Msg>,
+        mut sender: seec_channel::Sender<Msg>,
+        mut receiver: seec_channel::Receiver<Msg>,
     ) -> (Vec<Block>, Option<Vec<u8>>) {
         let rT = {
             let (_sender, receiver) = pprf_channel(&mut sender, &mut receiver)
@@ -726,10 +726,16 @@ pub fn bit_shift_xor(dest: &mut [Block], inp: &[Block], bit_shift: u8) {
 }
 
 async fn base_ot_channel<BaseMsg: RemoteSend>(
-    sender: &mut mpc_channel::Sender<Msg<BaseMsg>>,
-    receiver: &mut mpc_channel::Receiver<Msg<BaseMsg>>,
-) -> Result<(mpc_channel::Sender<BaseMsg>, mpc_channel::Receiver<BaseMsg>), CommunicationError> {
-    mpc_channel::sub_channel_with(sender, receiver, BASE_OT_COUNT, Msg::BaseOTChannel, |msg| {
+    sender: &mut seec_channel::Sender<Msg<BaseMsg>>,
+    receiver: &mut seec_channel::Receiver<Msg<BaseMsg>>,
+) -> Result<
+    (
+        seec_channel::Sender<BaseMsg>,
+        seec_channel::Receiver<BaseMsg>,
+    ),
+    CommunicationError,
+> {
+    seec_channel::sub_channel_with(sender, receiver, BASE_OT_COUNT, Msg::BaseOTChannel, |msg| {
         match msg {
             Msg::BaseOTChannel(receiver) => Some(receiver),
             _ => None,
@@ -739,16 +745,16 @@ async fn base_ot_channel<BaseMsg: RemoteSend>(
 }
 
 async fn pprf_channel<BaseMsg: RemoteSend>(
-    sender: &mut mpc_channel::Sender<Msg<BaseMsg>>,
-    receiver: &mut mpc_channel::Receiver<Msg<BaseMsg>>,
+    sender: &mut seec_channel::Sender<Msg<BaseMsg>>,
+    receiver: &mut seec_channel::Receiver<Msg<BaseMsg>>,
 ) -> Result<
     (
-        mpc_channel::Sender<pprf::Msg>,
-        mpc_channel::Receiver<pprf::Msg>,
+        seec_channel::Sender<pprf::Msg>,
+        seec_channel::Receiver<pprf::Msg>,
     ),
     CommunicationError,
 > {
-    mpc_channel::sub_channel_with(sender, receiver, 128, Msg::Pprf, |msg| match msg {
+    seec_channel::sub_channel_with(sender, receiver, 128, Msg::Pprf, |msg| match msg {
         Msg::Pprf(receiver) => Some(receiver),
         _ => None,
     })
@@ -863,7 +869,7 @@ mod test {
         let num_threads = 2;
         let delta = Block::all_ones();
         let conf = configure(num_ots, scaler, 128);
-        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
+        let (ch1, ch2) = seec_channel::in_memory::new_pair(128);
         let mut rng = StdRng::seed_from_u64(42);
         let (sender_base_ots, receiver_base_ots, base_choices) = fake_base(
             conf.into(),
@@ -901,7 +907,7 @@ mod test {
         let scaler = 2;
         let num_threads = 2;
         let conf = configure(num_ots, scaler, 128);
-        let (ch1, ch2) = mpc_channel::in_memory::new_pair(128);
+        let (ch1, ch2) = seec_channel::in_memory::new_pair(128);
         let mut rng = StdRng::seed_from_u64(42);
         let (sender_base_ots, receiver_base_ots, base_choices) = fake_base(
             conf.into(),

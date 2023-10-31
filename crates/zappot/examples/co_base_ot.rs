@@ -3,9 +3,9 @@
 //! This example shows how to use the zappot crate to execute the Chou Orlandi base OT protocol.
 use bitvec::vec::BitVec;
 use clap::Parser;
-use mpc_channel::sub_channel;
 use rand::{distributions, Rng};
 use rand_core::OsRng;
+use seec_channel::sub_channel;
 use std::time::Duration;
 use tokio::time::Instant;
 use zappot::base_ot::{Receiver, Sender};
@@ -30,7 +30,7 @@ async fn sender(args: Args) -> Vec<[Block; 2]> {
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
     let (mut base_sender, _, mut base_receiver, _) =
-        mpc_channel::tcp::listen::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::listen::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
@@ -51,7 +51,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     let mut receiver = Receiver::new();
     // Connect to the sender on the listened on port
     let (mut base_sender, _, mut base_receiver, _) =
-        mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::connect::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)

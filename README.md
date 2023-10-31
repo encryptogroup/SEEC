@@ -1,6 +1,6 @@
-# GMW
+# SEEC
 
-This framework implements the GMW secure multi party computation protocol.
+This framework implements secure 2-party secret-sharing based multi party computation protocols. Currently, we implement the Boolean and arithmetic versions of GMW87 with multiplication triple preprocessing. Additionally, we implement the Boolean part of the ABY2.0 protocol. 
 
 ## Development
 

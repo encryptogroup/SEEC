@@ -12,11 +12,11 @@ use bitvec::slice::BitSlice;
 use bitvec::store::BitStore;
 use bitvec::vec::BitVec;
 use bytemuck::{cast_slice, Pod};
-use mpc_channel::channel;
 use rand::{CryptoRng, Rng, RngCore};
 use rand_core::SeedableRng;
 use rayon::prelude::*;
 use remoc::RemoteSend;
+use seec_channel::channel;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -38,7 +38,7 @@ pub enum ExtOTMsg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
     // Workaround for compiler bug,
     // see https://github.com/serde-rs/serde/issues/1296#issuecomment-394056188
     #[serde(bound = "")]
-    BaseOTChannel(mpc_channel::Receiver<BaseOTMsg>),
+    BaseOTChannel(seec_channel::Receiver<BaseOTMsg>),
     URow(usize, Vec<u8>),
     Correlated(Vec<u8>),
 }
@@ -51,8 +51,8 @@ where
     pub async fn perform_base_ots<RNG: RngCore + CryptoRng + Send>(
         &mut self,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<<Self as ExtROTSender>::Msg>,
-        receiver: &mut mpc_channel::Receiver<<Self as ExtROTSender>::Msg>,
+        sender: &seec_channel::Sender<<Self as ExtROTSender>::Msg>,
+        receiver: &mut seec_channel::Receiver<<Self as ExtROTSender>::Msg>,
     ) -> Result<(), Error<<Self as ExtROTSender>::Msg>> {
         if let (Some(_), Some(_)) = (&self.base_rngs, &self.base_choices) {
             return Ok(());
@@ -97,8 +97,8 @@ where
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -176,8 +176,8 @@ where
         count: usize,
         correlation: impl Fn(usize, Block) -> Block + Send,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -201,8 +201,8 @@ where
         count: usize,
         correlation: impl Fn(usize, [u8; LEN]) -> [u8; LEN] + Send,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[u8; LEN]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -236,8 +236,8 @@ where
     pub async fn perform_base_ots<RNG: RngCore + CryptoRng + Send>(
         &mut self,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<<Self as ExtROTReceiver>::Msg>,
-        receiver: &mut mpc_channel::Receiver<<Self as ExtROTReceiver>::Msg>,
+        sender: &seec_channel::Sender<<Self as ExtROTReceiver>::Msg>,
+        receiver: &mut seec_channel::Receiver<<Self as ExtROTReceiver>::Msg>,
     ) -> Result<(), Error<<Self as ExtROTReceiver>::Msg>> {
         if self.base_rngs.is_some() {
             return Ok(());
@@ -280,8 +280,8 @@ where
         &mut self,
         choices: &BitSlice<C>,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -351,8 +351,8 @@ where
         &mut self,
         choices: &BitSlice<C>,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -371,8 +371,8 @@ where
         &mut self,
         choices: &BitSlice<C>,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[u8; LEN]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -460,7 +460,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn random_ot_ext() {
-        let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(128);
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
         let num_ots: usize = 1000;
         let now = Instant::now();
         let send = tokio::spawn(async move {
@@ -489,7 +489,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn correlated_ot_ext() {
-        let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(128);
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
         let num_ots: usize = 1000;
         let now = Instant::now();
         let send = tokio::spawn(async move {

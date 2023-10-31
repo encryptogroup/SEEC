@@ -49,8 +49,8 @@ impl BaseROTSender for Sender {
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -110,8 +110,8 @@ impl BaseROTReceiver for Receiver {
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -185,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn base_rot() {
-        let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(128);
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
         let mut rng_send = StdRng::seed_from_u64(42);
         let mut rng_recv = StdRng::seed_from_u64(42 * 42);
         let mut sender = Sender;

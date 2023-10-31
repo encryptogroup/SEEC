@@ -35,8 +35,8 @@ pub trait BaseROTSender {
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
@@ -52,8 +52,8 @@ pub trait BaseROTReceiver {
         &mut self,
         choices: &BitSlice,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
@@ -68,8 +68,8 @@ pub trait ExtROTSender {
         &mut self,
         count: usize,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[Block; 2]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
@@ -79,8 +79,8 @@ pub trait ExtROTSender {
         count: usize,
         correlation: impl Fn(usize, Block) -> Block + Send,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send;
@@ -90,8 +90,8 @@ pub trait ExtROTSender {
         count: usize,
         correlation: impl Fn(usize, [u8; LEN]) -> [u8; LEN] + Send,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[u8; LEN]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -107,8 +107,8 @@ pub trait ExtROTReceiver {
         &mut self,
         choices: &BitSlice<C>,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -119,8 +119,8 @@ pub trait ExtROTReceiver {
         &mut self,
         choices: &BitSlice<C>,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<Block>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,
@@ -131,8 +131,8 @@ pub trait ExtROTReceiver {
         &mut self,
         choices: &BitSlice<C>,
         rng: &mut RNG,
-        sender: &mpc_channel::Sender<Self::Msg>,
-        receiver: &mut mpc_channel::Receiver<Self::Msg>,
+        sender: &seec_channel::Sender<Self::Msg>,
+        receiver: &mut seec_channel::Receiver<Self::Msg>,
     ) -> Result<Vec<[u8; LEN]>, Error<Self::Msg>>
     where
         RNG: RngCore + CryptoRng + Send,

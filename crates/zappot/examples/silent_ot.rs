@@ -4,8 +4,8 @@
 //! to generate random OTs.
 use bitvec::vec::BitVec;
 use clap::Parser;
-use mpc_channel::sub_channel;
 use rand_core::OsRng;
+use seec_channel::sub_channel;
 use std::time::Duration;
 use tokio::time::Instant;
 use tracing_subscriber::EnvFilter;
@@ -38,7 +38,7 @@ async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
     let (mut base_sender, bytes_sent, mut base_receiver, bytes_rcv) =
-        mpc_channel::tcp::listen::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::listen::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     tracing::debug!("Before sub channel");
@@ -71,7 +71,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // Create a secure RNG to use in the protocol
     let mut rng = OsRng;
     let (mut base_sender, _, mut base_receiver, _) =
-        mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::connect::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     tracing::debug!("Before sub channel");

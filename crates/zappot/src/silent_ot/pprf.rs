@@ -65,7 +65,7 @@ impl Sender {
 
     pub async fn expand<RNG>(
         &mut self,
-        sender: mpc_channel::Sender<Msg>,
+        sender: seec_channel::Sender<Msg>,
         value: Block,
         rng: &mut RNG,
         thread_pool: Option<Arc<ThreadPool>>,
@@ -269,7 +269,7 @@ impl Receiver {
 
     pub async fn expand(
         &mut self,
-        mut receiver: mpc_channel::Receiver<Msg>,
+        mut receiver: seec_channel::Receiver<Msg>,
         thread_pool: Option<Arc<ThreadPool>>,
     ) -> Array2<Block> {
         let conf = self.conf;
@@ -744,7 +744,7 @@ pub(crate) mod tests {
         let mut rng = StdRng::seed_from_u64(42);
 
         let threads = 1;
-        let ((sender_ch, _), (_, receiver_ch)) = mpc_channel::in_memory::new_pair(128);
+        let ((sender_ch, _), (_, receiver_ch)) = seec_channel::in_memory::new_pair(128);
         let (sender_base_ots, receiver_base_ots, base_choices) =
             fake_base(conf, conf.domain * conf.pnt_count, format, &mut rng);
         let send_pool = rayon::ThreadPoolBuilder::new()
