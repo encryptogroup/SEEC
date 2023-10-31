@@ -1,18 +1,18 @@
 use async_trait::async_trait;
-use gmw::circuit::base_circuit::BaseGate;
-use gmw::circuit::{BaseCircuit, ExecutableCircuit};
-use gmw::executor::{Executor, GateOutputs, Input};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::private_test_utils::init_tracing;
-use gmw::protocols::tensor_aby2::{
-    AbySetupProvider, BoolTensorAby2, BooleanGate, DeltaShareStorage, DeltaSharing, PartialShare,
-    SetupData, ShareType, TensorGate,
-};
-use gmw::protocols::{DynDim, FunctionDependentSetup, Protocol, SetupStorage};
-use gmw::Circuit;
 use mpc_bitmatrix::BitMatrix;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
+use seec::circuit::base_circuit::BaseGate;
+use seec::circuit::{BaseCircuit, ExecutableCircuit};
+use seec::executor::{Executor, GateOutputs, Input};
+use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use seec::private_test_utils::init_tracing;
+use seec::protocols::tensor_aby2::{
+    AbySetupProvider, BoolTensorAby2, BooleanGate, DeltaShareStorage, DeltaSharing, PartialShare,
+    SetupData, ShareType, TensorGate,
+};
+use seec::protocols::{DynDim, FunctionDependentSetup, Protocol, SetupStorage};
+use seec::Circuit;
 
 #[derive(Clone, Debug)]
 struct MockSetupProvider {
@@ -119,7 +119,7 @@ async fn simple_matmul() -> anyhow::Result<()> {
     let state1 = BoolTensorAby2::new(sharing_state1.clone());
     let state2 = BoolTensorAby2::new(sharing_state2.clone());
 
-    let (ch1, ch2) = mpc_channel::in_memory::new_pair(16);
+    let (ch1, ch2) = seec_channel::in_memory::new_pair(16);
     let delta_provider1 = AbySetupProvider::new(0, InsecureMTProvider, ch1.0, ch1.1);
     let delta_provider2 = AbySetupProvider::new(1, InsecureMTProvider, ch2.0, ch2.1);
     let gate_output = [
@@ -166,7 +166,7 @@ async fn simple_matmul() -> anyhow::Result<()> {
     let reconst = DeltaSharing::reconstruct(inp1.clone(), inp2.clone());
     assert_eq!(reconst, [id_mat, mat.clone()]);
 
-    let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(16);
+    let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(16);
 
     let (out0, out1) = tokio::try_join!(
         ex1.execute(Input::Scalar(inp1), &mut ch1.0, &mut ch1.1),

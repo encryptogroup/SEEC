@@ -20,8 +20,8 @@ pub struct OtMTProvider<R, RNG, OtS: ExtROTSender, OtR: ExtROTReceiver> {
     rng: RNG,
     ot_sender: OtS,
     ot_receiver: OtR,
-    ch_sender: mpc_channel::Sender<mpc_channel::Receiver<OtS::Msg>>,
-    ch_receiver: mpc_channel::Receiver<mpc_channel::Receiver<OtS::Msg>>,
+    ch_sender: seec_channel::Sender<seec_channel::Receiver<OtS::Msg>>,
+    ch_receiver: seec_channel::Receiver<seec_channel::Receiver<OtS::Msg>>,
     precomputed_mts: Option<MulTriples<R>>,
 }
 
@@ -32,8 +32,8 @@ impl<R: Ring, RNG: RngCore + CryptoRng + Send, OtS: ExtROTSender, OtR: ExtROTRec
         rng: RNG,
         ot_sender: OtS,
         ot_receiver: OtR,
-        ch_sender: mpc_channel::Sender<mpc_channel::Receiver<OtS::Msg>>,
-        ch_receiver: mpc_channel::Receiver<mpc_channel::Receiver<OtS::Msg>>,
+        ch_sender: seec_channel::Sender<seec_channel::Receiver<OtS::Msg>>,
+        ch_receiver: seec_channel::Receiver<seec_channel::Receiver<OtS::Msg>>,
     ) -> Self {
         Self {
             rng,
@@ -66,11 +66,11 @@ where
         let amount = Integer::next_multiple_of(&amount, &8);
 
         let (ch_sender1, mut ch_receiver1) =
-            mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
+            seec_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
         let (ch_sender2, mut ch_receiver2) =
-            mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
+            seec_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
 
@@ -183,7 +183,7 @@ mod tests {
     async fn ot_ext_provider() {
         let _guard = init_tracing();
         let ((ch_sender1, ch_receiver1), (ch_sender2, ch_receiver2)) =
-            mpc_channel::in_memory::new_pair(8);
+            seec_channel::in_memory::new_pair(8);
 
         let party = |ch_sender, ch_receiver| async {
             let ot_sender = ot_ext::Sender::default();

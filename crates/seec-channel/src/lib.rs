@@ -5,7 +5,7 @@ use remoc::rch::{base, mpsc};
 use remoc::{codec, RemoteSend};
 use serde::{Deserialize, Serialize};
 
-pub use mpc_channel_macros::sub_channels_for;
+pub use seec_channel_macros::sub_channels_for;
 
 pub mod in_memory;
 pub mod tcp;

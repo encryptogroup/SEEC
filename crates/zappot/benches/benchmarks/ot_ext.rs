@@ -27,7 +27,7 @@ fn bench_ot_ext(c: &mut Criterion) {
         |b, choices| {
             b.to_async(&runtime).iter(|| async {
                 let ((sender1, receiver1), (sender2, receiver2)) =
-                    mpc_channel::in_memory::new_pair(128);
+                    seec_channel::in_memory::new_pair(128);
                 let send = tokio::spawn(async move {
                     let mut sender = ot_ext::Sender::new(base_ot::Receiver {});
                     let mut rng_send = StdRng::seed_from_u64(42);

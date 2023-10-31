@@ -7,12 +7,12 @@ use crate::protocols::{Gate, Protocol, Share, ShareStorage};
 use crate::utils::{BoxError, ErasedError};
 use crate::CircuitBuilder;
 use anyhow::{anyhow, Context};
-use mpc_channel::util::{Phase, RunResult, Statistics};
-use mpc_channel::{sub_channels_for, Channel, Receiver};
 use rand::distributions::{Distribution, Standard};
 use rand::rngs::OsRng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use seec_channel::util::{Phase, RunResult, Statistics};
+use seec_channel::{sub_channels_for, Channel, Receiver};
 use serde::Serialize;
 use std::fmt::Debug;
 use std::fs::File;
@@ -147,9 +147,9 @@ where
         async move {
             let server = self.server.unwrap_or("127.0.0.1:7744".parse().unwrap());
             let (mut sender, bytes_written, mut receiver, bytes_read) = match self.id {
-                0 => mpc_channel::tcp::listen(&server).await?,
+                0 => seec_channel::tcp::listen(&server).await?,
                 1 => {
-                    mpc_channel::tcp::connect_with_timeout(&server, Duration::from_secs(120))
+                    seec_channel::tcp::connect_with_timeout(&server, Duration::from_secs(120))
                         .await?
                 }
                 illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),

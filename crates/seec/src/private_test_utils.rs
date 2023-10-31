@@ -8,9 +8,9 @@ use bitvec::order::Lsb0;
 use bitvec::prelude::BitSlice;
 use bitvec::vec;
 use itertools::Itertools;
-use mpc_channel::sub_channel;
 use rand::rngs::ThreadRng;
 use rand::thread_rng;
+use seec_channel::sub_channel;
 use tokio::task::spawn_blocking;
 use tokio::time::Instant;
 use tracing::info;
@@ -74,7 +74,7 @@ pub fn create_and_tree(depth: u32) -> BaseCircuit {
 /// [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/struct.EnvFilter.html)
 ///
 /// ```ignore
-/// use gmw::private_test_utils::init_tracing;
+/// use seec::private_test_utils::init_tracing;
 /// fn some_test() {
 ///     let _guard = init_tracing();
 /// }
@@ -243,14 +243,14 @@ where
     let now = Instant::now();
     let (out1, out2) = match channel {
         TestChannel::InMemory => {
-            let (mut t1, mut t2) = mpc_channel::in_memory::new_pair(2);
+            let (mut t1, mut t2) = seec_channel::in_memory::new_pair(2);
             let h1 = ex1.execute(Input::Scalar(input_a), &mut t1.0, &mut t1.1);
             let h2 = ex2.execute(Input::Scalar(input_b), &mut t2.0, &mut t2.1);
             futures::try_join!(h1, h2)?
         }
         TestChannel::Tcp => {
             let (mut t1, mut t2) =
-                mpc_channel::tcp::new_local_pair::<mpc_channel::Receiver<_>>(None).await?;
+                seec_channel::tcp::new_local_pair::<seec_channel::Receiver<_>>(None).await?;
             let (mut sub_t1, mut sub_t2) = tokio::try_join!(
                 sub_channel(&mut t1.0, &mut t1.2, 2),
                 sub_channel(&mut t2.0, &mut t2.2, 2)

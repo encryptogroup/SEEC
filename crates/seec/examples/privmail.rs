@@ -8,15 +8,15 @@ use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::ExecutableCircuit;
-use gmw::circuit::GateId;
-use gmw::common::BitVec;
-use gmw::executor::{BoolGmwExecutor, Input, Message};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::secret::{inputs, low_depth_reduce, Secret};
-use gmw::CircuitBuilder;
-use mpc_channel::sub_channels_for;
+use seec::circuit::ExecutableCircuit;
+use seec::circuit::GateId;
+use seec::common::BitVec;
+use seec::executor::{BoolGmwExecutor, Input, Message};
+use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::secret::{inputs, low_depth_reduce, Secret};
+use seec::CircuitBuilder;
+use seec_channel::sub_channels_for;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -223,8 +223,8 @@ async fn main() -> anyhow::Result<()> {
     // }
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.my_id {
-        0 => mpc_channel::tcp::listen(args.server).await?,
-        1 => mpc_channel::tcp::connect(args.server).await?,
+        0 => seec_channel::tcp::listen(args.server).await?,
+        1 => seec_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 

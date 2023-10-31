@@ -373,10 +373,10 @@ pub(crate) fn sub_circuit_inputs<Idx: GateIdx>(
 ///
 /// ```rust
 ///# use std::sync::Arc;
-///# use gmw::circuit::{BaseCircuit, DefaultIdx};
-///# use gmw::secret::{inputs, low_depth_reduce};
+///# use seec::circuit::{BaseCircuit, DefaultIdx};
+///# use seec::secret::{inputs, low_depth_reduce};
 ///# use parking_lot::Mutex;
-///# use gmw::{BooleanGate, Circuit, CircuitBuilder};
+///# use seec::{BooleanGate, Circuit, CircuitBuilder};
 ///#
 /// let inputs = inputs::<DefaultIdx>(23);
 /// low_depth_reduce(inputs, std::ops::BitAnd::bitand)

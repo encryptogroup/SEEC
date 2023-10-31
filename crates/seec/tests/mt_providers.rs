@@ -2,17 +2,17 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
 use bitvec::order::Msb0;
-use gmw::circuit::dyn_layers::Circuit;
-use gmw::circuit::ExecutableCircuit;
-use gmw::common::BitVec;
-use gmw::executor::{Executor, Input};
-use gmw::mul_triple::boolean;
-use gmw::mul_triple::boolean::trusted_provider::{
+use seec::circuit::dyn_layers::Circuit;
+use seec::circuit::ExecutableCircuit;
+use seec::common::BitVec;
+use seec::executor::{Executor, Input};
+use seec::mul_triple::boolean;
+use seec::mul_triple::boolean::trusted_provider::{
     TrustedMTProviderClient, TrustedMTProviderServer,
 };
-use gmw::private_test_utils::init_tracing;
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use mpc_channel::{sub_channel, tcp};
+use seec::private_test_utils::init_tracing;
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec_channel::{sub_channel, tcp};
 use tokio::task::spawn_blocking;
 
 // Test the TrustedMTProvider by executing the aes circuit with the provided mts
@@ -36,7 +36,7 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
     let mut ex2 = Executor::<BooleanGmw, _>::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);
     let input_b = BitVec::repeat(false, 256);
-    let (mut t1, mut t2) = tcp::new_local_pair::<mpc_channel::Receiver<_>>(None).await?;
+    let (mut t1, mut t2) = tcp::new_local_pair::<seec_channel::Receiver<_>>(None).await?;
     let (mut t1, mut t2) = tokio::try_join!(
         sub_channel(&mut t1.0, &mut t1.2, 8),
         sub_channel(&mut t2.0, &mut t2.2, 8)
@@ -92,7 +92,7 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
     let mut ex2 = Executor::<BooleanGmw, _>::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);
     let input_b = BitVec::repeat(false, 256);
-    let (mut t1, mut t2) = tcp::new_local_pair::<mpc_channel::Receiver<_>>(None).await?;
+    let (mut t1, mut t2) = tcp::new_local_pair::<seec_channel::Receiver<_>>(None).await?;
     let (mut t1, mut t2) = tokio::try_join!(
         sub_channel(&mut t1.0, &mut t1.2, 8),
         sub_channel(&mut t2.0, &mut t2.2, 8)

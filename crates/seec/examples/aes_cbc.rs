@@ -11,22 +11,22 @@ use bitvec::order::Msb0;
 use bitvec::view::BitView;
 use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut};
 use clap::{Args, Parser};
-use gmw::bench::BenchParty;
-use gmw::circuit::base_circuit::Load;
-use gmw::circuit::{BaseCircuit, ExecutableCircuit};
-use gmw::common::{BitSlice, BitVec};
-use gmw::executor::{Executor, Input, Message, Output};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::mul_triple::MTProvider;
-use gmw::protocols::boolean_gmw::{BooleanGmw, XorSharing};
-use gmw::protocols::Sharing;
-use gmw::secret::{inputs, Secret};
-use gmw::{mul_triple, BooleanGate, CircuitBuilder, SharedCircuit, SubCircuitOutput};
-use mpc_channel::{sub_channel_with, sub_channels_for, Channel};
 use once_cell::sync::Lazy;
 use rand::rngs::{OsRng, ThreadRng};
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
+use seec::bench::BenchParty;
+use seec::circuit::base_circuit::Load;
+use seec::circuit::{BaseCircuit, ExecutableCircuit};
+use seec::common::{BitSlice, BitVec};
+use seec::executor::{Executor, Input, Message, Output};
+use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use seec::mul_triple::MTProvider;
+use seec::protocols::boolean_gmw::{BooleanGmw, XorSharing};
+use seec::protocols::Sharing;
+use seec::secret::{inputs, Secret};
+use seec::{mul_triple, BooleanGate, CircuitBuilder, SharedCircuit, SubCircuitOutput};
+use seec_channel::{sub_channel_with, sub_channels_for, Channel};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::filter::LevelFilter;
@@ -105,7 +105,7 @@ enum Msg {
         iv: [usize; 2],
         key: [usize; 2],
     },
-    OtChannel(mpc_channel::Receiver<mul_triple::boolean::ot_ext::DefaultMsg>),
+    OtChannel(seec_channel::Receiver<mul_triple::boolean::ot_ext::DefaultMsg>),
     Ack,
 }
 
@@ -143,8 +143,8 @@ fn compile(args: &CompileArgs) -> Result<()> {
 
 async fn execute(args: &ExecuteArgs) -> Result<()> {
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
-        0 => mpc_channel::tcp::listen(args.server).await?,
-        1 => mpc_channel::tcp::connect(args.server).await?,
+        0 => seec_channel::tcp::listen(args.server).await?,
+        1 => seec_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 

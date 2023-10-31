@@ -6,8 +6,8 @@ use bitvec::bitvec;
 use bitvec::order::{Lsb0, Msb0};
 use hex_literal::hex;
 
-use gmw::common::BitVec;
-use gmw::private_test_utils::{execute_bristol, init_tracing, TestChannel};
+use seec::common::BitVec;
+use seec::private_test_utils::{execute_bristol, init_tracing, TestChannel};
 
 #[tokio::test]
 async fn eval_8_bit_adder() -> Result<()> {

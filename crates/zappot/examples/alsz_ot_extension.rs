@@ -5,9 +5,9 @@
 use bitvec::vec::BitVec;
 use bitvec::{bitvec, order::Lsb0};
 use clap::Parser;
-use mpc_channel::sub_channel;
 use rand::Rng;
 use rand_core::OsRng;
+use seec_channel::sub_channel;
 use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
 use zappot::base_ot;
@@ -35,7 +35,7 @@ async fn sender(args: Args) -> (Vec<[Block; 2]>, usize, usize) {
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
     let (mut base_sender, send_cnt, mut base_receiver, recv_cnt) =
-        mpc_channel::tcp::listen::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::listen::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 128)
@@ -58,7 +58,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     // to create the base_ots
     let mut receiver = Receiver::new(base_ot::Sender);
     let (mut base_sender, _, mut base_receiver, _) =
-        mpc_channel::tcp::connect::<mpc_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::connect::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 128)

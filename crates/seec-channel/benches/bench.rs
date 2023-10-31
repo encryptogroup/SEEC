@@ -1,8 +1,8 @@
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use mpc_channel::Channel;
-use mpc_channel_macros::sub_channels_for;
+use seec_channel::Channel;
+use seec_channel_macros::sub_channels_for;
 use tokio::runtime::Runtime;
 
 // Here we have an async function to benchmark
@@ -21,7 +21,7 @@ fn bench_layers(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     let (mut ch0, mut ch1) = rt.block_on(async {
-        let (mut base_ch0, mut base_ch1) = mpc_channel::tcp::new_local_pair(None)
+        let (mut base_ch0, mut base_ch1) = seec_channel::tcp::new_local_pair(None)
             .await
             .expect("unable to create local channel");
 

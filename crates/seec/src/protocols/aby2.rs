@@ -93,8 +93,8 @@ pub type AbySetupMsg = executor::Message<BooleanGmw>;
 pub struct AbySetupProvider<Mtp> {
     party_id: usize,
     mt_provider: Mtp,
-    sender: mpc_channel::Sender<AbySetupMsg>,
-    receiver: mpc_channel::Receiver<AbySetupMsg>,
+    sender: seec_channel::Sender<AbySetupMsg>,
+    receiver: seec_channel::Receiver<AbySetupMsg>,
     setup_data: Option<SetupData>,
 }
 
@@ -591,8 +591,8 @@ impl<Mtp> AbySetupProvider<Mtp> {
     pub fn new(
         party_id: usize,
         mt_provider: Mtp,
-        sender: mpc_channel::Sender<AbySetupMsg>,
-        receiver: mpc_channel::Receiver<AbySetupMsg>,
+        sender: seec_channel::Sender<AbySetupMsg>,
+        receiver: seec_channel::Receiver<AbySetupMsg>,
     ) -> Self {
         Self {
             party_id,

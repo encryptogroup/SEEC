@@ -1,11 +1,10 @@
 use anyhow::Result;
-use gmw::circuit::{DefaultIdx, ExecutableCircuit};
-
-use gmw::common::BitVec;
-use gmw::private_test_utils::{execute_circuit, init_tracing, TestChannel};
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::secret::{inputs, low_depth_reduce};
-use gmw::{BooleanGate, CircuitBuilder};
+use seec::circuit::{DefaultIdx, ExecutableCircuit};
+use seec::common::BitVec;
+use seec::private_test_utils::{execute_circuit, init_tracing, TestChannel};
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::secret::{inputs, low_depth_reduce};
+use seec::{BooleanGate, CircuitBuilder};
 
 #[tokio::test]
 async fn and_tree() -> Result<()> {

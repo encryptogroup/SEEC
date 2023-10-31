@@ -12,14 +12,14 @@ use bitvec::prelude::*;
 use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
-use gmw::executor::{Executor, Input, Message};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::mul_triple::MTProvider;
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::secret::inputs;
-use gmw::CircuitBuilder;
-use mpc_channel::sub_channels_for;
+use seec::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
+use seec::executor::{Executor, Input, Message};
+use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use seec::mul_triple::MTProvider;
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::secret::inputs;
+use seec::CircuitBuilder;
+use seec_channel::sub_channels_for;
 
 fn build_circuit() {
     // The `inputs` method is a convenience method to create n input gates for the circuit.
@@ -69,8 +69,8 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // new connections. The other party then `connect`s to it. If party 1 connects before party 0
     // listens, an error will be returned.
     let (mut sender, _bytes_written, mut receiver, _bytes_read) = match party_id {
-        0 => mpc_channel::tcp::listen("127.0.0.1:7766").await?,
-        1 => mpc_channel::tcp::connect("127.0.0.1:7766").await?,
+        0 => seec_channel::tcp::listen("127.0.0.1:7766").await?,
+        1 => seec_channel::tcp::connect("127.0.0.1:7766").await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 

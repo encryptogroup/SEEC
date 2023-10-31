@@ -13,16 +13,16 @@ use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::base_circuit::Load;
-use gmw::circuit::{BaseCircuit, ExecutableCircuit};
-use gmw::common::BitVec;
-use gmw::executor::{Executor, Input, Message};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::mul_triple::boolean::trusted_seed_provider::TrustedMTProviderClient;
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::BooleanGate;
-use mpc_channel::sub_channels_for;
-use mpc_channel::util::{Phase, Statistics};
+use seec::circuit::base_circuit::Load;
+use seec::circuit::{BaseCircuit, ExecutableCircuit};
+use seec::common::BitVec;
+use seec::executor::{Executor, Input, Message};
+use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use seec::mul_triple::boolean::trusted_seed_provider::TrustedMTProviderClient;
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::BooleanGate;
+use seec_channel::sub_channels_for;
+use seec_channel::util::{Phase, Statistics};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -58,8 +58,8 @@ async fn main() -> Result<()> {
     );
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
-        0 => mpc_channel::tcp::listen(args.server).await?,
-        1 => mpc_channel::tcp::connect(args.server).await?,
+        0 => seec_channel::tcp::listen(args.server).await?,
+        1 => seec_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
 
     let mut executor: Executor<BooleanGmw, _> = if let Some(addr) = args.mt_provider {
         let (mt_sender, bytes_written, mt_receiver, bytes_read) =
-            mpc_channel::tcp::connect(addr).await?;
+            seec_channel::tcp::connect(addr).await?;
         // Set the counters for the helper channel
         comm_stats.set_helper(bytes_written, bytes_read);
         let mt_provider = TrustedMTProviderClient::new("unique-id".into(), mt_sender, mt_receiver);

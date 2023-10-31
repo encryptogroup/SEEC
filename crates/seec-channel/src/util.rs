@@ -435,7 +435,7 @@ impl RunResult {
     ///
     /// ## Example
     /// ```
-    ///# use mpc_channel::util::Statistics;
+    ///# use seec_channel::util::Statistics;
     /// let statistics = Statistics::default();
     /// let mut run_res = statistics.into_run_result();
     /// run_res.add_metadata("Description", "Lorem Ipsum");

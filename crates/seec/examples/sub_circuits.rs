@@ -2,11 +2,11 @@ use std::ops;
 
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::builder::CircuitBuilder;
-use gmw::circuit::dyn_layers::CircuitLayerIter;
-use gmw::circuit::DefaultIdx;
-use gmw::secret::{inputs, low_depth_reduce, Secret};
-use gmw::{sub_circuit, BooleanGate, Circuit};
+use seec::circuit::builder::CircuitBuilder;
+use seec::circuit::dyn_layers::CircuitLayerIter;
+use seec::circuit::DefaultIdx;
+use seec::secret::{inputs, low_depth_reduce, Secret};
+use seec::{sub_circuit, BooleanGate, Circuit};
 
 #[sub_circuit]
 fn and_sc(input: &[Secret]) -> Secret {

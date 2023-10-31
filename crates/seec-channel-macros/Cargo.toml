@@ -1,5 +1,5 @@
 [package]
-name = "mpc-channel-macros"
+name = "seec-channel-macros"
 version = "0.1.0"
 edition = "2021"
 

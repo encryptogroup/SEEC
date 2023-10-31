@@ -7,7 +7,7 @@ use std::future::Future;
 use std::time::Instant;
 use std::{iter, mem};
 
-use mpc_channel::{Receiver, Sender};
+use seec_channel::{Receiver, Sender};
 use tracing::{debug, error, info, trace};
 
 use crate::circuit::base_circuit::BaseGate;

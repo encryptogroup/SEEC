@@ -1,11 +1,11 @@
-use gmw::circuit::ExecutableCircuit;
-use gmw::common::BitVec;
-use gmw::executor::{Executor, Input};
-use gmw::mul_triple::boolean::insecure_provider::InsecureMTProvider;
-use gmw::private_test_utils::init_tracing;
-use gmw::protocols::aby2::{AbySetupProvider, BooleanAby2, DeltaSharing, ShareType};
-use gmw::Circuit;
 use rand::{thread_rng, Rng};
+use seec::circuit::ExecutableCircuit;
+use seec::common::BitVec;
+use seec::executor::{Executor, Input};
+use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
+use seec::private_test_utils::init_tracing;
+use seec::protocols::aby2::{AbySetupProvider, BooleanAby2, DeltaSharing, ShareType};
+use seec::Circuit;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn eval_8_bit_adder() -> anyhow::Result<()> {
@@ -32,7 +32,7 @@ async fn eval_8_bit_adder() -> anyhow::Result<()> {
     let state1 = BooleanAby2::new(sharing_state1.clone());
     let state2 = BooleanAby2::new(sharing_state2.clone());
 
-    let (ch1, ch2) = mpc_channel::in_memory::new_pair(16);
+    let (ch1, ch2) = seec_channel::in_memory::new_pair(16);
     let delta_provider1 = AbySetupProvider::new(0, InsecureMTProvider, ch1.0, ch1.1);
     let delta_provider2 = AbySetupProvider::new(1, InsecureMTProvider, ch2.0, ch2.1);
 
@@ -67,7 +67,7 @@ async fn eval_8_bit_adder() -> anyhow::Result<()> {
         .collect();
     assert_eq!(BitVec::from_slice(&[30_u8, 12]), reconstruct);
 
-    let (mut ch1, mut ch2) = mpc_channel::in_memory::new_pair(16);
+    let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(16);
 
     let (out0, out1) = tokio::try_join!(
         ex1.execute(Input::Scalar(inp1), &mut ch1.0, &mut ch1.1),

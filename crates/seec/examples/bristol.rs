@@ -7,13 +7,13 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser};
-use gmw::bench::BenchParty;
-use gmw::circuit::base_circuit::Load;
-use gmw::circuit::{BaseCircuit, ExecutableCircuit};
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::secret::inputs;
-use gmw::SubCircuitOutput;
-use gmw::{BooleanGate, CircuitBuilder};
+use seec::bench::BenchParty;
+use seec::circuit::base_circuit::Load;
+use seec::circuit::{BaseCircuit, ExecutableCircuit};
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::secret::inputs;
+use seec::SubCircuitOutput;
+use seec::{BooleanGate, CircuitBuilder};
 use std::fs::File;
 use std::io;
 use std::io::{stdout, BufReader, BufWriter, Write};

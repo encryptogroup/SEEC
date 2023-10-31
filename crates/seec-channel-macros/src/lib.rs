@@ -31,18 +31,18 @@ pub fn sub_channels_for(input: TokenStream) -> TokenStream {
         {
             async {
                 #(
-                let (#sub_sender_idents, #field_idents) = ::mpc_channel::channel::<#sub_types, 128>(#local_buffer);
+                let (#sub_sender_idents, #field_idents) = ::seec_channel::channel::<#sub_types, 128>(#local_buffer);
                 )*
 
                 let receivers = (
                     #(#field_idents),*
                 );
                 #sender.send(receivers).await?;
-                let msg = #receiver.recv().await?.ok_or(::mpc_channel::CommunicationError::RemoteClosed)?;
+                let msg = #receiver.recv().await?.ok_or(::seec_channel::CommunicationError::RemoteClosed)?;
                 let (
                     #(#field_idents),*
                 ) = msg;
-                Ok::<_, ::mpc_channel::CommunicationError>((#((#sub_sender_idents, #field_idents)),*))
+                Ok::<_, ::seec_channel::CommunicationError>((#((#sub_sender_idents, #field_idents)),*))
             }
         }
 

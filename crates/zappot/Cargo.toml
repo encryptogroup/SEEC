@@ -27,7 +27,7 @@ serde = { version = "1.0.137", features = ["derive"]}
 blake2 = "0.10.4"
 generic-array = { version = "0.14.5", features = ["serde"]}
 pin-project = "1.0.10"
-mpc-channel = {path = "../mpc-channel"}
+seec-channel = {path = "../seec-channel"}
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 num-prime = "0.4.1"

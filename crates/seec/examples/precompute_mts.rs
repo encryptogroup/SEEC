@@ -1,9 +1,9 @@
 use anyhow::Context;
 use clap::Parser;
-use gmw::mul_triple;
-use gmw::mul_triple::storage::MTStorage;
-use mpc_channel::sub_channels_for;
 use rand::rngs::OsRng;
+use seec::mul_triple;
+use seec::mul_triple::storage::MTStorage;
+use seec_channel::sub_channels_for;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -35,8 +35,10 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.id {
-        0 => mpc_channel::tcp::listen(&args.server).await?,
-        1 => mpc_channel::tcp::connect_with_timeout(&args.server, Duration::from_secs(120)).await?,
+        0 => seec_channel::tcp::listen(&args.server).await?,
+        1 => {
+            seec_channel::tcp::connect_with_timeout(&args.server, Duration::from_secs(120)).await?
+        }
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
@@ -45,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         &mut receiver,
         128,
         mul_triple::boolean::ot_ext::DefaultMsg,
-        mpc_channel::SyncMsg
+        seec_channel::SyncMsg
     )
     .await
     .context("sub-channel establishment")?;
@@ -67,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
         "Finished precomputing MTs"
     );
 
-    mpc_channel::sync(&mut sync_ch.0, &mut sync_ch.1)
+    seec_channel::sync(&mut sync_ch.0, &mut sync_ch.1)
         .await
         .context("unable to sync")?;
 

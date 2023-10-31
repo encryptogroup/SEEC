@@ -10,15 +10,15 @@ use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
-use gmw::circuit::builder::CircuitBuilder;
-use gmw::circuit::{ExecutableCircuit, GateId};
-use gmw::common::BitVec;
-use gmw::executor::{BoolGmwExecutor, Input, Message};
-use gmw::mul_triple::boolean::ot_ext::OtMTProvider;
-use gmw::protocols::boolean_gmw::BooleanGmw;
-use gmw::secret::{inputs, low_depth_reduce, Secret};
-use gmw::sub_circuit;
-use mpc_channel::sub_channels_for;
+use seec::circuit::builder::CircuitBuilder;
+use seec::circuit::{ExecutableCircuit, GateId};
+use seec::common::BitVec;
+use seec::executor::{BoolGmwExecutor, Input, Message};
+use seec::mul_triple::boolean::ot_ext::OtMTProvider;
+use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::secret::{inputs, low_depth_reduce, Secret};
+use seec::sub_circuit;
+use seec_channel::sub_channels_for;
 use zappot::ot_ext;
 
 #[derive(Parser, Debug)]
@@ -215,8 +215,8 @@ async fn main() -> anyhow::Result<()> {
     // }
     // dbg!(&circuit);
     let (mut sender, bytes_written, mut receiver, bytes_read) = match args.my_id {
-        0 => mpc_channel::tcp::listen(args.server).await?,
-        1 => mpc_channel::tcp::connect(args.server).await?,
+        0 => seec_channel::tcp::listen(args.server).await?,
+        1 => seec_channel::tcp::connect(args.server).await?,
         illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
     };
 
@@ -224,7 +224,7 @@ async fn main() -> anyhow::Result<()> {
         &mut sender,
         &mut receiver,
         64,
-        mpc_channel::Receiver<ot_ext::ExtOTMsg>,
+        seec_channel::Receiver<ot_ext::ExtOTMsg>,
         Message<BooleanGmw>
     )
     .await?;

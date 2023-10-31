@@ -10,8 +10,8 @@ use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
 use async_trait::async_trait;
 use futures::StreamExt;
-use mpc_channel::{BaseReceiver, BaseSender};
 use rand::thread_rng;
+use seec_channel::{BaseReceiver, BaseSender};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -132,7 +132,7 @@ impl TrustedMTProviderServer {
     pub async fn start(addr: impl ToSocketAddrs + Debug) -> Result<(), io::Error> {
         let data = Default::default();
 
-        mpc_channel::tcp::server(addr)
+        seec_channel::tcp::server(addr)
             .await?
             .for_each(|channel| async {
                 let (sender, receiver) = match channel {

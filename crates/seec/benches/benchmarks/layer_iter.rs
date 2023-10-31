@@ -2,9 +2,9 @@ use std::ops;
 
 use criterion::{criterion_group, BenchmarkId, Criterion};
 
-use gmw::circuit::dyn_layers::{Circuit, CircuitLayerIter};
-use gmw::secret::{inputs, low_depth_reduce, Secret};
-use gmw::{sub_circuit, BooleanGate, CircuitBuilder};
+use seec::circuit::dyn_layers::{Circuit, CircuitLayerIter};
+use seec::secret::{inputs, low_depth_reduce, Secret};
+use seec::{sub_circuit, BooleanGate, CircuitBuilder};
 
 fn build_circuit(keyword_size: usize, target_text_size: usize) -> Circuit {
     CircuitBuilder::<BooleanGate, u32>::new().install();

@@ -13,7 +13,7 @@ use thiserror::Error;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
 
-pub type Msg<Msg> = mpc_channel::Receiver<Msg>;
+pub type Msg<Msg> = seec_channel::Receiver<Msg>;
 /// Message for default ot ext
 pub type DefaultMsg = Msg<<zappot::ot_ext::Sender as ExtROTSender>::Msg>;
 
@@ -21,8 +21,8 @@ pub struct OtMTProvider<RNG, S: ExtROTSender, R: ExtROTReceiver> {
     rng: RNG,
     ot_sender: S,
     ot_receiver: R,
-    ch_sender: mpc_channel::Sender<Msg<S::Msg>>,
-    ch_receiver: mpc_channel::Receiver<Msg<S::Msg>>,
+    ch_sender: seec_channel::Sender<Msg<S::Msg>>,
+    ch_receiver: seec_channel::Receiver<Msg<S::Msg>>,
     precomputed_mts: Option<MulTriples>,
 }
 
@@ -36,8 +36,8 @@ impl<RNG: RngCore + CryptoRng + Send, S: ExtROTSender, R: ExtROTReceiver> OtMTPr
         rng: RNG,
         ot_sender: S,
         ot_receiver: R,
-        ch_sender: mpc_channel::Sender<Msg<S::Msg>>,
-        ch_receiver: mpc_channel::Receiver<Msg<S::Msg>>,
+        ch_sender: seec_channel::Sender<Msg<S::Msg>>,
+        ch_receiver: seec_channel::Receiver<Msg<S::Msg>>,
     ) -> Self {
         Self {
             rng,
@@ -55,8 +55,8 @@ impl<RNG: RngCore + CryptoRng + Send>
 {
     pub fn new_with_default_ot_ext(
         rng: RNG,
-        ch_sender: mpc_channel::Sender<DefaultMsg>,
-        ch_receiver: mpc_channel::Receiver<DefaultMsg>,
+        ch_sender: seec_channel::Sender<DefaultMsg>,
+        ch_receiver: seec_channel::Receiver<DefaultMsg>,
     ) -> Self {
         Self {
             rng,
@@ -86,11 +86,11 @@ where
         let amount = Integer::next_multiple_of(&amount, &8);
 
         let (ch_sender1, mut ch_receiver1) =
-            mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
+            seec_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
         let (ch_sender2, mut ch_receiver2) =
-            mpc_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
+            seec_channel::sub_channel(&mut self.ch_sender, &mut self.ch_receiver, 128)
                 .await
                 .unwrap();
 
@@ -177,7 +177,7 @@ mod tests {
     async fn ot_ext_provider() {
         let _guard = init_tracing();
         let ((ch_sender1, ch_receiver1), (ch_sender2, ch_receiver2)) =
-            mpc_channel::in_memory::new_pair(8);
+            seec_channel::in_memory::new_pair(8);
 
         let party = |ch_sender, ch_receiver| async {
             let ot_sender = ot_ext::Sender::default();
