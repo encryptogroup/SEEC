@@ -1,4 +1,7 @@
-#![cfg_attr(feature = "portable_transpose", feature(portable_simd))]
+#![cfg_attr(is_nightly, feature(portable_simd))]
+//! MPC-BitMatrix
+//!
+//! A library for fast bitmatrix transpose intended for MPC implementations.
 
 use bitvec::order::Lsb0;
 use bitvec::slice::BitSlice;
@@ -12,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Binary, Debug, Formatter};
 use std::ops::{BitAnd, BitXor};
 
-#[cfg(feature = "portable_transpose")]
+#[cfg(is_nightly)]
 mod portable_transpose;
 mod simple;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]

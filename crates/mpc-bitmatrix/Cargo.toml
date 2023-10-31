@@ -6,7 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-portable_transpose = [] # requires nightly
+
+[build-dependencies]
+rustversion = "1.0.14"
 
 [dependencies]
 bitvec = "1.0.1"
