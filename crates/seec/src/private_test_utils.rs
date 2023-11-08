@@ -8,6 +8,8 @@ use bitvec::order::Lsb0;
 use bitvec::prelude::BitSlice;
 use bitvec::vec;
 use itertools::Itertools;
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
 use rand::rngs::ThreadRng;
 use rand::thread_rng;
 use seec_channel::sub_channel;
@@ -26,7 +28,8 @@ use crate::mul_triple::MTProvider;
 use crate::mul_triple::{arithmetic, boolean};
 use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
 use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
-use crate::protocols::{Gate, Protocol, Ring, ScalarDim, Share, Sharing};
+use crate::protocols::mixed_gmw::{MixedGmw, MixedShareStorage, MixedSharing};
+use crate::protocols::{mixed_gmw, Gate, Protocol, Ring, ScalarDim, Share, Sharing};
 
 pub trait ProtocolTestExt: Protocol + Default {
     type InsecureSetup: MTProvider<Output = Self::SetupStorage, Error = Infallible>
@@ -42,6 +45,10 @@ impl ProtocolTestExt for BooleanGmw {
 
 impl<R: Ring> ProtocolTestExt for ArithmeticGmw<R> {
     type InsecureSetup = arithmetic::insecure_provider::InsecureMTProvider<R>;
+}
+
+impl<R: Ring> ProtocolTestExt for MixedGmw<R> {
+    type InsecureSetup = mixed_gmw::InsecureMixedSetup<R>;
 }
 
 pub fn create_and_tree(depth: u32) -> BaseCircuit {
@@ -112,13 +119,22 @@ macro_rules! impl_into_shares {
                 }
             }
 
-            impl IntoShares<AdditiveSharing<$typ, ThreadRng>> for $typ
-                {
-                    fn into_shares(self) -> (Vec<$typ>, Vec<$typ>) {
-                        let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
-                        (a, b)
-                    }
+            impl IntoShares<AdditiveSharing<$typ, ThreadRng>> for $typ {
+                fn into_shares(self) -> (Vec<$typ>, Vec<$typ>) {
+                    let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
+                    (a, b)
                 }
+            }
+
+            impl IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<$typ, ThreadRng>, $typ>>
+                for $typ
+            {
+                fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
+                    let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
+                    (MixedShareStorage::Arith(a), MixedShareStorage::Arith(b))
+                }
+            }
+
 
             impl<T: IntoShares<AdditiveSharing<$typ, ThreadRng>>> IntoInput<AdditiveSharing<$typ, ThreadRng>>
                 for T
@@ -141,6 +157,21 @@ impl IntoShares<XorSharing<ThreadRng>> for bool {
         let a = BitVec::repeat(false, 1);
         let b = BitVec::repeat(self, 1);
         (a, b)
+    }
+}
+
+impl<R> IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<R, ThreadRng>, R>> for bool
+where
+    R: Ring,
+    Standard: Distribution<R>,
+{
+    fn into_shares(self) -> (MixedShareStorage<R>, MixedShareStorage<R>)
+    where
+        BitSlice<u8, Lsb0>: BitField,
+    {
+        let a = BitVec::repeat(false, 1);
+        let b = BitVec::repeat(self, 1);
+        (MixedShareStorage::Bool(a), MixedShareStorage::Bool(b))
     }
 }
 

@@ -158,7 +158,7 @@ impl<RING, RNG: CryptoRng + Rng> AdditiveSharing<RING, RNG> {
 
 impl<RING, RNG> Sharing for AdditiveSharing<RING, RNG>
 where
-    RING: Ring + Copy,
+    RING: Ring,
     RNG: CryptoRng + Rng,
     Standard: Distribution<RING>,
 {

@@ -21,6 +21,8 @@ use zappot::util::Block;
 pub mod aby2;
 pub mod arithmetic_gmw;
 pub mod boolean_gmw;
+
+pub mod mixed_gmw;
 #[cfg(feature = "aby2")]
 pub mod tensor_aby2;
 
@@ -216,7 +218,7 @@ pub trait SetupStorage: Default + Sized + Send + Sync {
 }
 
 pub trait Sharing {
-    type Plain: Copy + Clone + Default + Debug;
+    type Plain: Clone + Default + Debug;
     type Shared: ShareStorage<Self::Plain>;
 
     fn share(&mut self, input: Self::Shared) -> [Self::Shared; 2];

@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 pub mod insecure_provider;
 pub mod ot_ext;
 
+pub use insecure_provider::InsecureMTProvider;
+pub use ot_ext::OtMTProvider;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MulTriples<R> {
     a: Vec<R>,

@@ -450,6 +450,9 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
                 if party_id == 0 {
                     constant.clone()
                 } else {
+                    // TODO this doesn't work for the mixed prot
+                    //  maybe I can have a &self.zero method on Share, which I could call on
+                    //  constant. This method could return the correct enum variant
                     T::default()
                 }
             }
