@@ -55,6 +55,7 @@ pub enum BaseGate<T, D = ScalarDim> {
     /// the SIMD output
     ConnectToMainFromSimd((D, u32)),
     Constant(T),
+    Debug,
 }
 
 #[derive(
@@ -115,6 +116,7 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
                 BaseGate::SubCircuitInput(_)
                 | BaseGate::ConnectToMain(_)
                 | BaseGate::ConnectToMainFromSimd(_) => self.sub_circuit_input_gates.push(gate_id),
+                BaseGate::Debug => (/* nothing special to do */),
             }
         }
         if gate.is_interactive() {
@@ -466,6 +468,11 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
             Self::ConnectToMainFromSimd(_) => {
                 panic!("BaseGate::evaluate_non_interactive called on SIMD gates")
             }
+            Self::Debug => {
+                let inp = inputs.next().expect("Empty input");
+                debug!("BaseGate::Debug party_id={party_id}: {inp:?}");
+                inp
+            }
         }
     }
 
@@ -487,6 +494,9 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
             }
             BaseGate::Constant(_constant) => {
                 todo!("SimdShare from constant")
+            }
+            BaseGate::Debug => {
+                todo!("Debug SIMD gate not impld")
             }
         }
     }

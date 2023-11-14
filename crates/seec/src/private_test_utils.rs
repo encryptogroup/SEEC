@@ -47,7 +47,11 @@ impl<R: Ring> ProtocolTestExt for ArithmeticGmw<R> {
     type InsecureSetup = arithmetic::insecure_provider::InsecureMTProvider<R>;
 }
 
-impl<R: Ring> ProtocolTestExt for MixedGmw<R> {
+impl<R> ProtocolTestExt for MixedGmw<R>
+where
+    R: Ring,
+    Standard: Distribution<R>,
+{
     type InsecureSetup = mixed_gmw::InsecureMixedSetup<R>;
 }
 
@@ -107,6 +111,8 @@ pub trait IntoInput<S: Sharing> {
     fn into_input(self) -> (S::Shared, S::Shared);
 }
 
+pub struct ToBool<R>(pub R);
+
 macro_rules! impl_into_shares {
     ($($typ:ty),+) => {
         $(
@@ -132,6 +138,14 @@ macro_rules! impl_into_shares {
                 fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
                     let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
                     (MixedShareStorage::Arith(a), MixedShareStorage::Arith(b))
+                }
+            }
+
+            impl IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<$typ, ThreadRng>, $typ>> for ToBool<$typ> {
+                fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
+                    // use xor bool sharing
+                    let (a, b) = IntoShares::<XorSharing<ThreadRng>>::into_shares(self.0);
+                    (MixedShareStorage::Bool(a), MixedShareStorage::Bool(b))
                 }
             }
 

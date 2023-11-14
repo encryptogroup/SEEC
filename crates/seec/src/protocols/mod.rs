@@ -15,6 +15,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
+use std::ops::{BitAnd, BitXor, Shl};
 use zappot::util::Block;
 
 #[cfg(feature = "aby2")]
@@ -308,20 +309,15 @@ impl Dimension for DynDim {
     }
 }
 
-impl DynDim {
-    pub fn new(dims: &[usize]) -> Self {
-        Self {
-            dimensions: dims.to_vec(),
-        }
-    }
-}
-
 // This doesn't really capture a Ring in the mathematic sense, but is enough for our purposes
 pub trait Ring:
     WrappingAdd
     + WrappingSub
     + WrappingMul
     + Pow<u32, Output = Self>
+    + BitAnd<Output = Self>
+    + BitXor<Output = Self>
+    + Shl<usize, Output = Self>
     + Share
     + Ord
     + Eq
@@ -332,8 +328,23 @@ pub trait Ring:
     const BITS: usize;
     const BYTES: usize;
     const MAX: Self;
+    const ZERO: Self;
+    const ONE: Self;
 
     fn from_block(b: Block) -> Self;
+
+    fn get_bit(&self, idx: usize) -> bool {
+        let mask = Self::ONE << idx;
+        self.clone() & mask != Self::ZERO
+    }
+}
+
+impl DynDim {
+    pub fn new(dims: &[usize]) -> Self {
+        Self {
+            dimensions: dims.to_vec(),
+        }
+    }
 }
 
 macro_rules! impl_ring {
@@ -343,6 +354,8 @@ macro_rules! impl_ring {
             const BITS: usize = { Self::BYTES * 8 };
             const BYTES: usize = { mem::size_of::<Self>() };
             const MAX: Self = <$typ>::MAX;
+            const ZERO: Self = 0;
+            const ONE: Self = 1;
 
             fn from_block(b: Block) -> Self {
                 let bytes = b.to_le_bytes();
