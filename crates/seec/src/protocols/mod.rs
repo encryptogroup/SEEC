@@ -15,7 +15,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
-use std::ops::{BitAnd, BitXor, Shl};
+use std::ops::{BitAnd, BitXor, Shl, Shr};
 use zappot::util::Block;
 
 #[cfg(feature = "aby2")]
@@ -200,6 +200,7 @@ impl<R: Ring> ShareStorage<R> for Vec<R> {
     }
 }
 
+// TODO I'm not sure if this trait is really needed anymore with the current design
 pub trait SetupStorage: Default + Sized + Send + Sync {
     fn len(&self) -> usize;
     /// Split of the last `count` mul triples.
@@ -318,6 +319,7 @@ pub trait Ring:
     + BitAnd<Output = Self>
     + BitXor<Output = Self>
     + Shl<usize, Output = Self>
+    + Shr<usize, Output = Self>
     + Share
     + Ord
     + Eq

@@ -198,7 +198,9 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
 
     pub fn add_wired_gate(&mut self, gate: G, from: &[GateId<Idx>]) -> GateId<Idx> {
         let added = self.add_gate(gate);
-        for from_id in from {
+        // reverse so that connections during online phase are yielded in the same order as passed
+        // here in from
+        for from_id in from.iter().rev() {
             self.add_wire(*from_id, added);
         }
         added

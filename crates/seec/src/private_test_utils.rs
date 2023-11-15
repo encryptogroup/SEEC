@@ -7,6 +7,7 @@ use bitvec::field::BitField;
 use bitvec::order::Lsb0;
 use bitvec::prelude::BitSlice;
 use bitvec::vec;
+use bitvec::view::BitViewSized;
 use itertools::Itertools;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
@@ -51,6 +52,7 @@ impl<R> ProtocolTestExt for MixedGmw<R>
 where
     R: Ring,
     Standard: Distribution<R>,
+    [R; 1]: BitViewSized,
 {
     type InsecureSetup = mixed_gmw::InsecureMixedSetup<R>;
 }
