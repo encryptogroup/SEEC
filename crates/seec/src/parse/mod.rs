@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 use std::num::ParseIntError;
 
 pub mod bristol;
+pub mod fuse;
 
 fn integer<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError> + 'a>(
     i: &'a str,

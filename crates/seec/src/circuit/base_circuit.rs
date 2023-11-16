@@ -391,7 +391,7 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
                 "sub_circuit_input_gates",
                 &self.sub_circuit_input_gates().len(),
             )
-            .field("and_count", &self.interactive_count())
+            .field("interactive_count", &self.interactive_count())
             .field("output_count", &self.output_count())
             .field(
                 "sub_circuit_output_gates",
