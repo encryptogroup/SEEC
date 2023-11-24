@@ -1,36 +1,57 @@
 use crate::circuit::base_circuit::BaseGate;
-use crate::circuit::BaseCircuit;
 use crate::parse::fuse::module_generated::fuse::ir::{
     CircuitTable, ModuleTable, PrimitiveOperation,
 };
 use crate::protocols::{arithmetic_gmw, boolean_gmw, mixed_gmw, Ring, ScalarDim};
-use crate::{Circuit, CircuitBuilder, GateId};
+use crate::{Circuit, CircuitBuilder, GateId, SharedCircuit};
 use ahash::{HashMap, HashMapExt};
+use crate::protocols::mixed_gmw::MixedGate;
 
 mod module_generated;
 
 /// Plan:
 /// - read fb file
-///
+/// - identify main circuit
+/// - parse all **other** circuits, which should be sub-circuits, error on SCCall
+/// - add SCs to builder, storing mapping of sc name -> shared_circ
+/// - parse main circ, if sccall is encountered, use connect_sub_circuit and connect_to_main on sc
 
-impl<'a, R: Ring> TryFrom<ModuleTable<'a>> for Circuit<mixed_gmw::MixedGate<R>> {
+type BaseCircuit<R> = crate::circuit::BaseCircuit<MixedGate<R>>;
+
+struct FuseConverter<R> {
+    builder: CircuitBuilder<MixedGate<R>>,
+    sc_map: HashMap<String, SharedCircuit<MixedGate<R>>>
+}
+
+impl<'a, R: Ring> TryFrom<ModuleTable<'a>> for Circuit<MixedGate<R>> {
     type Error = ();
 
     fn try_from(module: ModuleTable<'a>) -> Result<Self, Self::Error> {
-        let mut builder = CircuitBuilder::<mixed_gmw::MixedGate<R>>::new();
+        let mut converter = FuseConverter {
+            builder: CircuitBuilder::<mixed_gmw::MixedGate<R>>::new(),
+            sc_map: HashMap::new(),
+        };
         let ep = module.entry_point().unwrap_or("main");
-        let main_circ = module
+        let mut main_circ = None;
+
+        let sub_circs: Vec<BaseCircuit<mixed_gmw::MixedGate<R>>> = module
             .circuits()
             .expect("Missing circs")
             .iter()
-            .filter(|c| {
+            .filter_map(|c| {
                 let c = c
                     .circuit_buffer_nested_flatbuffer()
                     .expect("Missing nested circuit_table");
-                c.name() == ep
+                // filter out main circ from sub_circs
+                if c.name() == ep {
+                    main_circ = Some(c);
+                    None
+                } else {
+                    Some(c.try_into().expect("Unable to convert CircuitTable"))
+                }
             })
-            .next()
-            .expect("Missing main circ");
+            .collect();
+
         let main_circ = main_circ
             .circuit_buffer_nested_flatbuffer()
             .unwrap()
@@ -40,6 +61,28 @@ impl<'a, R: Ring> TryFrom<ModuleTable<'a>> for Circuit<mixed_gmw::MixedGate<R>> 
         Ok(builder.into_circuit())
     }
 }
+
+impl<R> FuseConverter<R> {
+    fn add_fuse_sub_circ(&mut self, circ: CircuitTable<'_>) {
+        let mut res_c = BaseCircuit::new();
+        let mut key_map = HashMap::with_capacity(circ.nodes().unwrap().len());
+        for (idx, node) in circ.nodes().expect("No nodes").iter().enumerate() {
+            key_map.entry(node.id()).or_insert(idx);
+            let gate = node.operation().try_into()?;
+            if let Some(inps) = node.input_identifiers() {
+                let mapped_inps: Vec<_> = inps
+                    .iter()
+                    .map(|inp_k| GateId::from(key_map[&inp_k]))
+                    .collect();
+                res_c.add_wired_gate(gate, &mapped_inps);
+            } else {
+                res_c.add_gate(gate);
+            }
+        }
+    }
+}
+
+fn add_fuse_prim_op<R>(prim_op: PrimitiveOperation, bc: &mut BaseCircuit<R>, inputs: &[GateId])
 
 // TODO this is potentially not expressible using From as we might need state
 impl<'a, R: Ring> TryFrom<CircuitTable<'a>> for BaseCircuit<mixed_gmw::MixedGate<R>> {
@@ -64,6 +107,9 @@ impl<'a, R: Ring> TryFrom<CircuitTable<'a>> for BaseCircuit<mixed_gmw::MixedGate
         Ok(res_c)
     }
 }
+
+
+
 
 impl<R> TryFrom<PrimitiveOperation> for mixed_gmw::MixedGate<R> {
     type Error = ();
