@@ -545,7 +545,7 @@ impl<Shares: Clone> GateOutputs<Shares> {
         #[cfg(debug_assertions)]
         assert!(
             self.output_set.contains(&id.into_usize()),
-            "parent {id} not set",
+            "gate {id} not evaluated",
         );
         self.get_unchecked(id)
     }

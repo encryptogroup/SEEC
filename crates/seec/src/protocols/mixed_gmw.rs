@@ -724,6 +724,7 @@ pub fn a2b<R: Ring>(bc: &mut BaseCircuit<MixedGate<R>>, a: GateId) -> Vec<GateId
     };
     let split_a2b0 = split(a2b0_sw);
     let split_a2b1 = split(a2b1_sw);
+    // TODO log depth addition circuit
     basic_add(bc, &split_a2b0, &split_a2b1)
 }
 

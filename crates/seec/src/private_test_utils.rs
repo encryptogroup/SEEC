@@ -241,6 +241,26 @@ where
     }
 }
 
+impl<S, T> IntoInput<S> for Vec<T>
+where
+    S: Sharing,
+    T: IntoShares<S>,
+    S::Shared: Extend<S::Plain>,
+    S::Shared: IntoIterator<Item = S::Plain>,
+{
+    fn into_input(self) -> (S::Shared, S::Shared) {
+        self.into_iter().fold(
+            Default::default(),
+            |(mut p1, mut p2): (S::Shared, S::Shared), inp| {
+                let (s1, s2) = inp.into_shares();
+                p1.extend(s1);
+                p2.extend(s2);
+                (p1, p2)
+            },
+        )
+    }
+}
+
 /// This is kind of cursed...
 impl IntoInput<XorSharing<ThreadRng>> for [BitVec<usize>; 2] {
     fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
