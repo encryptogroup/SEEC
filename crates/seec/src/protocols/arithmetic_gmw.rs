@@ -16,7 +16,7 @@ pub enum Msg<R> {
     MulLayer { e: Vec<R>, d: Vec<R> },
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum ArithmeticGate<R> {
     Base(BaseGate<R>),
     Mul,

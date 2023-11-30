@@ -16,7 +16,7 @@ use petgraph::visit::IntoNodeIdentifiers;
 use petgraph::visit::{VisitMap, Visitable};
 use petgraph::{Directed, Direction, Graph};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, instrument, trace};
 
 use crate::circuit::{CircuitId, DefaultIdx, GateIdx, LayerIterable};
 use crate::errors::CircuitError;
@@ -209,12 +209,13 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
     /// Adds another SubCircuit into `self`. The gates and wires of `circuit` are added to
     /// `self` and the `inputs` gates in `self` are connected to the [`BaseCircuit::sub_circuit_input_gates`]
     /// of the provided `circuit`.
+    #[instrument(level = "debug", ret, skip_all)]
     pub fn add_sub_circuit(
         &mut self,
         circuit: &Self,
         inputs: impl IntoIterator<Item = GateId<Idx>>,
     ) -> Vec<GateId<Idx>> {
-        assert!(!self.is_main, "Can't add main circuit as sub circuit");
+        assert!(!circuit.is_main, "Can't add main circuit as sub circuit");
         assert!(
             circuit.input_gates().is_empty(),
             "Added circuit can't have Input gates. Must have SubCircuitInput gates"
@@ -397,6 +398,7 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
                 "sub_circuit_output_gates",
                 &self.sub_circuit_output_gates().len(),
             )
+            .field("constant_gates", &self.constant_gates.len())
             .field("simd_size", &self.simd_size)
             .finish()
     }
@@ -454,10 +456,7 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
                 if party_id == 0 {
                     constant.clone()
                 } else {
-                    // TODO this doesn't work for the mixed prot
-                    //  maybe I can have a &self.zero method on Share, which I could call on
-                    //  constant. This method could return the correct enum variant
-                    T::default()
+                    constant.zero()
                 }
             }
             Self::Output(_)
@@ -527,7 +526,6 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
             circuit
                 .input_gates
                 .iter()
-                .chain(&circuit.constant_gates)
                 .copied()
                 .map(Into::<NodeIndex<Idx>>::into),
         );
@@ -548,10 +546,9 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
             })
             .collect();
         let to_visit = VecDeque::new();
-        let next_layer = VecDeque::new();
+        let next_layer = circuit.constant_gates.iter().map(|&g| g.into()).collect();
         let visited = circuit.graph.visit_map();
         let added_to_next = circuit.graph.visit_map();
-        // let interactive_gates_set = AHashSet::new();
         Self {
             circuit,
             inputs_needed_cnt,
@@ -561,7 +558,6 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
             added_to_next,
             inputs_left_to_provide: Default::default(),
             last_layer_size: (0, 0),
-            // interactive_gates_set,
             gates_produced: 0,
         }
     }
@@ -714,6 +710,10 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
                 let mut neigh_cnt = 0;
                 for neigh in graph.neighbors(node_idx) {
                     neigh_cnt += 1;
+                    {
+                        let count = self.inputs_needed_cnt[neigh.index()];
+                        trace!("Node: {node_idx:?} -> Neigh {neigh:?}: count {count}")
+                    }
                     self.inputs_needed_cnt[neigh.index()] -= 1;
                     let inputs_needed = self.inputs_needed_cnt[neigh.index()];
                     if inputs_needed == 0 {

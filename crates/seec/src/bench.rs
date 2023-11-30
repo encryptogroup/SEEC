@@ -3,13 +3,15 @@ use crate::executor::{Executor, Input, Message};
 use crate::mul_triple::storage::MTStorage;
 use crate::mul_triple::{boolean, MTProvider};
 use crate::protocols::boolean_gmw::BooleanGmw;
-use crate::protocols::{Gate, Protocol, Share, ShareStorage};
+use crate::protocols::mixed_gmw::{MixedGmw, MixedShare};
+use crate::protocols::{mixed_gmw, Gate, Protocol, Ring, Share, ShareStorage};
 use crate::utils::{BoxError, ErasedError};
 use crate::CircuitBuilder;
 use anyhow::{anyhow, Context};
+use bitvec::view::BitViewSized;
 use rand::distributions::{Distribution, Standard};
 use rand::rngs::OsRng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use seec_channel::util::{Phase, RunResult, Statistics};
 use seec_channel::{sub_channels_for, Channel, Receiver};
@@ -47,6 +49,35 @@ impl BenchProtocol for BooleanGmw {
     fn stored(path: &Path) -> DynMTP<Self> {
         let file = BufReader::new(File::open(path).expect("opening MT file"));
         MTStorage::new(file).into_dyn()
+    }
+}
+
+impl<R> BenchProtocol for MixedGmw<R>
+where
+    R: Ring,
+    Standard: Distribution<R>,
+    [R; 1]: BitViewSized,
+{
+    fn insecure_setup() -> DynMTP<Self> {
+        mixed_gmw::InsecureMixedSetup::default().into_dyn()
+    }
+
+    fn ot_setup(_ch: Channel<Receiver<ExtOTMsg>>) -> DynMTP<Self> {
+        todo!()
+    }
+
+    fn stored(_path: &Path) -> DynMTP<Self> {
+        todo!()
+    }
+}
+
+// TODO this is wrong to just always generate arith shares, so it lives here in the bench API
+impl<R> Distribution<MixedShare<R>> for Standard
+where
+    Standard: Distribution<R>,
+{
+    fn sample<RNG: Rng + ?Sized>(&self, rng: &mut RNG) -> MixedShare<R> {
+        MixedShare::Arith(rng.sample(Standard))
     }
 }
 

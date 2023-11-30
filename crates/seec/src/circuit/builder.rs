@@ -100,6 +100,7 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
         Self::with_global(|builder| builder.push_circuit(circuit))
     }
 
+    #[allow(clippy::unwrap_or_default)]
     pub fn with_global<R, F>(op: F) -> R
     where
         F: FnOnce(&mut CircuitBuilder<G, Idx>) -> R,

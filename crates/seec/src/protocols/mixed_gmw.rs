@@ -42,7 +42,7 @@ pub struct Msg<R> {
     own_bool_reshares: Vec<R>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum MixedShare<R> {
     Bool(bool),
     Arith(R),
@@ -83,7 +83,7 @@ impl<R> Default for MixedShare<R> {
     }
 }
 
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum MixedGate<R> {
     Base(BaseGate<MixedShare<R>>),
     Bool(boolean_gmw::BooleanGate),
@@ -91,7 +91,7 @@ pub enum MixedGate<R> {
     Conv(ConvGate),
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum ConvGate {
     // Selects the first input for party 0 and the second for party 1
     Select,
@@ -296,11 +296,11 @@ impl<R: Ring> SetupStorage for MixedSetupStorage<R> {
         todo!()
     }
 
-    fn split_off_last(&mut self, count: usize) -> Self {
+    fn split_off_last(&mut self, _count: usize) -> Self {
         todo!()
     }
 
-    fn append(&mut self, other: Self) {
+    fn append(&mut self, _other: Self) {
         todo!()
     }
 }
@@ -317,7 +317,7 @@ where
     type Output = MixedSetupStorage<R>;
     type Error = Infallible;
 
-    async fn precompute_mts(&mut self, amount: usize) -> Result<(), Self::Error> {
+    async fn precompute_mts(&mut self, _amount: usize) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -326,6 +326,7 @@ where
         let rng = ChaCha8Rng::seed_from_u64(42);
         // both parties sample the same bits, so th plain sample bit is always zero
         let bool = rng.sample_iter(Standard).take(amount).collect();
+        // TODO this needs sooo much memory
         let shared_bits = SharedBits {
             bool,
             arith: vec![R::ZERO; amount * R::BITS],
@@ -523,14 +524,13 @@ where
                         // TODO is rev correct here? Must be consistent with the order of the
                         //  bool shared bits...
                         .rev();
-                    dbg!(&t_rec);
                     let xa: R = (0..R::BITS)
                         .zip(ri_a)
                         .map(|(i, ri)| {
                             let ti: R = if t_rec.get_bit(i) { R::ONE } else { R::ZERO };
                             let two: R = R::ONE.wrapping_add(&R::ONE);
                             let lhs = if party_id == 0 {
-                                ti.wrapping_add(&ri)
+                                ti.wrapping_add(ri)
                             } else {
                                 ri.clone()
                             };
@@ -568,6 +568,13 @@ where
 
 impl<R: Ring> Share for MixedShare<R> {
     type SimdShare = MixedShareStorage<R>;
+
+    fn zero(&self) -> Self {
+        match self {
+            MixedShare::Bool(_) => MixedShare::Bool(false),
+            MixedShare::Arith(_) => MixedShare::Arith(R::ZERO),
+        }
+    }
 }
 
 impl<R: Ring> Gate for MixedGate<R> {
@@ -626,7 +633,7 @@ impl<R: Ring> Gate for MixedGate<R> {
                 let inputs = inputs.map(|i| match i {
                     MixedShare::Bool(b) => b,
                     MixedShare::Arith(_) => {
-                        panic!("Received arithmetic share as input for Boolean gate")
+                        panic!("Received arithmetic share as input for Boolean {g:?}")
                     }
                 });
                 let out = g.evaluate_non_interactive(party_id, inputs);
@@ -636,7 +643,7 @@ impl<R: Ring> Gate for MixedGate<R> {
                 let inputs = inputs.map(|i| match i {
                     MixedShare::Arith(e) => e,
                     MixedShare::Bool(_) => {
-                        panic!("Received Boolean share as input for arithmetic gate")
+                        panic!("Received Boolean share as input for arithmetic {g:?}")
                     }
                 });
                 let out = g.evaluate_non_interactive(party_id, inputs);
@@ -717,9 +724,7 @@ pub fn a2b<R: Ring>(bc: &mut BaseCircuit<MixedGate<R>>, a: GateId) -> Vec<GateId
     let a2b1_sw = bc.add_wired_gate(MixedGate::Conv(ConvGate::Select), &[a2b1, a2b0]);
     let mut split = |a: GateId| {
         (0..R::BITS)
-            .map(|idx| {
-                bc.add_wired_gate(MixedGate::Conv(ConvGate::A2BSelectBit(idx as usize)), &[a])
-            })
+            .map(|idx| bc.add_wired_gate(MixedGate::Conv(ConvGate::A2BSelectBit(idx)), &[a]))
             .collect::<Vec<GateId>>()
     };
     let split_a2b0 = split(a2b0_sw);
@@ -761,7 +766,6 @@ fn basic_add<R: Ring>(
         out.push(s);
         carry = c;
     }
-    bc.add_wired_gate(MixedGate::Base(BaseGate::Debug), &[carry]);
     out
 }
 
@@ -773,10 +777,10 @@ mod tests {
     use crate::private_test_utils::{execute_circuit, init_tracing, TestChannel, ToBool};
     use crate::protocols::arithmetic_gmw::ArithmeticGate;
     use crate::protocols::mixed_gmw::{
-        a2b, ConvGate, MixedGate, MixedGmw, MixedShare, MixedShareStorage, MixedSharing,
+        a2b, ConvGate, MixedGate, MixedGmw, MixedShareStorage, MixedSharing,
     };
     use crate::protocols::ScalarDim;
-    use crate::{BooleanGate, GateId};
+    use crate::BooleanGate;
     use bitvec::vec::BitVec;
 
     #[tokio::test]

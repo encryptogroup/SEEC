@@ -139,6 +139,10 @@ pub trait Share:
     Clone + Default + Debug + PartialEq + PartialOrd + Hash + Send + Sync + 'static
 {
     type SimdShare: ShareStorage<Self> + Clone + Default + Debug + PartialEq + PartialOrd + Hash;
+
+    fn zero(&self) -> Self {
+        Self::default()
+    }
 }
 
 pub trait Wire: Clone + Debug + Send + Sync + 'static {}
