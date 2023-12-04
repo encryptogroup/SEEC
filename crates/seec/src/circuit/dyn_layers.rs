@@ -39,10 +39,6 @@ impl<G: Gate, Idx: GateIdx, W: Wire> Circuit<G, Idx, W> {
         Self::default()
     }
 
-    // pub fn add_circuit(&mut self, circuit: impl Into<Arc<BaseCircuit<G, Idx, W>>>) {
-    //     self.circuits.push(circuit.into());
-    // }
-
     pub fn get_gate(&self, id: SubCircuitGate<Idx>) -> G {
         self.get_circ(id.circuit_id).get_gate(id.gate_id)
     }

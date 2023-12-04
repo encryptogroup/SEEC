@@ -8,7 +8,7 @@ use std::time::Instant;
 use std::{iter, mem};
 
 use seec_channel::{Receiver, Sender};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, instrument, trace};
 
 use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::builder::SubCircuitGate;
@@ -538,14 +538,15 @@ impl<Shares: Clone> GateOutputs<Shares> {
         }
     }
 
-    pub fn get<Share, Idx: GateIdx>(&self, id: SubCircuitGate<Idx>) -> Share
+    #[instrument(ret, level = "trace", skip(self))]
+    pub fn get<Share: Debug, Idx: GateIdx>(&self, id: SubCircuitGate<Idx>) -> Share
     where
         Shares: ShareStorage<Share>,
     {
         #[cfg(debug_assertions)]
         assert!(
             self.output_set.contains(&id.into_usize()),
-            "parent {id} not set",
+            "gate {id} not evaluated",
         );
         self.get_unchecked(id)
     }

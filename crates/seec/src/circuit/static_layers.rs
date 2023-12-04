@@ -65,11 +65,6 @@ pub struct LayerIterator<'a, G, Idx> {
     current_layer: usize,
 }
 
-// TODO: Ramblings, damn, the approach I want to take is a little more complicated than I though,
-//  I think i need to include an ID for the base circuit so that I can match up layers with
-//  different sc id's to the same underlying sub circuit. Alternatively I could maybe use ptr
-//  values of the base scs, like I do in the builder -> circuit conversion
-
 impl<G, Idx> Circuit<G, Idx> {
     pub fn gate_count(&self) -> usize {
         self.sc_map

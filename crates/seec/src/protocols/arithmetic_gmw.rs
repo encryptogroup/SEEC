@@ -16,11 +16,12 @@ pub enum Msg<R> {
     MulLayer { e: Vec<R>, d: Vec<R> },
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum ArithmeticGate<R> {
     Base(BaseGate<R>),
     Mul,
     Add,
+    Sub,
 }
 
 #[derive(Debug)]
@@ -108,7 +109,7 @@ impl<R: Ring + Share> Gate for ArithmeticGate<R> {
     fn input_size(&self) -> usize {
         match self {
             ArithmeticGate::Base(base_gate) => base_gate.input_size(),
-            ArithmeticGate::Mul | ArithmeticGate::Add => 2,
+            ArithmeticGate::Mul | ArithmeticGate::Add | ArithmeticGate::Sub => 2,
         }
     }
 
@@ -137,6 +138,12 @@ impl<R: Ring + Share> Gate for ArithmeticGate<R> {
                 let y = inputs.next().expect("Empty input");
                 x.wrapping_add(&y)
             }
+            ArithmeticGate::Sub => {
+                // TODO is this the correct order?
+                let x = inputs.next().expect("Empty input");
+                let y = inputs.next().expect("Empty input");
+                x.wrapping_sub(&y)
+            }
         }
     }
 }
@@ -158,7 +165,7 @@ impl<RING, RNG: CryptoRng + Rng> AdditiveSharing<RING, RNG> {
 
 impl<RING, RNG> Sharing for AdditiveSharing<RING, RNG>
 where
-    RING: Ring + Copy,
+    RING: Ring,
     RNG: CryptoRng + Rng,
     Standard: Distribution<RING>,
 {

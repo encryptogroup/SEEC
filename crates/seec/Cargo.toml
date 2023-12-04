@@ -18,6 +18,11 @@ required-features = ["bench-api"]
 name = "aes_cbc"
 required-features = ["bench-api"]
 
+[[example]]
+name = "fuse"
+required-features = ["bench-api"]
+
+
 [dependencies]
 ahash = "0.8.2"
 async-trait = "0.1.53"
@@ -56,6 +61,7 @@ zappot = {path = "../zappot"}
 typemap = "0.3.3"
 mpc-bitmatrix = {path = "../mpc-bitmatrix"}
 either = "1.8.1"
+flatbuffers = "23.5.26"
 
 [dev-dependencies]
 aes = "0.8.1"

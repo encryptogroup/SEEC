@@ -233,7 +233,8 @@ impl BooleanGate {
                 BaseGate::Output(_)
                 | BaseGate::SubCircuitInput(_)
                 | BaseGate::SubCircuitOutput(_)
-                | BaseGate::ConnectToMain(_) => inputs.next().expect("Empty input"),
+                | BaseGate::ConnectToMain(_)
+                | BaseGate::Debug => inputs.next().expect("Empty input"),
                 BaseGate::Constant(_) => todo!(),
                 BaseGate::ConnectToMainFromSimd(_) => {
                     unimplemented!("SIMD currently not supported for ABY2")

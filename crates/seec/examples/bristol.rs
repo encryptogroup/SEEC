@@ -64,7 +64,7 @@ struct ExecuteArgs {
     #[clap(long)]
     insecure_setup: bool,
 
-    /// Use MTs stored ad <FILE> generated via precompute_mts.rs
+    /// Use MTs stored in <FILE> generated via precompute_mts.rs
     #[clap(long)]
     stored_mts: Option<PathBuf>,
 
