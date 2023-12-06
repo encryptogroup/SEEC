@@ -1,0 +1,9 @@
+jump = "jump_host"
+server = "IP"
+client = "IP"
+remote_path = "/path/on/remote"
+remote_hosts = ["host1", "host2"]
+heaptrack_dir = "/remote/heaptrack/dir"
+lan_cmd = "sudo tc_lan10"
+wan_cmd = "sudo tc_wan"
+reset_net_cmd = "sudo tc_off"

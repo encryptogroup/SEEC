@@ -1,0 +1,18 @@
+namespace encrypto.motion.communication;
+
+table HelloMessage {
+  source_id:uint16;
+  destination_id:uint16;
+  number_of_parties:uint16;
+  input_sharing_seed:[ubyte]; //32-byte seed
+  global_sharing_seed:[ubyte]; //32-byte seed
+  fixed_key_aes_seed:[ubyte]; //16-byte key
+  online_after_setup:bool = false;
+  motion_version_major:uint16;
+  motion_version_minor:uint16;
+  motion_version_patch:uint16;
+}
+// MT/OT generation parameters?
+// other parameters?
+
+root_type HelloMessage;

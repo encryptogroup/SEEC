@@ -1,0 +1,111 @@
+repeat = 1
+
+#[[bench]]
+#framework = "ABY"
+#tag = "aby_aes_cbc_setup"
+#target = "aes_cbc_test"
+#flags = ["-i"]
+#persist_heaptrack = true
+#[bench.args]
+#-l = ["500"]
+
+
+#[[bench]]
+#framework = "MP-SPDZ"
+#tag = "mp_spdz_aes_ctr"
+#target = "aes_circuit"
+#compile_flags = ["100"]
+##persist_heaptrack = true
+#flags = ["-F"]
+
+#[[bench]]
+#framework = "SEEC"
+#target = "bristol"
+#tag = "seec_aes_ctr_no_setup"
+#compile_flags = ["../../../circuits/advanced/aes_128.bristol"]
+#flags = ["--insecure-setup"]
+#[bench.compile_args]
+#--simd = ["10000"]
+
+[[bench]]
+framework = "SEEC"
+target = "aes_cbc"
+tag = "seec_aes_cbc_no_setup_sc_static_layers"
+#net_settings = ["RESET", "LAN"]
+compile_flags = ["--use-sc", "--static-layers"]
+flags = ["--bench", "--insecure-setup"]
+#cores = [0,1,2,8,16]
+#persist_heaptrack = true
+[bench.compile_args]
+--input-blocks = ["100"]
+
+[[bench]]
+framework = "SEEC"
+target = "precompute_mts"
+tag = "seec_precompute_mts"
+flags = ["-b", "10000000", "-o", "precomputed.mts"]
+ignore_error = true
+[bench.args]
+"-n" = ["1000000000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_aes_ctr_no_setup"
+compile_flags = ["../../../circuits/advanced/aes_128.bristol"]
+flags = ["--stored-mts", "dprecomputed.mts", "--interleave-setup"]
+#cores = [0,1]
+[bench.compile_args]
+--simd = ["1", "10", "100"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_sha256_interleaved_stored_setup"
+compile_flags = ["../../../circuits/advanced/sha_256.bristol", "--dyn-layers"]
+flags = ["--stored-mts", "precomputed.mts", "--interleave-setup"]
+#flags = ["--stored-mts", "dprecomputed.mts"]
+#flags = ["--insecure-setup", "--interleave-setup"]
+#flags = ["--insecure-setup"]
+[bench.compile_args]
+--simd = ["50000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_sha256_insecure_free_gates"
+compile_flags = ["../../../circuits/advanced/sha_256.bristol", "--dyn-layers"]
+flags = ["--insecure-setup",]
+#flags = ["--stored-mts", "dprecomputed.mts"]
+#flags = ["--insecure-setup", "--interleave-setup"]
+#flags = ["--insecure-setup"]
+[bench.compile_args]
+--simd = ["50000"]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_inline"
+compile_flags = ["--inline-circuits", "../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_inline_dyn"
+compile_flags = ["--inline-circuits", "--dyn-layers", "../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_sub_circuits"
+compile_flags = ["../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_sub_circuits_dyn"
+compile_flags = ["--dyn-layers", "../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]

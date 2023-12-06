@@ -1,0 +1,350 @@
+net_settings = ["RESET", "LAN", "WAN"]
+repeat = 5
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_aes_ctr_no_setup"
+compile_flags = ["../../../circuits/advanced/aes_128.bristol"]
+flags = ["--insecure-setup"]
+cores = [0,1]
+[bench.compile_args]
+--simd = ["1", "10", "100", "1000", "10000", "100000", "1000000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_aes_ctr_no_setup_free_gates"
+compile_flags = ["../../../circuits/advanced/aes_128.bristol", "--dyn-layers"]
+flags = ["--insecure-setup"]
+cores = [0,1]
+net_settings = ["LAN"]
+[bench.compile_args]
+--simd = ["1", "10", "100", "1000", "10000", "100000", "1000000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_aes_ctr_stored_setup_free_gates"
+compile_flags = ["../../../circuits/advanced/aes_128.bristol", "--dyn-layers"]
+flags = ["--stored-mts", "precomputed.mts", "--interleave-setup"]
+cores = [0,1]
+net_settings = ["LAN"]
+[bench.compile_args]
+--simd = ["1", "10", "100", "1000", "10000", "100000", "1000000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_aes_ctr_setup"
+compile_flags = ["../../../circuits/advanced/aes_128.bristol"]
+[bench.compile_args]
+--simd = ["1", "10", "100", "1000", "10000", "100000"]
+
+[[bench]]
+framework = "MOTION"
+tag = "motion_aes_no_setup"
+target = "aes128"
+flags = ["--insecure-setup"]
+cores = [0,1]
+[bench.args]
+--num-simd = ["1", "10", "100", "1000", "10000", "100000", "1000000"]
+
+[[bench]]
+framework = "MOTION"
+tag = "motion_aes"
+target = "aes128"
+[bench.args]
+--num-simd = ["1", "10", "100", "1000", "10000", "100000"]
+
+[[bench]]
+framework = "MOTION"
+tag = "motion_aes_interleaved_setup"
+target = "aes128"
+flags = ["--online-after-setup", "0"]
+net_settings = ["LAN"]
+[bench.args]
+--num-simd = ["1", "10", "100", "1000", "10000", "100000"]
+
+[[bench]]
+framework = "MOTION"
+tag = "motion_aes_bmr"
+target = "aes128"
+cores = [0, 1]
+flags = ["--protocol", "BMR"]
+[bench.args]
+--num-simd = ["1", "10", "100", "1000", "10000", "100000"]
+
+[[bench]]
+framework = "ABY"
+tag = "aby_aes_setup"
+target = "bristol"
+flags = ["-c", "../../bin/circ/aes_128.aby", "-d", "256"]
+[bench.args]
+-n = ["1", "10", "100", "1000", "10000", "100000"]
+
+[[bench]]
+framework = "ABY"
+tag = "aby_aes_no_setup"
+target = "bristol"
+flags = ["-i","-c", "../../bin/circ/aes_128.aby", "-d", "256"]
+cores = [0,1]
+[bench.args]
+-n = ["1", "10", "100", "1000", "10000", "100000"]
+
+ [[bench]]
+ framework = "MP-SPDZ"
+ tag = "mp_spdz_aes_no_setup"
+ target = "aes_circuit"
+ compile_flags = ["1", "10", "100", "1000", "10000", "100000"]
+ flags = ["-F"]
+ cores = [0,1]
+
+ [[bench]]
+ framework = "MP-SPDZ"
+ tag = "mp_spdz_aes_setup"
+ target = "aes_circuit"
+ compile_flags = ["1", "10", "100", "1000", "10000", "100000"]
+
+ [[bench]]
+ framework = "SEEC"
+ target = "bristol"
+ tag = "seec_sha256_no_setup"
+ compile_flags = ["../../../circuits/advanced/sha_256.bristol"]
+ flags = ["--insecure-setup"]
+ [bench.compile_args]
+ --simd = ["1", "10", "100", "1000", "10000", "100000", "500000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_sha256_no_setup_free_gates"
+compile_flags = ["../../../circuits/advanced/sha_256.bristol", "--dyn-layers"]
+flags = ["--insecure-setup"]
+net_settings = ["LAN"]
+[bench.compile_args]
+--simd = ["1", "10", "100", "1000", "10000", "100000", "500000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_sha256_stored_setup_free_gates"
+compile_flags = ["../../../circuits/advanced/sha_256.bristol", "--dyn-layers"]
+flags = ["--stored-mts", "precomputed.mts", "--interleave-setup"]
+net_settings = ["LAN"]
+[bench.compile_args]
+--simd = ["1", "10", "100", "1000", "10000", "100000", "500000"]
+
+[[bench]]
+framework = "SEEC"
+target = "bristol"
+tag = "seec_sha256_trillion_gates"
+compile_flags = ["../../../circuits/advanced/sha_256.bristol", "--dyn-layers"]
+flags = ["--stored-mts", "precomputed.mts", "--interleave-setup"]
+net_settings = ["LAN"]
+[bench.compile_args]
+--simd = ["7500000"]
+
+ [[bench]]
+ framework = "SEEC"
+ target = "bristol"
+ tag = "seec_sha256_setup"
+ compile_flags = ["../../../circuits/advanced/sha_256.bristol"]
+ [bench.compile_args]
+ --simd = ["1", "10", "100", "1000", "10000"]
+
+ [[bench]]
+ framework = "MOTION"
+ tag = "motion_sha256_no_setup"
+ target = "sha256"
+ flags = ["--protocol", "GMW", "--insecure-setup"]
+ [bench.args]
+ --num-simd = ["1", "10", "100", "1000", "10000", "100000", "500000"]
+
+ [[bench]]
+ framework = "MOTION"
+ tag = "motion_sha256_setup"
+ target = "sha256"
+ flags = ["--protocol", "GMW"]
+ [bench.args]
+ --num-simd = ["1", "10", "100", "1000", "10000"]
+
+[[bench]]
+framework = "ABY"
+tag = "aby_sha256_no_setup"
+target = "bristol"
+flags = ["-i","-c", "../../bin/circ/sha_256.aby", "-d", "768"]
+[bench.args]
+-n = ["1", "10", "100", "1000", "10000", "100000", "500000"]
+
+ [[bench]]
+ framework = "MOTION"
+ tag = "motion_aes_cbc_no_setup"
+ target = "aes_cbc"
+ flags = ["--insecure-setup"]
+ net_settings = ["RESET", "LAN"]
+ cores = [0,1,2,8,16]
+ [bench.args]
+ --input-blocks = ["1", "10", "100"] # 1000 is not possible because of OOM
+
+ [[bench]]
+ framework = "MOTION"
+ tag = "motion_aes_cbc_setup"
+ target = "aes_cbc"
+ net_settings = ["RESET", "LAN"]
+ [bench.args]
+ --input-blocks = ["1", "10", "100",]
+
+[[bench]]
+framework = "ABY"
+tag = "aby_aes_cbc_no_setup"
+target = "aes_cbc_test"
+net_settings = ["RESET", "LAN"]
+flags = ["-i"]
+cores = [0, 1]
+[bench.args]
+-l = ["1", "10", "100", "1000", "10000"]
+
+# there really is no need for this
+#[[bench]]
+#framework = "ABY"
+#tag = "aby_aes_cbc_setup"
+#target = "aes_cbc_test"
+#net_settings = ["RESET", "LAN"]
+#[bench.args]
+#-l = ["1", "10", "100", "1000", "10000"]
+
+[[bench]]
+framework = "MP-SPDZ"
+tag = "mp_spdz_aes_cbc_no_setup"
+target = "aescbc_circuit"
+net_settings = ["RESET", "LAN"]
+compile_flags = ["1", "10", "100", "1000", "10000"]
+flags = ["-F"]
+cores = [0,1]
+
+## not needed
+#[[bench]]
+#framework = "MP-SPDZ"
+#tag = "mp_spdz_aes_cbc_setup"
+#target = "aescbc_circuit"
+#net_settings = ["RESET", "LAN"]
+#compile_flags = ["1", "10", "100", "1000", "10000"]
+
+## not needed
+#[[bench]]
+#framework = "MP-SPDZ"
+#tag = "mp_spdz_aes_cbc_setup_bigger_batch_size"
+#target = "aescbc_circuit"
+#net_settings = ["RESET", "LAN"]
+#compile_flags = ["1", "10", "100", "1000", "10000"]
+#flags = ["-b", "1000000"]
+
+[[bench]]
+framework = "SEEC"
+target = "aes_cbc"
+tag = "seec_aes_cbc_no_setup_sc_static_layers"
+net_settings = ["RESET", "LAN"]
+compile_flags = ["--use-sc", "--static-layers"]
+flags = ["--bench", "--insecure-setup"]
+cores = [0,1,2,8,16]
+[bench.compile_args]
+--input-blocks = ["1", "10", "100", "1000", "10000"]
+
+[[bench]]
+framework = "SEEC"
+target = "aes_cbc"
+tag = "seec_aes_cbc_no_setup_sc"
+net_settings = ["RESET", "LAN"]
+compile_flags = ["--use-sc"]
+flags = ["--bench", "--insecure-setup"]
+[bench.compile_args]
+--input-blocks = ["1", "10", "100", "1000", "10000"]
+
+[[bench]]
+framework = "SEEC"
+target = "aes_cbc"
+tag = "seec_aes_cbc_no_setup"
+net_settings = ["RESET", "LAN"]
+flags = ["--bench", "--insecure-setup"]
+[bench.compile_args]
+--input-blocks = ["1", "10", "100", "1000", "10000"]
+
+# TODO with cores restricted
+[[bench]]
+framework = "SEEC"
+target = "aes_cbc"
+tag = "seec_aes_cbc_setup_sc_static_layers"
+net_settings = ["RESET", "LAN"]
+compile_flags = ["--use-sc", "--static-layers"]
+flags = ["--bench",]
+[bench.compile_args]
+--input-blocks = ["1", "10", "100", "1000", "10000"]
+
+ [[bench]]
+ framework = "MOTION"
+ tag = "motion_aes_cbc_no_setup_wan"
+ target = "aes_cbc"
+ flags = ["--insecure-setup"]
+ net_settings = ["WAN"]
+ [bench.args]
+ --input-blocks = ["1", "10", "100",]
+
+[[bench]]
+framework = "ABY"
+tag = "aby_aes_cbc_no_setup_wan"
+target = "aes_cbc_test"
+net_settings = ["WAN"]
+flags = ["-i"]
+[bench.args]
+-l = ["1", "10", "100"]
+
+[[bench]]
+framework = "MP-SPDZ"
+tag = "mp_spdz_aes_cbc_no_setup_wan"
+target = "aescbc_circuit"
+net_settings = ["WAN"]
+compile_flags = ["1", "10", "100"]
+flags = ["-F"]
+
+[[bench]]
+framework = "SEEC"
+target = "aes_cbc"
+tag = "seec_aes_cbc_no_setup_sc_static_layers_wan"
+net_settings = ["WAN"]
+compile_flags = ["--use-sc", "--static-layers"]
+flags = ["--bench", "--insecure-setup"]
+[bench.compile_args]
+--input-blocks = ["1", "10", "100"]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_inline"
+compile_flags = ["--inline-circuits", "../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+cores = [0,1]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_inline_dyn"
+compile_flags = ["--inline-circuits", "--dyn-layers", "../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+cores = [0,1]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_sub_circuits"
+compile_flags = ["../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+cores = [0,1]
+
+[[bench]]
+framework = "SEEC"
+target = "fuse"
+tag = "seec_fuse_mnist_sub_circuits_dyn"
+compile_flags = ["--dyn-layers", "../../../circuits/FUSE/mnist_fuse.mfs"]
+flags = ["--insecure-setup"]
+cores = [0,1]

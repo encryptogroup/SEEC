@@ -1,0 +1,171 @@
+# bankers_bonus-multithread-1--0
+ldarg ci0 # 0
+ldint ci2, 2 # 1
+ltc ci1, ci0, ci2 # 2
+ldint ci2, 1 # 3
+subint ci3, ci2, ci1 # 4
+convint c0, ci3 # 5
+cond_print_str c0, 1919252079 # 6
+convint c0, ci3 # 7
+cond_print_str c0, 2003790950 # 8
+convint c0, ci3 # 9
+cond_print_str c0, 8250 # 10
+convint c0, ci0 # 11
+convint c1, ci3 # 12
+ldi c2, 0 # 13
+cond_print_plain c1, c0, c2 # 14
+convint c1, ci3 # 15
+cond_print_str c1, 47 # 16
+convint c1, ci3 # 17
+cond_print_str c1, 91 # 18
+convint c1, ci3 # 19
+cond_print_str c1, 50 # 20
+convint c1, ci3 # 21
+cond_print_str c1, 8236 # 22
+convint c1, ci3 # 23
+cond_print_str c1, 50 # 24
+convint c1, ci3 # 25
+cond_print_str c1, 93 # 26
+convint c1, ci3 # 27
+cond_print_str c1, 10 # 28
+crash ci3 # 29
+ldint ci3, 2 # 30
+mulint ci2, ci0, ci3 # 31
+ldint ci0, 8211 # 32
+addint ci3, ci2, ci0 # 33
+ldminti ci2, ci3 # 34
+ldmint ci3, 8210 # 35
+divint ci0, ci2, ci3 # 36
+ldmint ci1, 8209 # 37
+ldint ci4, 2 # 38
+divint ci6, ci1, ci4 # 39
+ldint ci4, 2 # 40
+mulint ci5, ci6, ci4 # 41
+subint ci6, ci1, ci5 # 42
+ltc ci1, ci0, ci6 # 43
+subint ci5, ci0, ci6 # 44
+mulint ci0, ci1, ci5 # 45
+addint ci5, ci0, ci6 # 46
+addint ci0, ci2, ci5 # 47
+ldarg ci2 # 48
+ldint ci5, 2 # 49
+ltc ci6, ci2, ci5 # 50
+ldint ci5, 1 # 51
+subint ci4, ci5, ci6 # 52
+convint c1, ci4 # 53
+cond_print_str c1, 1919252079 # 54
+convint c1, ci4 # 55
+cond_print_str c1, 2003790950 # 56
+convint c1, ci4 # 57
+cond_print_str c1, 8250 # 58
+convint c1, ci2 # 59
+convint c0, ci4 # 60
+ldi c2, 0 # 61
+cond_print_plain c0, c1, c2 # 62
+convint c0, ci4 # 63
+cond_print_str c0, 47 # 64
+convint c0, ci4 # 65
+cond_print_str c0, 91 # 66
+convint c0, ci4 # 67
+cond_print_str c0, 50 # 68
+convint c0, ci4 # 69
+cond_print_str c0, 8236 # 70
+convint c0, ci4 # 71
+cond_print_str c0, 50 # 72
+convint c0, ci4 # 73
+cond_print_str c0, 93 # 74
+convint c0, ci4 # 75
+cond_print_str c0, 10 # 76
+crash ci4 # 77
+ldint ci4, 2 # 78
+mulint ci5, ci2, ci4 # 79
+ldint ci2, 8211 # 80
+addint ci4, ci5, ci2 # 81
+ldint ci5, 1 # 82
+addint ci2, ci4, ci5 # 83
+ldminti ci4, ci2 # 84
+addint ci4, ci3, ci1 # 85
+ldint ci3, 0 # 86
+addint ci1, ci4, ci3 # 87
+ldint ci4, 1 # 88
+divint ci3, ci1, ci4 # 89
+ldint ci4, 0 # 90
+gtc ci2, ci3, ci4 # 91
+ldint ci4, 0 # 92
+jmpeqz ci2, 35 # 93
+# bankers_bonus-multithread-1-begin-loop-2
+ldint ci2, 1 # 94
+addint ci5, ci0, ci4 # 95
+triple s0, s2, s1 # 96
+writesocketshare 6, ci5, 0, 1, s0, s2, s1 # 97
+readsocketc 3, ci5, 1, c0 # 98
+submr s2, c0, s0 # 99
+ldint ci6, 8 # 100
+ltc ci8, ci5, ci6 # 101
+ldint ci6, 1 # 102
+subint ci7, ci6, ci8 # 103
+convint c0, ci7 # 104
+cond_print_str c0, 1919252079 # 105
+convint c0, ci7 # 106
+cond_print_str c0, 2003790950 # 107
+convint c0, ci7 # 108
+cond_print_str c0, 8250 # 109
+convint c0, ci5 # 110
+convint c1, ci7 # 111
+ldi c2, 0 # 112
+cond_print_plain c1, c0, c2 # 113
+convint c1, ci7 # 114
+cond_print_str c1, 47 # 115
+convint c1, ci7 # 116
+cond_print_str c1, 56 # 117
+convint c1, ci7 # 118
+cond_print_str c1, 10 # 119
+crash ci7 # 120
+ldint ci7, 8200 # 121
+addint ci6, ci5, ci7 # 122
+stmsi s2, ci6 # 123
+addint ci6, ci4, ci2 # 124
+ldint ci6, 1 # 125
+addint ci4, ci4, ci6 # 126
+ltc ci6, ci4, ci3 # 127
+jmpnz ci6, -35 # 128
+# bankers_bonus-multithread-1-end-if-4
+ltc ci4, ci3, ci1 # 129
+ldint ci6, 0 # 130
+addint ci2, ci3, ci6 # 131
+jmpeqz ci4, 33 # 132
+# bankers_bonus-multithread-1-begin-loop-6
+addint ci4, ci0, ci2 # 133
+triple s1, s0, s2 # 134
+writesocketshare 6, ci4, 0, 1, s1, s0, s2 # 135
+readsocketc 3, ci4, 1, c1 # 136
+submr s0, c1, s1 # 137
+ldint ci3, 8 # 138
+ltc ci6, ci4, ci3 # 139
+ldint ci3, 1 # 140
+subint ci5, ci3, ci6 # 141
+convint c1, ci5 # 142
+cond_print_str c1, 1919252079 # 143
+convint c1, ci5 # 144
+cond_print_str c1, 2003790950 # 145
+convint c1, ci5 # 146
+cond_print_str c1, 8250 # 147
+convint c1, ci4 # 148
+convint c0, ci5 # 149
+ldi c2, 0 # 150
+cond_print_plain c0, c1, c2 # 151
+convint c0, ci5 # 152
+cond_print_str c0, 47 # 153
+convint c0, ci5 # 154
+cond_print_str c0, 56 # 155
+convint c0, ci5 # 156
+cond_print_str c0, 10 # 157
+crash ci5 # 158
+ldint ci5, 8200 # 159
+addint ci3, ci4, ci5 # 160
+stmsi s0, ci3 # 161
+ldint ci3, 1 # 162
+addint ci2, ci2, ci3 # 163
+ltc ci3, ci2, ci1 # 164
+jmpnz ci3, -33 # 165
+use 0, 0, -1 # 166

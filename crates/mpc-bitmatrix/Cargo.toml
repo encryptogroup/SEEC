@@ -1,0 +1,23 @@
+[package]
+name = "mpc-bitmatrix"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+
+[build-dependencies]
+rustversion = "1.0.14"
+
+[dependencies]
+bitvec = "1.0.1"
+bytemuck = { version = "1.12.1", features = ["extern_crate_alloc"]}
+cfg-if = "1.0.0"
+rand = "0.8.5"
+serde = { version = "1.0.152", features = ["derive"]}
+
+[dev-dependencies]
+proptest = "1.0.0"
+ndarray = "0.15.6"
+num-traits = "0.2.15"

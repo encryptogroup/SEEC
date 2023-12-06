@@ -1,0 +1,42 @@
+*.h~
+*.cpp~
+*.c~
+*.o
+*.exe
+*.log
+.metadata
+.cproject
+.project
+.settings
+*.db
+README.html
+*.dump
+.idea*
+*_generated.h
+
+src/motioncore/communication/fbs_headers/*
+src/motioncore/utility/config.h
+
+# build directory
+build*/
+cmake-build*
+
+# CMake
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+*Config.cmake
+*Targets.cmake
+*.cbp
+
+# VS Code Directory
+.vscode/
+
+# doxygen
+docs/Doxyfile

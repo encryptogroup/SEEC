@@ -1,0 +1,24 @@
+PROJECT_NAME            = @PROJECT_NAME@
+PROJECT_NUMBER          = @MOTION_VERSION@
+PROJECT_BRIEF           = "Framework for mixed-protocol multi-party computation"
+OUTPUT_LANGUAGE         = English
+
+OUTPUT_DIRECTORY        = @CMAKE_CURRENT_BINARY_DIR@/
+INPUT                   = @MOTION_SOURCE_DIR@/
+INCLUDE_PATH            = @GXX_INCLUDES@ \
+                          @MOTION_SOURCE_DIR@/motioncore/ \
+                          @MOTION_EXTERN_DIR@/flatbuffers/include/ \
+                          @MOTION_EXTERN_DIR@/fmt/include/
+RECURSIVE               = YES
+MACRO_EXPANSION         = YES
+ENABLE_PREPROCESSING    = YES
+QUIET                   = YES
+WARN_IF_UNDOCUMENTED    = NO
+BUILTIN_STL_SUPPORT     = YES
+CALL_GRAPH              = YES
+CALLER_GRAPH            = YES
+EXTRACT_ALL             = YES
+EXTRACT_STATIC          = YES
+DOT_GRAPH_MAX_NODES     = 1000
+FULL_PATH_NAMES		= NO
+SHORT_NAMES		= YES

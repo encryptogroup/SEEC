@@ -1,0 +1,23 @@
+from circuit import Circuit
+
+chunks = int(program.args[1])
+
+sb128 = sbitvec.get_type(128)
+key = sb128.from_hex('2b7e151628aed2a6abf7158809cf4f3c')
+chaining_state = sb128.from_hex('00000000000000000000000000000000')
+plaintext = sb128.Array(chunks)
+#plaintext = [sb128(0x6bc1bee22e409f96e93d7e117393172a)] * chunks
+aes128 = Circuit('aes_128')
+ciphertext = sb128.Array(chunks)
+
+@for_range(chunks)
+def loop(chunk_idx):
+    chunk = plaintext[chunk_idx]
+    tmp = chaining_state ^ chunk
+    res = aes128(key, tmp)
+    chaining_state.update(res)
+    ciphertext[chunk_idx] = res
+
+
+ciphertext.reveal()
+

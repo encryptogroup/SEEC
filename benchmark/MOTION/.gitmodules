@@ -1,0 +1,12 @@
+[submodule "extern/fmt"]
+	path = extern/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "extern/flatbuffers"]
+	path = extern/flatbuffers
+	url = https://github.com/google/flatbuffers.git
+[submodule "extern/googletest"]
+	path = extern/googletest
+	url = https://github.com/google/googletest.git
+[submodule "extern/benchmark"]
+	path = extern/benchmark
+	url = https://github.com/google/benchmark.git

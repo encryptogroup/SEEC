@@ -1,0 +1,1805 @@
+# bankers_bonus-0--0
+ldint ci1, 14000 # 0
+listen ci1 # 1
+print_char4 1953720652 # 2
+print_char4 1852403301 # 3
+print_char4 1868963943 # 4
+print_char4 1818435698 # 5
+print_char4 1953391977 # 6
+print_char4 1852793632 # 7
+print_char4 1952671086 # 8
+print_char4 1936617321 # 9
+print_char4 544108320 # 10
+print_char4 1702060386 # 11
+print_char4 1919905824 # 12
+print_char 116 # 13
+print_char 32 # 14
+print_char4 808465457 # 15
+print_char 48 # 16
+print_char 10 # 17
+# bankers_bonus-0-begin-loop-1
+print_char4 1918989395 # 18
+print_char4 1735289204 # 19
+print_char4 1847615776 # 20
+print_char4 1914730341 # 21
+print_char4 1684960623 # 22
+print_char4 543584032 # 23
+print_char4 543516788 # 24
+print_char4 1701667175 # 25
+print_char 46 # 26
+print_char 10 # 27
+ldint ci1, 0 # 28
+stmint ci1, 8200 # 29
+vldint 8, ci69, 0 # 30
+vstmint 8, ci69, 8201 # 31
+# bankers_bonus-0-begin-loop-2
+ldint ci1, 14000 # 32
+acceptclientconnection ci0, ci1 # 33
+readsocketint 3, ci0, 1, ci1 # 34
+ldint ci5, 8 # 35
+ltc ci68, ci0, ci5 # 36
+ldint ci5, 1 # 37
+subint ci2, ci5, ci68 # 38
+jmpeqz ci2, 9 # 39
+# bankers_bonus-0-if-block-3
+print_char4 1701407843 # 40
+print_char4 1763734638 # 41
+print_char4 1869881444 # 42
+print_char4 1768431727 # 43
+print_char 103 # 44
+print_char 104 # 45
+print_char 10 # 46
+ldint ci2, 1 # 47
+crash ci2 # 48
+# bankers_bonus-0-end-if-4
+ldint ci2, 8 # 49
+ltc ci5, ci0, ci2 # 50
+ldint ci2, 1 # 51
+subint ci68, ci2, ci5 # 52
+convint c2, ci68 # 53
+cond_print_str c2, 1919252079 # 54
+convint c2, ci68 # 55
+cond_print_str c2, 2003790950 # 56
+convint c2, ci68 # 57
+cond_print_str c2, 8250 # 58
+convint c2, ci0 # 59
+convint c1, ci68 # 60
+ldi c0, 0 # 61
+cond_print_plain c1, c2, c0 # 62
+convint c1, ci68 # 63
+cond_print_str c1, 47 # 64
+convint c1, ci68 # 65
+cond_print_str c1, 56 # 66
+convint c1, ci68 # 67
+cond_print_str c1, 10 # 68
+crash ci68 # 69
+ldint ci68, 8192 # 70
+addint ci2, ci0, ci68 # 71
+stminti ci0, ci2 # 72
+ldint ci2, 8 # 73
+ltc ci68, ci0, ci2 # 74
+ldint ci2, 1 # 75
+subint ci5, ci2, ci68 # 76
+convint c1, ci5 # 77
+cond_print_str c1, 1919252079 # 78
+convint c1, ci5 # 79
+cond_print_str c1, 2003790950 # 80
+convint c1, ci5 # 81
+cond_print_str c1, 8250 # 82
+convint c1, ci0 # 83
+convint c2, ci5 # 84
+ldi c0, 0 # 85
+cond_print_plain c2, c1, c0 # 86
+convint c2, ci5 # 87
+cond_print_str c2, 47 # 88
+convint c2, ci5 # 89
+cond_print_str c2, 56 # 90
+convint c2, ci5 # 91
+cond_print_str c2, 10 # 92
+crash ci5 # 93
+ldint ci5, 8192 # 94
+addint ci2, ci0, ci5 # 95
+convint c2, ci0 # 96
+ldsi s97, 0 # 97
+addm s1, s97, c2 # 98
+stmsi s1, ci2 # 99
+ldint ci2, 8 # 100
+ltc ci5, ci0, ci2 # 101
+ldint ci2, 1 # 102
+subint ci68, ci2, ci5 # 103
+convint c2, ci68 # 104
+cond_print_str c2, 1919252079 # 105
+convint c2, ci68 # 106
+cond_print_str c2, 2003790950 # 107
+convint c2, ci68 # 108
+cond_print_str c2, 8250 # 109
+convint c2, ci0 # 110
+convint c1, ci68 # 111
+ldi c0, 0 # 112
+cond_print_plain c1, c2, c0 # 113
+convint c1, ci68 # 114
+cond_print_str c1, 47 # 115
+convint c1, ci68 # 116
+cond_print_str c1, 56 # 117
+convint c1, ci68 # 118
+cond_print_str c1, 10 # 119
+crash ci68 # 120
+ldint ci68, 8201 # 121
+addint ci2, ci0, ci68 # 122
+ldint ci68, 1 # 123
+stminti ci68, ci2 # 124
+ldint ci68, 1 # 125
+eqc ci2, ci1, ci68 # 126
+jmpeqz ci2, 3 # 127
+# bankers_bonus-0-if-block-5
+ldint ci2, 1 # 128
+addint ci68, ci0, ci2 # 129
+stmint ci68, 8200 # 130
+# bankers_bonus-0-end-if-6
+ldmint ci68, 8201 # 131
+ldmint ci2, 8202 # 132
+addint ci5, ci68, ci2 # 133
+ldmint ci68, 8203 # 134
+addint ci2, ci5, ci68 # 135
+ldmint ci5, 8204 # 136
+addint ci68, ci2, ci5 # 137
+ldmint ci2, 8205 # 138
+addint ci5, ci68, ci2 # 139
+ldmint ci68, 8206 # 140
+addint ci2, ci5, ci68 # 141
+ldmint ci5, 8207 # 142
+addint ci68, ci2, ci5 # 143
+ldmint ci2, 8208 # 144
+addint ci5, ci68, ci2 # 145
+ldmint ci68, 8200 # 146
+ltc ci2, ci5, ci68 # 147
+ldint ci5, 0 # 148
+eqc ci3, ci68, ci5 # 149
+addint ci68, ci2, ci3 # 150
+jmpnz ci68, -120 # 151
+# bankers_bonus-0-end-loop-7
+ldmint ci68, 8200 # 152
+stmint ci68, 8209 # 153
+ldint ci2, 2 # 154
+divint ci3, ci68, ci2 # 155
+stmint ci3, 8210 # 156
+ldmint ci3, 8210 # 157
+ldint ci68, False # 158
+crash ci68 # 159
+ldint ci68, 0 # 160
+stmint ci68, 8211 # 161
+ldint ci68, False # 162
+crash ci68 # 163
+stmint ci3, 8213 # 164
+# bankers_bonus-0-pre-run_tape-8
+run_tape 6, 1, 1, 0, 2, 1, 1 # 165
+# bankers_bonus-0-pre-join_tape-10
+join_tape 1 # 166
+# bankers_bonus-0-pre-join_tape-12
+join_tape 2 # 167
+# bankers_bonus-0-post-join_tape-13
+ldms s1, 8200 # 168
+stms s1, 8208 # 169
+ldms s1, 8192 # 170
+stms s1, 8209 # 171
+ldmint ci3, 8200 # 172
+ldint ci68, 1 # 173
+subint ci2, ci3, ci68 # 174
+ldint ci3, 0 # 175
+gtc ci68, ci2, ci3 # 176
+ldint ci3, 0 # 177
+jmpeqz ci68, 887 # 178
+# bankers_bonus-0-begin-loop-15
+ldms s1, 8208 # 179
+ldint ci68, 1 # 180
+addint ci5, ci3, ci68 # 181
+ldint ci68, 8 # 182
+ltc ci4, ci5, ci68 # 183
+ldint ci68, 1 # 184
+subint ci7, ci68, ci4 # 185
+convint c1, ci7 # 186
+cond_print_str c1, 1919252079 # 187
+convint c1, ci7 # 188
+cond_print_str c1, 2003790950 # 189
+convint c1, ci7 # 190
+cond_print_str c1, 8250 # 191
+convint c1, ci5 # 192
+convint c2, ci7 # 193
+ldi c0, 0 # 194
+cond_print_plain c2, c1, c0 # 195
+convint c2, ci7 # 196
+cond_print_str c2, 47 # 197
+convint c2, ci7 # 198
+cond_print_str c2, 56 # 199
+convint c2, ci7 # 200
+cond_print_str c2, 10 # 201
+crash ci7 # 202
+ldint ci7, 8200 # 203
+addint ci68, ci5, ci7 # 204
+ldmsi s97, ci68 # 205
+subs s66, s1, s97 # 206
+movs s1, s66 # 207
+vbit 1, s66 # 208
+vadds 1, s97, s66, s66 # 209
+vbit 1, s66 # 210
+vadds 1, s28, s97, s66 # 211
+vadds 1, s97, s28, s28 # 212
+vbit 1, s28 # 213
+vadds 1, s66, s97, s28 # 214
+vadds 1, s97, s66, s66 # 215
+vbit 1, s66 # 216
+vadds 1, s28, s97, s66 # 217
+vadds 1, s97, s28, s28 # 218
+vbit 1, s28 # 219
+vadds 1, s66, s97, s28 # 220
+vadds 1, s97, s66, s66 # 221
+vbit 1, s66 # 222
+vadds 1, s28, s97, s66 # 223
+vadds 1, s97, s28, s28 # 224
+vbit 1, s28 # 225
+vadds 1, s66, s97, s28 # 226
+vadds 1, s97, s66, s66 # 227
+vbit 1, s66 # 228
+vadds 1, s28, s97, s66 # 229
+vadds 1, s97, s28, s28 # 230
+vbit 1, s28 # 231
+vadds 1, s66, s97, s28 # 232
+vadds 1, s97, s66, s66 # 233
+vbit 1, s66 # 234
+vadds 1, s28, s97, s66 # 235
+vadds 1, s97, s28, s28 # 236
+vbit 1, s28 # 237
+vadds 1, s66, s97, s28 # 238
+vadds 1, s97, s66, s66 # 239
+vbit 1, s66 # 240
+vadds 1, s28, s97, s66 # 241
+vadds 1, s97, s28, s28 # 242
+vbit 1, s28 # 243
+vadds 1, s66, s97, s28 # 244
+vadds 1, s97, s66, s66 # 245
+vbit 1, s66 # 246
+vadds 1, s28, s97, s66 # 247
+vadds 1, s97, s28, s28 # 248
+vbit 1, s28 # 249
+vadds 1, s66, s97, s28 # 250
+vadds 1, s97, s66, s66 # 251
+vbit 1, s66 # 252
+vadds 1, s28, s97, s66 # 253
+vadds 1, s97, s28, s28 # 254
+vbit 1, s28 # 255
+vadds 1, s66, s97, s28 # 256
+vadds 1, s97, s66, s66 # 257
+vbit 1, s66 # 258
+vadds 1, s28, s97, s66 # 259
+vadds 1, s97, s28, s28 # 260
+vbit 1, s28 # 261
+vadds 1, s66, s97, s28 # 262
+vadds 1, s97, s66, s66 # 263
+vbit 1, s66 # 264
+vadds 1, s28, s97, s66 # 265
+vadds 1, s97, s28, s28 # 266
+vbit 1, s28 # 267
+vadds 1, s66, s97, s28 # 268
+vadds 1, s97, s66, s66 # 269
+vbit 1, s66 # 270
+vadds 1, s28, s97, s66 # 271
+vadds 1, s97, s28, s28 # 272
+vbit 1, s28 # 273
+vadds 1, s66, s97, s28 # 274
+vadds 1, s97, s66, s66 # 275
+vbit 1, s66 # 276
+vadds 1, s28, s97, s66 # 277
+vadds 1, s97, s28, s28 # 278
+vbit 1, s28 # 279
+vadds 1, s66, s97, s28 # 280
+vadds 1, s97, s66, s66 # 281
+vbit 1, s66 # 282
+vadds 1, s28, s97, s66 # 283
+vadds 1, s97, s28, s28 # 284
+vbit 1, s28 # 285
+vadds 1, s66, s97, s28 # 286
+vadds 1, s97, s66, s66 # 287
+vbit 1, s66 # 288
+vadds 1, s28, s97, s66 # 289
+vadds 1, s97, s28, s28 # 290
+vbit 1, s28 # 291
+vadds 1, s66, s97, s28 # 292
+vadds 1, s97, s66, s66 # 293
+vbit 1, s66 # 294
+vadds 1, s28, s97, s66 # 295
+vadds 1, s97, s28, s28 # 296
+vbit 1, s28 # 297
+vadds 1, s66, s97, s28 # 298
+vadds 1, s97, s66, s66 # 299
+vbit 1, s66 # 300
+vadds 1, s28, s97, s66 # 301
+vadds 1, s97, s28, s28 # 302
+vbit 1, s28 # 303
+vadds 1, s66, s97, s28 # 304
+vadds 1, s97, s66, s66 # 305
+vbit 1, s66 # 306
+vadds 1, s28, s97, s66 # 307
+vadds 1, s97, s28, s28 # 308
+vbit 1, s28 # 309
+vadds 1, s66, s97, s28 # 310
+vadds 1, s97, s66, s66 # 311
+vbit 1, s66 # 312
+vadds 1, s28, s97, s66 # 313
+vadds 1, s97, s28, s28 # 314
+vbit 1, s28 # 315
+vadds 1, s66, s97, s28 # 316
+vadds 1, s97, s66, s66 # 317
+vbit 1, s66 # 318
+vadds 1, s28, s97, s66 # 319
+vadds 1, s97, s28, s28 # 320
+vbit 1, s28 # 321
+vadds 1, s66, s97, s28 # 322
+vadds 1, s97, s66, s66 # 323
+vbit 1, s66 # 324
+vadds 1, s28, s97, s66 # 325
+vadds 1, s97, s28, s28 # 326
+vbit 1, s28 # 327
+vadds 1, s66, s97, s28 # 328
+vbit 1, s97 # 329
+vadds 1, s28, s97, s97 # 330
+vbit 1, s96 # 331
+vadds 1, s102, s28, s96 # 332
+vadds 1, s28, s102, s102 # 333
+vbit 1, s102 # 334
+vadds 1, s62, s28, s102 # 335
+vadds 1, s28, s62, s62 # 336
+vbit 1, s62 # 337
+vadds 1, s105, s28, s62 # 338
+vadds 1, s28, s105, s105 # 339
+vbit 1, s105 # 340
+vadds 1, s83, s28, s105 # 341
+vadds 1, s28, s83, s83 # 342
+vbit 1, s83 # 343
+vadds 1, s108, s28, s83 # 344
+vadds 1, s28, s108, s108 # 345
+vbit 1, s108 # 346
+vadds 1, s24, s28, s108 # 347
+vadds 1, s28, s24, s24 # 348
+vbit 1, s24 # 349
+vadds 1, s111, s28, s24 # 350
+vadds 1, s28, s111, s111 # 351
+vbit 1, s111 # 352
+vadds 1, s22, s28, s111 # 353
+vadds 1, s28, s22, s22 # 354
+vbit 1, s22 # 355
+vadds 1, s114, s28, s22 # 356
+vadds 1, s28, s114, s114 # 357
+vbit 1, s114 # 358
+vadds 1, s23, s28, s114 # 359
+vadds 1, s28, s23, s23 # 360
+vbit 1, s23 # 361
+vadds 1, s117, s28, s23 # 362
+vadds 1, s28, s117, s117 # 363
+vbit 1, s117 # 364
+vadds 1, s9, s28, s117 # 365
+vadds 1, s28, s9, s9 # 366
+vbit 1, s9 # 367
+vadds 1, s120, s28, s9 # 368
+vadds 1, s28, s120, s120 # 369
+vbit 1, s120 # 370
+vadds 1, s86, s28, s120 # 371
+vadds 1, s28, s86, s86 # 372
+vbit 1, s86 # 373
+vadds 1, s123, s28, s86 # 374
+vadds 1, s28, s123, s123 # 375
+vbit 1, s123 # 376
+vadds 1, s2, s28, s123 # 377
+vadds 1, s28, s2, s2 # 378
+vbit 1, s2 # 379
+vadds 1, s126, s28, s2 # 380
+vadds 1, s28, s126, s126 # 381
+vbit 1, s126 # 382
+vadds 1, s89, s28, s126 # 383
+vadds 1, s28, s89, s89 # 384
+vbit 1, s89 # 385
+vadds 1, s129, s28, s89 # 386
+vadds 1, s28, s129, s129 # 387
+vbit 1, s129 # 388
+vadds 1, s92, s28, s129 # 389
+vadds 1, s28, s92, s92 # 390
+vbit 1, s92 # 391
+vadds 1, s132, s28, s92 # 392
+vadds 1, s28, s132, s132 # 393
+vbit 1, s132 # 394
+vadds 1, s25, s28, s132 # 395
+vadds 1, s28, s25, s25 # 396
+vbit 1, s25 # 397
+vadds 1, s135, s28, s25 # 398
+vadds 1, s28, s135, s135 # 399
+vbit 1, s135 # 400
+vadds 1, s56, s28, s135 # 401
+vadds 1, s28, s56, s56 # 402
+vbit 1, s56 # 403
+vadds 1, s138, s28, s56 # 404
+vadds 1, s28, s138, s138 # 405
+vbit 1, s138 # 406
+vadds 1, s26, s28, s138 # 407
+vadds 1, s28, s26, s26 # 408
+vbit 1, s26 # 409
+vadds 1, s141, s28, s26 # 410
+vadds 1, s28, s141, s141 # 411
+vbit 1, s141 # 412
+vadds 1, s94, s28, s141 # 413
+vadds 1, s28, s94, s94 # 414
+vbit 1, s94 # 415
+vadds 1, s144, s28, s94 # 416
+vadds 1, s28, s144, s144 # 417
+vbit 1, s144 # 418
+vadds 1, s5, s28, s144 # 419
+vadds 1, s28, s5, s5 # 420
+vbit 1, s5 # 421
+vadds 1, s147, s28, s5 # 422
+vadds 1, s28, s147, s147 # 423
+vbit 1, s147 # 424
+vadds 1, s10, s28, s147 # 425
+vadds 1, s28, s10, s10 # 426
+vbit 1, s10 # 427
+vadds 1, s150, s28, s10 # 428
+vadds 1, s28, s150, s150 # 429
+vbit 1, s150 # 430
+vadds 1, s49, s28, s150 # 431
+vadds 1, s28, s49, s49 # 432
+vbit 1, s49 # 433
+vadds 1, s153, s28, s49 # 434
+vadds 1, s28, s153, s153 # 435
+vbit 1, s153 # 436
+vadds 1, s30, s28, s153 # 437
+vadds 1, s28, s30, s30 # 438
+vbit 1, s30 # 439
+vadds 1, s156, s28, s30 # 440
+vadds 1, s28, s156, s156 # 441
+vbit 1, s156 # 442
+vadds 1, s51, s28, s156 # 443
+vadds 1, s28, s51, s51 # 444
+vbit 1, s51 # 445
+vadds 1, s159, s28, s51 # 446
+vadds 1, s28, s159, s159 # 447
+vbit 1, s159 # 448
+vadds 1, s4, s28, s159 # 449
+vadds 1, s28, s4, s4 # 450
+vbit 1, s4 # 451
+vadds 1, s162, s28, s4 # 452
+vadds 1, s28, s162, s162 # 453
+vbit 1, s162 # 454
+vadds 1, s52, s28, s162 # 455
+vadds 1, s28, s52, s52 # 456
+vbit 1, s52 # 457
+vadds 1, s165, s28, s52 # 458
+vadds 1, s28, s165, s165 # 459
+vbit 1, s165 # 460
+vadds 1, s55, s28, s165 # 461
+vadds 1, s28, s55, s55 # 462
+vbit 1, s55 # 463
+vadds 1, s168, s28, s55 # 464
+vadds 1, s28, s168, s168 # 465
+vbit 1, s168 # 466
+vadds 1, s54, s28, s168 # 467
+vadds 1, s28, s54, s54 # 468
+vbit 1, s54 # 469
+vadds 1, s171, s28, s54 # 470
+vadds 1, s28, s171, s171 # 471
+vbit 1, s171 # 472
+vadds 1, s18, s28, s171 # 473
+vadds 1, s28, s18, s18 # 474
+vbit 1, s18 # 475
+vadds 1, s174, s28, s18 # 476
+vadds 1, s28, s174, s174 # 477
+vbit 1, s174 # 478
+vadds 1, s57, s28, s174 # 479
+vadds 1, s28, s57, s57 # 480
+vbit 1, s57 # 481
+vadds 1, s177, s28, s57 # 482
+vadds 1, s28, s177, s177 # 483
+vbit 1, s177 # 484
+vadds 1, s60, s28, s177 # 485
+vadds 1, s28, s60, s60 # 486
+vbit 1, s60 # 487
+vadds 1, s180, s28, s60 # 488
+vadds 1, s28, s180, s180 # 489
+vbit 1, s180 # 490
+vadds 1, s58, s28, s180 # 491
+vadds 1, s28, s58, s58 # 492
+vbit 1, s58 # 493
+vadds 1, s183, s28, s58 # 494
+vadds 1, s28, s183, s183 # 495
+vbit 1, s183 # 496
+vadds 1, s59, s28, s183 # 497
+vadds 1, s28, s59, s59 # 498
+vbit 1, s59 # 499
+vadds 1, s186, s28, s59 # 500
+vadds 1, s28, s186, s186 # 501
+vbit 1, s186 # 502
+vadds 1, s61, s28, s186 # 503
+vadds 1, s28, s61, s61 # 504
+vbit 1, s61 # 505
+vadds 1, s189, s28, s61 # 506
+vadds 1, s28, s189, s189 # 507
+vbit 1, s189 # 508
+vadds 1, s63, s28, s189 # 509
+vadds 1, s28, s63, s63 # 510
+vbit 1, s63 # 511
+vadds 1, s16, s28, s63 # 512
+vadds 1, s28, s16, s16 # 513
+vbit 1, s16 # 514
+vadds 1, s191, s28, s16 # 515
+vadds 1, s28, s191, s191 # 516
+vbit 1, s191 # 517
+vadds 1, s29, s28, s191 # 518
+vmovs 1, s28, s29 # 519
+vldi 1, c2, 16 # 520
+vmulci 1, c1, c2, 1073741824 # 521
+vmulci 1, c2, c1, 1073741824 # 522
+vmovc 1, c1, c2 # 523
+vmulm 1, s29, s66, c1 # 524
+vldi 1, c2, 16 # 525
+vmulci 1, c0, c2, 1073741824 # 526
+vmulci 1, c2, c0, 1073741824 # 527
+vmovc 1, c0, c2 # 528
+vaddm 1, s66, s1, c0 # 529
+vadds 1, s99, s29, s66 # 530
+vadds 1, s29, s99, s28 # 531
+vasm_open 1, 3, True, c0, s29 # 532
+vmodc 1, c2, c0, c1 # 533
+vconvmodp 1, ci68, c2, 0 # 534
+vbitdecint 1, 65, ci68, ci67, ci66, ci65, ci64, ci63, ci62, ci61, ci60, ci59, ci58, ci57, ci56, ci55, ci54, ci53, ci52, ci51, ci50, ci49, ci48, ci47, ci46, ci45, ci44, ci43, ci42, ci41, ci40, ci38, ci37, ci36, ci35, ci34, ci33, ci32, ci31, ci30, ci29, ci28, ci27, ci26, ci25, ci24, ci23, ci22, ci21, ci20, ci19, ci18, ci17, ci16, ci15, ci14, ci13, ci10, ci11, ci12, ci8, ci9, ci39, ci6, ci4, ci7, ci5 # 535
+vconvint 1, c0, ci67 # 536
+vconvint 1, c3, ci66 # 537
+vconvint 1, c4, ci65 # 538
+vconvint 1, c5, ci64 # 539
+vconvint 1, c6, ci63 # 540
+vconvint 1, c7, ci62 # 541
+vconvint 1, c8, ci61 # 542
+vconvint 1, c9, ci60 # 543
+vconvint 1, c10, ci59 # 544
+vconvint 1, c11, ci58 # 545
+vconvint 1, c12, ci57 # 546
+vconvint 1, c13, ci56 # 547
+vconvint 1, c14, ci55 # 548
+vconvint 1, c15, ci54 # 549
+vconvint 1, c16, ci53 # 550
+vconvint 1, c17, ci52 # 551
+vconvint 1, c18, ci51 # 552
+vconvint 1, c19, ci50 # 553
+vconvint 1, c20, ci49 # 554
+vconvint 1, c21, ci48 # 555
+vconvint 1, c22, ci47 # 556
+vconvint 1, c23, ci46 # 557
+vconvint 1, c24, ci45 # 558
+vconvint 1, c25, ci44 # 559
+vconvint 1, c26, ci43 # 560
+vconvint 1, c27, ci42 # 561
+vconvint 1, c28, ci41 # 562
+vconvint 1, c29, ci40 # 563
+vconvint 1, c30, ci38 # 564
+vconvint 1, c31, ci37 # 565
+vconvint 1, c32, ci36 # 566
+vconvint 1, c33, ci35 # 567
+vconvint 1, c34, ci34 # 568
+vconvint 1, c35, ci33 # 569
+vconvint 1, c36, ci32 # 570
+vconvint 1, c37, ci31 # 571
+vconvint 1, c38, ci30 # 572
+vconvint 1, c39, ci29 # 573
+vconvint 1, c40, ci28 # 574
+vconvint 1, c41, ci27 # 575
+vconvint 1, c42, ci26 # 576
+vconvint 1, c43, ci25 # 577
+vconvint 1, c44, ci24 # 578
+vconvint 1, c45, ci23 # 579
+vconvint 1, c46, ci22 # 580
+vconvint 1, c47, ci21 # 581
+vconvint 1, c48, ci20 # 582
+vconvint 1, c49, ci19 # 583
+vconvint 1, c50, ci18 # 584
+vconvint 1, c51, ci17 # 585
+vconvint 1, c52, ci16 # 586
+vconvint 1, c53, ci15 # 587
+vconvint 1, c54, ci14 # 588
+vconvint 1, c55, ci13 # 589
+vconvint 1, c56, ci10 # 590
+vconvint 1, c57, ci11 # 591
+vconvint 1, c58, ci12 # 592
+vconvint 1, c59, ci8 # 593
+vconvint 1, c60, ci9 # 594
+vconvint 1, c61, ci39 # 595
+vconvint 1, c62, ci6 # 596
+vconvint 1, c63, ci4 # 597
+vconvint 1, c64, ci7 # 598
+vconvint 1, c65, ci5 # 599
+vsubsfi 1, s29, s191, 1 # 600
+vsubsfi 1, s191, s16, 1 # 601
+vsubsfi 1, s16, s63, 1 # 602
+vsubsfi 1, s63, s189, 1 # 603
+vsubsfi 1, s189, s61, 1 # 604
+vsubsfi 1, s61, s186, 1 # 605
+vsubsfi 1, s186, s59, 1 # 606
+vsubsfi 1, s59, s183, 1 # 607
+vsubsfi 1, s183, s58, 1 # 608
+vsubsfi 1, s58, s180, 1 # 609
+vsubsfi 1, s180, s60, 1 # 610
+vsubsfi 1, s60, s177, 1 # 611
+vsubsfi 1, s177, s57, 1 # 612
+vsubsfi 1, s57, s174, 1 # 613
+vsubsfi 1, s174, s18, 1 # 614
+vsubsfi 1, s18, s171, 1 # 615
+vsubsfi 1, s171, s54, 1 # 616
+vsubsfi 1, s54, s168, 1 # 617
+vsubsfi 1, s168, s55, 1 # 618
+vsubsfi 1, s55, s165, 1 # 619
+vsubsfi 1, s165, s52, 1 # 620
+vsubsfi 1, s52, s162, 1 # 621
+vsubsfi 1, s162, s4, 1 # 622
+vsubsfi 1, s4, s159, 1 # 623
+vsubsfi 1, s159, s51, 1 # 624
+vsubsfi 1, s51, s156, 1 # 625
+vsubsfi 1, s156, s30, 1 # 626
+vsubsfi 1, s30, s153, 1 # 627
+vsubsfi 1, s153, s49, 1 # 628
+vsubsfi 1, s49, s150, 1 # 629
+vsubsfi 1, s150, s10, 1 # 630
+vsubsfi 1, s10, s147, 1 # 631
+vsubsfi 1, s147, s5, 1 # 632
+vsubsfi 1, s5, s144, 1 # 633
+vsubsfi 1, s144, s94, 1 # 634
+vsubsfi 1, s94, s141, 1 # 635
+vsubsfi 1, s141, s26, 1 # 636
+vsubsfi 1, s26, s138, 1 # 637
+vsubsfi 1, s138, s56, 1 # 638
+vsubsfi 1, s56, s135, 1 # 639
+vsubsfi 1, s135, s25, 1 # 640
+vsubsfi 1, s25, s132, 1 # 641
+vsubsfi 1, s132, s92, 1 # 642
+vsubsfi 1, s92, s129, 1 # 643
+vsubsfi 1, s129, s89, 1 # 644
+vsubsfi 1, s89, s126, 1 # 645
+vsubsfi 1, s126, s2, 1 # 646
+vsubsfi 1, s2, s123, 1 # 647
+vsubsfi 1, s123, s86, 1 # 648
+vsubsfi 1, s86, s120, 1 # 649
+vsubsfi 1, s120, s9, 1 # 650
+vsubsfi 1, s9, s117, 1 # 651
+vsubsfi 1, s117, s23, 1 # 652
+vsubsfi 1, s23, s114, 1 # 653
+vsubsfi 1, s114, s22, 1 # 654
+vsubsfi 1, s22, s111, 1 # 655
+vsubsfi 1, s111, s24, 1 # 656
+vsubsfi 1, s24, s108, 1 # 657
+vsubsfi 1, s108, s83, 1 # 658
+vsubsfi 1, s83, s105, 1 # 659
+vsubsfi 1, s105, s62, 1 # 660
+vsubsfi 1, s62, s102, 1 # 661
+vsubsfi 1, s102, s96, 1 # 662
+vsubsfi 1, s96, s97, 1 # 663
+vmulm 1, s97, s96, c65 # 664
+vaddm 1, s99, s96, c65 # 665
+vmulsi 1, s96, s97, 2 # 666
+vsubs 1, s66, s99, s96 # 667
+vmulm 1, s99, s102, c64 # 668
+vaddm 1, s96, s102, c64 # 669
+vmulsi 1, s102, s99, 2 # 670
+vsubs 1, s98, s96, s102 # 671
+vmulm 1, s96, s62, c63 # 672
+vaddm 1, s102, s62, c63 # 673
+vmulsi 1, s62, s96, 2 # 674
+vsubs 1, s100, s102, s62 # 675
+vmulm 1, s102, s105, c62 # 676
+vaddm 1, s62, s105, c62 # 677
+vmulsi 1, s105, s102, 2 # 678
+vsubs 1, s101, s62, s105 # 679
+vmulm 1, s62, s83, c61 # 680
+vaddm 1, s105, s83, c61 # 681
+vmulsi 1, s83, s62, 2 # 682
+vsubs 1, s103, s105, s83 # 683
+vmulm 1, s105, s108, c60 # 684
+vaddm 1, s83, s108, c60 # 685
+vmulsi 1, s108, s105, 2 # 686
+vsubs 1, s104, s83, s108 # 687
+vmulm 1, s83, s24, c59 # 688
+vaddm 1, s108, s24, c59 # 689
+vmulsi 1, s24, s83, 2 # 690
+vsubs 1, s106, s108, s24 # 691
+vmulm 1, s108, s111, c58 # 692
+vaddm 1, s24, s111, c58 # 693
+vmulsi 1, s111, s108, 2 # 694
+vsubs 1, s107, s24, s111 # 695
+vmulm 1, s24, s22, c57 # 696
+vaddm 1, s111, s22, c57 # 697
+vmulsi 1, s22, s24, 2 # 698
+vsubs 1, s109, s111, s22 # 699
+vmulm 1, s111, s114, c56 # 700
+vaddm 1, s22, s114, c56 # 701
+vmulsi 1, s114, s111, 2 # 702
+vsubs 1, s110, s22, s114 # 703
+vmulm 1, s22, s23, c55 # 704
+vaddm 1, s114, s23, c55 # 705
+vmulsi 1, s23, s22, 2 # 706
+vsubs 1, s112, s114, s23 # 707
+vmulm 1, s114, s117, c54 # 708
+vaddm 1, s23, s117, c54 # 709
+vmulsi 1, s117, s114, 2 # 710
+vsubs 1, s113, s23, s117 # 711
+vmulm 1, s23, s9, c53 # 712
+vaddm 1, s117, s9, c53 # 713
+vmulsi 1, s9, s23, 2 # 714
+vsubs 1, s115, s117, s9 # 715
+vmulm 1, s117, s120, c52 # 716
+vaddm 1, s9, s120, c52 # 717
+vmulsi 1, s120, s117, 2 # 718
+vsubs 1, s116, s9, s120 # 719
+vmulm 1, s9, s86, c51 # 720
+vaddm 1, s120, s86, c51 # 721
+vmulsi 1, s86, s9, 2 # 722
+vsubs 1, s118, s120, s86 # 723
+vmulm 1, s120, s123, c50 # 724
+vaddm 1, s86, s123, c50 # 725
+vmulsi 1, s123, s120, 2 # 726
+vsubs 1, s119, s86, s123 # 727
+vmulm 1, s86, s2, c49 # 728
+vaddm 1, s123, s2, c49 # 729
+vmulsi 1, s2, s86, 2 # 730
+vsubs 1, s121, s123, s2 # 731
+vmulm 1, s123, s126, c48 # 732
+vaddm 1, s2, s126, c48 # 733
+vmulsi 1, s126, s123, 2 # 734
+vsubs 1, s122, s2, s126 # 735
+vmulm 1, s2, s89, c47 # 736
+vaddm 1, s126, s89, c47 # 737
+vmulsi 1, s89, s2, 2 # 738
+vsubs 1, s124, s126, s89 # 739
+vmulm 1, s126, s129, c46 # 740
+vaddm 1, s89, s129, c46 # 741
+vmulsi 1, s129, s126, 2 # 742
+vsubs 1, s125, s89, s129 # 743
+vmulm 1, s89, s92, c45 # 744
+vaddm 1, s129, s92, c45 # 745
+vmulsi 1, s92, s89, 2 # 746
+vsubs 1, s127, s129, s92 # 747
+vmulm 1, s129, s132, c44 # 748
+vaddm 1, s92, s132, c44 # 749
+vmulsi 1, s132, s129, 2 # 750
+vsubs 1, s128, s92, s132 # 751
+vmulm 1, s92, s25, c43 # 752
+vaddm 1, s132, s25, c43 # 753
+vmulsi 1, s25, s92, 2 # 754
+vsubs 1, s130, s132, s25 # 755
+vmulm 1, s132, s135, c42 # 756
+vaddm 1, s25, s135, c42 # 757
+vmulsi 1, s135, s132, 2 # 758
+vsubs 1, s131, s25, s135 # 759
+vmulm 1, s25, s56, c41 # 760
+vaddm 1, s135, s56, c41 # 761
+vmulsi 1, s56, s25, 2 # 762
+vsubs 1, s133, s135, s56 # 763
+vmulm 1, s135, s138, c40 # 764
+vaddm 1, s56, s138, c40 # 765
+vmulsi 1, s138, s135, 2 # 766
+vsubs 1, s134, s56, s138 # 767
+vmulm 1, s56, s26, c39 # 768
+vaddm 1, s138, s26, c39 # 769
+vmulsi 1, s26, s56, 2 # 770
+vsubs 1, s136, s138, s26 # 771
+vmulm 1, s138, s141, c38 # 772
+vaddm 1, s26, s141, c38 # 773
+vmulsi 1, s141, s138, 2 # 774
+vsubs 1, s137, s26, s141 # 775
+vmulm 1, s26, s94, c37 # 776
+vaddm 1, s141, s94, c37 # 777
+vmulsi 1, s94, s26, 2 # 778
+vsubs 1, s139, s141, s94 # 779
+vmulm 1, s141, s144, c36 # 780
+vaddm 1, s94, s144, c36 # 781
+vmulsi 1, s144, s141, 2 # 782
+vsubs 1, s140, s94, s144 # 783
+vmulm 1, s94, s5, c35 # 784
+vaddm 1, s144, s5, c35 # 785
+vmulsi 1, s5, s94, 2 # 786
+vsubs 1, s142, s144, s5 # 787
+vmulm 1, s144, s147, c34 # 788
+vaddm 1, s5, s147, c34 # 789
+vmulsi 1, s147, s144, 2 # 790
+vsubs 1, s143, s5, s147 # 791
+vmulm 1, s5, s10, c33 # 792
+vaddm 1, s147, s10, c33 # 793
+vmulsi 1, s10, s5, 2 # 794
+vsubs 1, s145, s147, s10 # 795
+vmulm 1, s147, s150, c32 # 796
+vaddm 1, s10, s150, c32 # 797
+vmulsi 1, s150, s147, 2 # 798
+vsubs 1, s146, s10, s150 # 799
+vmulm 1, s10, s49, c31 # 800
+vaddm 1, s150, s49, c31 # 801
+vmulsi 1, s49, s10, 2 # 802
+vsubs 1, s148, s150, s49 # 803
+vmulm 1, s150, s153, c30 # 804
+vaddm 1, s49, s153, c30 # 805
+vmulsi 1, s153, s150, 2 # 806
+vsubs 1, s149, s49, s153 # 807
+vmulm 1, s49, s30, c29 # 808
+vaddm 1, s153, s30, c29 # 809
+vmulsi 1, s30, s49, 2 # 810
+vsubs 1, s151, s153, s30 # 811
+vmulm 1, s153, s156, c28 # 812
+vaddm 1, s30, s156, c28 # 813
+vmulsi 1, s156, s153, 2 # 814
+vsubs 1, s152, s30, s156 # 815
+vmulm 1, s30, s51, c27 # 816
+vaddm 1, s156, s51, c27 # 817
+vmulsi 1, s51, s30, 2 # 818
+vsubs 1, s154, s156, s51 # 819
+vmulm 1, s156, s159, c26 # 820
+vaddm 1, s51, s159, c26 # 821
+vmulsi 1, s159, s156, 2 # 822
+vsubs 1, s155, s51, s159 # 823
+vmulm 1, s51, s4, c25 # 824
+vaddm 1, s159, s4, c25 # 825
+vmulsi 1, s4, s51, 2 # 826
+vsubs 1, s157, s159, s4 # 827
+vmulm 1, s159, s162, c24 # 828
+vaddm 1, s4, s162, c24 # 829
+vmulsi 1, s162, s159, 2 # 830
+vsubs 1, s158, s4, s162 # 831
+vmulm 1, s4, s52, c23 # 832
+vaddm 1, s162, s52, c23 # 833
+vmulsi 1, s52, s4, 2 # 834
+vsubs 1, s160, s162, s52 # 835
+vmulm 1, s162, s165, c22 # 836
+vaddm 1, s52, s165, c22 # 837
+vmulsi 1, s165, s162, 2 # 838
+vsubs 1, s161, s52, s165 # 839
+vmulm 1, s52, s55, c21 # 840
+vaddm 1, s165, s55, c21 # 841
+vmulsi 1, s55, s52, 2 # 842
+vsubs 1, s163, s165, s55 # 843
+vmulm 1, s165, s168, c20 # 844
+vaddm 1, s55, s168, c20 # 845
+vmulsi 1, s168, s165, 2 # 846
+vsubs 1, s164, s55, s168 # 847
+vmulm 1, s55, s54, c19 # 848
+vaddm 1, s168, s54, c19 # 849
+vmulsi 1, s54, s55, 2 # 850
+vsubs 1, s166, s168, s54 # 851
+vmulm 1, s168, s171, c18 # 852
+vaddm 1, s54, s171, c18 # 853
+vmulsi 1, s171, s168, 2 # 854
+vsubs 1, s167, s54, s171 # 855
+vmulm 1, s54, s18, c17 # 856
+vaddm 1, s171, s18, c17 # 857
+vmulsi 1, s18, s54, 2 # 858
+vsubs 1, s169, s171, s18 # 859
+vmulm 1, s171, s174, c16 # 860
+vaddm 1, s18, s174, c16 # 861
+vmulsi 1, s174, s171, 2 # 862
+vsubs 1, s170, s18, s174 # 863
+vmulm 1, s18, s57, c15 # 864
+vaddm 1, s174, s57, c15 # 865
+vmulsi 1, s57, s18, 2 # 866
+vsubs 1, s172, s174, s57 # 867
+vmulm 1, s174, s177, c14 # 868
+vaddm 1, s57, s177, c14 # 869
+vmulsi 1, s177, s174, 2 # 870
+vsubs 1, s173, s57, s177 # 871
+vmulm 1, s57, s60, c13 # 872
+vaddm 1, s177, s60, c13 # 873
+vmulsi 1, s60, s57, 2 # 874
+vsubs 1, s175, s177, s60 # 875
+vmulm 1, s177, s180, c12 # 876
+vaddm 1, s60, s180, c12 # 877
+vmulsi 1, s180, s177, 2 # 878
+vsubs 1, s176, s60, s180 # 879
+vmulm 1, s60, s58, c11 # 880
+vaddm 1, s180, s58, c11 # 881
+vmulsi 1, s58, s60, 2 # 882
+vsubs 1, s178, s180, s58 # 883
+vmulm 1, s180, s183, c10 # 884
+vaddm 1, s58, s183, c10 # 885
+vmulsi 1, s183, s180, 2 # 886
+vsubs 1, s179, s58, s183 # 887
+vmulm 1, s58, s59, c9 # 888
+vaddm 1, s183, s59, c9 # 889
+vmulsi 1, s59, s58, 2 # 890
+vsubs 1, s181, s183, s59 # 891
+vmulm 1, s183, s186, c8 # 892
+vaddm 1, s59, s186, c8 # 893
+vmulsi 1, s186, s183, 2 # 894
+vsubs 1, s182, s59, s186 # 895
+vmulm 1, s59, s61, c7 # 896
+vaddm 1, s186, s61, c7 # 897
+vmulsi 1, s61, s59, 2 # 898
+vsubs 1, s184, s186, s61 # 899
+vmulm 1, s186, s189, c6 # 900
+vaddm 1, s61, s189, c6 # 901
+vmulsi 1, s189, s186, 2 # 902
+vsubs 1, s185, s61, s189 # 903
+vmulm 1, s61, s63, c5 # 904
+vaddm 1, s189, s63, c5 # 905
+vmulsi 1, s63, s61, 2 # 906
+vsubs 1, s187, s189, s63 # 907
+vmulm 1, s189, s16, c4 # 908
+vaddm 1, s63, s16, c4 # 909
+vmulsi 1, s16, s189, 2 # 910
+vsubs 1, s188, s63, s16 # 911
+vmulm 1, s63, s191, c3 # 912
+vaddm 1, s16, s191, c3 # 913
+vmulsi 1, s191, s63, 2 # 914
+vsubs 1, s190, s16, s191 # 915
+vmulm 1, s16, s29, c0 # 916
+vaddm 1, s191, s29, c0 # 917
+vmulsi 1, s29, s16, 2 # 918
+vsubs 1, s95, s191, s29 # 919
+vadds 1, s191, s16, s95 # 920
+vmuls 1, 189, s80, s66, s98, s69, s66, s99, s67, s100, s101, s64, s100, s102, s70, s103, s104, s73, s103, s105, s72, s106, s107, s53, s106, s108, s75, s109, s110, s78, s109, s111, s76, s112, s113, s65, s112, s114, s79, s115, s116, s82, s115, s117, s81, s118, s119, s15, s118, s120, s84, s121, s122, s87, s121, s123, s85, s124, s125, s17, s124, s126, s88, s127, s128, s91, s127, s129, s90, s130, s131, s19, s130, s132, s93, s133, s134, s14, s133, s135, s50, s136, s137, s21, s136, s138, s47, s139, s140, s46, s139, s141, s48, s142, s143, s68, s142, s144, s13, s145, s146, s45, s145, s147, s44, s148, s149, s0, s148, s150, s43, s151, s152, s41, s151, s153, s6, s154, s155, s71, s154, s156, s42, s157, s158, s11, s157, s159, s40, s160, s161, s74, s160, s162, s38, s163, s164, s37, s163, s165, s39, s166, s167, s20, s166, s168, s12, s169, s170, s36, s169, s171, s35, s172, s173, s7, s172, s174, s34, s175, s176, s32, s175, s177, s3, s178, s179, s8, s178, s180, s33, s181, s182, s27, s181, s183, s31, s184, s185, s77, s184, s186, s29, s187, s188, s95, s187, s189, s16, s190, s191 # 921
+vadds 1, s66, s69, s97 # 922
+vadds 1, s69, s64, s96 # 923
+vadds 1, s64, s73, s62 # 924
+vadds 1, s73, s53, s83 # 925
+vadds 1, s53, s78, s24 # 926
+vadds 1, s78, s65, s22 # 927
+vadds 1, s65, s82, s23 # 928
+vadds 1, s82, s15, s9 # 929
+vadds 1, s15, s87, s86 # 930
+vadds 1, s87, s17, s2 # 931
+vadds 1, s17, s91, s89 # 932
+vadds 1, s91, s19, s92 # 933
+vadds 1, s19, s14, s25 # 934
+vadds 1, s14, s21, s56 # 935
+vadds 1, s21, s46, s26 # 936
+vadds 1, s46, s68, s94 # 937
+vadds 1, s68, s45, s5 # 938
+vadds 1, s45, s0, s10 # 939
+vadds 1, s0, s41, s49 # 940
+vadds 1, s41, s71, s30 # 941
+vadds 1, s71, s11, s51 # 942
+vadds 1, s11, s74, s4 # 943
+vadds 1, s74, s37, s52 # 944
+vadds 1, s37, s20, s55 # 945
+vadds 1, s20, s36, s54 # 946
+vadds 1, s36, s7, s18 # 947
+vadds 1, s7, s32, s57 # 948
+vadds 1, s32, s8, s60 # 949
+vadds 1, s8, s27, s58 # 950
+vadds 1, s27, s77, s59 # 951
+vadds 1, s77, s95, s61 # 952
+vadds 1, s95, s16, s63 # 953
+vmuls 1, 93, s62, s80, s67, s83, s80, s69, s24, s70, s72, s22, s70, s73, s23, s75, s76, s9, s75, s78, s86, s79, s81, s2, s79, s82, s89, s84, s85, s92, s84, s87, s25, s88, s90, s56, s88, s91, s26, s93, s50, s94, s93, s14, s5, s47, s48, s10, s47, s46, s49, s13, s44, s30, s13, s45, s51, s43, s6, s4, s43, s41, s52, s42, s40, s55, s42, s11, s54, s38, s39, s18, s38, s37, s57, s12, s35, s60, s12, s36, s58, s34, s3, s59, s34, s32, s61, s33, s31, s63, s33, s27, s16, s29, s95 # 954
+vadds 1, s80, s83, s66 # 955
+vadds 1, s83, s22, s64 # 956
+vadds 1, s22, s9, s53 # 957
+vadds 1, s9, s2, s65 # 958
+vadds 1, s2, s92, s15 # 959
+vadds 1, s92, s56, s17 # 960
+vadds 1, s56, s94, s19 # 961
+vadds 1, s94, s10, s21 # 962
+vadds 1, s10, s30, s68 # 963
+vadds 1, s30, s4, s0 # 964
+vadds 1, s4, s55, s71 # 965
+vadds 1, s55, s18, s74 # 966
+vadds 1, s18, s60, s20 # 967
+vadds 1, s60, s59, s7 # 968
+vadds 1, s59, s63, s8 # 969
+vadds 1, s63, s16, s77 # 970
+vmuls 1, 45, s53, s62, s24, s65, s62, s83, s15, s23, s86, s17, s23, s9, s19, s89, s25, s21, s89, s92, s68, s26, s5, s0, s26, s94, s71, s49, s51, s74, s49, s30, s20, s52, s54, s7, s52, s55, s8, s57, s58, s77, s57, s60, s16, s61, s63 # 971
+vadds 1, s62, s65, s80 # 972
+vadds 1, s65, s17, s22 # 973
+vadds 1, s17, s21, s2 # 974
+vadds 1, s21, s0, s56 # 975
+vadds 1, s0, s74, s10 # 976
+vadds 1, s74, s7, s4 # 977
+vadds 1, s7, s77, s18 # 978
+vadds 1, s77, s16, s59 # 979
+vmuls 1, 21, s2, s53, s15, s56, s53, s65, s10, s19, s68, s4, s19, s21, s18, s71, s20, s59, s71, s74, s16, s8, s77 # 980
+vadds 1, s53, s56, s62 # 981
+vadds 1, s56, s4, s17 # 982
+vadds 1, s4, s59, s0 # 983
+vadds 1, s59, s16, s7 # 984
+vmuls 1, 9, s0, s2, s10, s7, s2, s56, s16, s18, s59 # 985
+vadds 1, s2, s7, s53 # 986
+vadds 1, s7, s16, s4 # 987
+vmuls 1, 3, s16, s0, s7 # 988
+vadds 1, s0, s16, s2 # 989
+vsubsfi 1, s16, s0, 1 # 990
+vmovs 1, s0, s16 # 991
+vmulm 1, s16, s0, c1 # 992
+vsubmr 1, s0, c2, s28 # 993
+vadds 1, s28, s0, s16 # 994
+vinv2m 1, c2, 64 # 995
+vsubs 1, s0, s1, s28 # 996
+vmulm 1, s1, s0, c2 # 997
+vsubsfi 1, s0, s1, 0 # 998
+vmovs 1, s1, s0 # 999
+movs s0, s1 # 1000
+ldint ci5, 1 # 1001
+addint ci7, ci3, ci5 # 1002
+ldint ci5, 8 # 1003
+ltc ci4, ci7, ci5 # 1004
+ldint ci5, 1 # 1005
+subint ci6, ci5, ci4 # 1006
+convint c2, ci6 # 1007
+cond_print_str c2, 1919252079 # 1008
+convint c2, ci6 # 1009
+cond_print_str c2, 2003790950 # 1010
+convint c2, ci6 # 1011
+cond_print_str c2, 8250 # 1012
+convint c2, ci7 # 1013
+convint c1, ci6 # 1014
+ldi c0, 0 # 1015
+cond_print_plain c1, c2, c0 # 1016
+convint c1, ci6 # 1017
+cond_print_str c1, 47 # 1018
+convint c1, ci6 # 1019
+cond_print_str c1, 56 # 1020
+convint c1, ci6 # 1021
+cond_print_str c1, 10 # 1022
+crash ci6 # 1023
+ldint ci6, 8200 # 1024
+addint ci5, ci7, ci6 # 1025
+ldmsi s1, ci5 # 1026
+ldms s28, 8208 # 1027
+subs s16, s1, s28 # 1028
+ldint ci5, 1 # 1029
+addint ci7, ci3, ci5 # 1030
+ldint ci5, 8 # 1031
+ltc ci6, ci7, ci5 # 1032
+ldint ci5, 1 # 1033
+subint ci4, ci5, ci6 # 1034
+convint c1, ci4 # 1035
+cond_print_str c1, 1919252079 # 1036
+convint c1, ci4 # 1037
+cond_print_str c1, 2003790950 # 1038
+convint c1, ci4 # 1039
+cond_print_str c1, 8250 # 1040
+convint c1, ci7 # 1041
+convint c2, ci4 # 1042
+ldi c0, 0 # 1043
+cond_print_plain c2, c1, c0 # 1044
+convint c2, ci4 # 1045
+cond_print_str c2, 47 # 1046
+convint c2, ci4 # 1047
+cond_print_str c2, 56 # 1048
+convint c2, ci4 # 1049
+cond_print_str c2, 10 # 1050
+crash ci4 # 1051
+ldint ci4, 8192 # 1052
+addint ci5, ci7, ci4 # 1053
+ldmsi s1, ci5 # 1054
+ldms s2, 8209 # 1055
+subs s7, s1, s2 # 1056
+muls 6, s4, s0, s16, s1, s0, s7 # 1057
+adds s0, s4, s28 # 1058
+stms s0, 8208 # 1059
+adds s0, s1, s2 # 1060
+stms s0, 8209 # 1061
+ldint ci5, 1 # 1062
+addint ci3, ci3, ci5 # 1063
+ltc ci5, ci3, ci2 # 1064
+jmpnz ci5, -887 # 1065
+# bankers_bonus-0-end-if-17
+ldms s0, 8208 # 1066
+asm_open 3, True, c2, s0 # 1067
+print_char4 1769496941 # 1068
+print_char4 980252013 # 1069
+print_char 32 # 1070
+print_reg_plain c2 # 1071
+print_char 10 # 1072
+ldms s0, 8209 # 1073
+ldmint ci5, 8200 # 1074
+ldint ci7, 0 # 1075
+subint ci4, ci5, ci7 # 1076
+randomfulls s1 # 1077
+muls 3, s2, s0, s1 # 1078
+ldint ci5, 0 # 1079
+gtc ci7, ci4, ci5 # 1080
+ldint ci5, 0 # 1081
+jmpeqz ci7, 30 # 1082
+# bankers_bonus-0-begin-loop-19
+ltc ci7, ci5, ci4 # 1083
+ldint ci6, 1 # 1084
+subint ci39, ci6, ci7 # 1085
+convint c2, ci39 # 1086
+cond_print_str c2, 1919252079 # 1087
+convint c2, ci39 # 1088
+cond_print_str c2, 2003790950 # 1089
+convint c2, ci39 # 1090
+cond_print_str c2, 8250 # 1091
+convint c2, ci5 # 1092
+convint c1, ci39 # 1093
+ldi c0, 0 # 1094
+cond_print_plain c1, c2, c0 # 1095
+convint c1, ci39 # 1096
+cond_print_str c1, 47 # 1097
+convint c1, ci4 # 1098
+convint c2, ci39 # 1099
+ldi c0, 0 # 1100
+cond_print_plain c2, c1, c0 # 1101
+convint c2, ci39 # 1102
+cond_print_str c2, 10 # 1103
+crash ci39 # 1104
+ldint ci39, 8192 # 1105
+addint ci6, ci5, ci39 # 1106
+ldminti ci39, ci6 # 1107
+writesocketshare 6, ci39, 0, 1, s0, s1, s2 # 1108
+ldint ci39, 1 # 1109
+addint ci5, ci5, ci39 # 1110
+ltc ci39, ci5, ci4 # 1111
+jmpnz ci39, -30 # 1112
+# bankers_bonus-0-end-if-21
+ldmint ci39, 8200 # 1113
+stmint ci39, 8215 # 1114
+ldint ci6, 2 # 1115
+divint ci7, ci39, ci6 # 1116
+stmint ci7, 8216 # 1117
+ldmint ci7, 8216 # 1118
+ldint ci39, False # 1119
+crash ci39 # 1120
+ldint ci39, 0 # 1121
+stmint ci39, 8217 # 1122
+ldint ci39, False # 1123
+crash ci39 # 1124
+stmint ci7, 8219 # 1125
+# bankers_bonus-0-pre-run_tape-22
+run_tape 6, 1, 2, 0, 2, 2, 1 # 1126
+# bankers_bonus-0-pre-join_tape-24
+join_tape 1 # 1127
+# bankers_bonus-0-pre-join_tape-26
+join_tape 2 # 1128
+# bankers_bonus-0-post-join_tape-27
+ldms s4, 8210 # 1129
+ldsi s28, 0 # 1130
+stms s4, 8218 # 1131
+ldms s4, 8192 # 1132
+stms s4, 8219 # 1133
+ldmint ci7, 8200 # 1134
+ldint ci39, 1 # 1135
+subint ci6, ci7, ci39 # 1136
+ldint ci7, 0 # 1137
+gtc ci39, ci6, ci7 # 1138
+ldint ci7, 0 # 1139
+jmpeqz ci39, 563 # 1140
+# bankers_bonus-0-begin-loop-29
+ldms s4, 8218 # 1141
+ldsi s28, 0 # 1142
+ldint ci39, 1 # 1143
+addint ci9, ci7, ci39 # 1144
+ldint ci39, 8 # 1145
+ltc ci8, ci9, ci39 # 1146
+ldint ci39, 1 # 1147
+subint ci12, ci39, ci8 # 1148
+convint c2, ci12 # 1149
+cond_print_str c2, 1919252079 # 1150
+convint c2, ci12 # 1151
+cond_print_str c2, 2003790950 # 1152
+convint c2, ci12 # 1153
+cond_print_str c2, 8250 # 1154
+convint c2, ci9 # 1155
+convint c1, ci12 # 1156
+ldi c0, 0 # 1157
+cond_print_plain c1, c2, c0 # 1158
+convint c1, ci12 # 1159
+cond_print_str c1, 47 # 1160
+convint c1, ci12 # 1161
+cond_print_str c1, 56 # 1162
+convint c1, ci12 # 1163
+cond_print_str c1, 10 # 1164
+crash ci12 # 1165
+ldint ci12, 8210 # 1166
+addint ci39, ci9, ci12 # 1167
+ldmsi s28, ci39 # 1168
+ldsi s16, 0 # 1169
+subs s16, s4, s28 # 1170
+movs s4, s16 # 1171
+vbit 1, s16 # 1172
+vadds 1, s28, s16, s16 # 1173
+vbit 1, s16 # 1174
+vadds 1, s7, s28, s16 # 1175
+vadds 1, s28, s7, s7 # 1176
+vbit 1, s7 # 1177
+vadds 1, s16, s28, s7 # 1178
+vadds 1, s28, s16, s16 # 1179
+vbit 1, s16 # 1180
+vadds 1, s7, s28, s16 # 1181
+vadds 1, s28, s7, s7 # 1182
+vbit 1, s7 # 1183
+vadds 1, s16, s28, s7 # 1184
+vadds 1, s28, s16, s16 # 1185
+vbit 1, s16 # 1186
+vadds 1, s7, s28, s16 # 1187
+vadds 1, s28, s7, s7 # 1188
+vbit 1, s7 # 1189
+vadds 1, s16, s28, s7 # 1190
+vadds 1, s28, s16, s16 # 1191
+vbit 1, s16 # 1192
+vadds 1, s7, s28, s16 # 1193
+vadds 1, s28, s7, s7 # 1194
+vbit 1, s7 # 1195
+vadds 1, s16, s28, s7 # 1196
+vadds 1, s28, s16, s16 # 1197
+vbit 1, s16 # 1198
+vadds 1, s7, s28, s16 # 1199
+vadds 1, s28, s7, s7 # 1200
+vbit 1, s7 # 1201
+vadds 1, s16, s28, s7 # 1202
+vadds 1, s28, s16, s16 # 1203
+vbit 1, s16 # 1204
+vadds 1, s7, s28, s16 # 1205
+vadds 1, s28, s7, s7 # 1206
+vbit 1, s7 # 1207
+vadds 1, s16, s28, s7 # 1208
+vadds 1, s28, s16, s16 # 1209
+vbit 1, s16 # 1210
+vadds 1, s7, s28, s16 # 1211
+vadds 1, s28, s7, s7 # 1212
+vbit 1, s7 # 1213
+vadds 1, s16, s28, s7 # 1214
+vadds 1, s28, s16, s16 # 1215
+vbit 1, s16 # 1216
+vadds 1, s7, s28, s16 # 1217
+vadds 1, s28, s7, s7 # 1218
+vbit 1, s7 # 1219
+vadds 1, s16, s28, s7 # 1220
+vadds 1, s28, s16, s16 # 1221
+vbit 1, s16 # 1222
+vadds 1, s7, s28, s16 # 1223
+vadds 1, s28, s7, s7 # 1224
+vbit 1, s7 # 1225
+vadds 1, s16, s28, s7 # 1226
+vadds 1, s28, s16, s16 # 1227
+vbit 1, s16 # 1228
+vadds 1, s7, s28, s16 # 1229
+vadds 1, s28, s7, s7 # 1230
+vbit 1, s7 # 1231
+vadds 1, s16, s28, s7 # 1232
+vadds 1, s28, s16, s16 # 1233
+vbit 1, s16 # 1234
+vadds 1, s7, s28, s16 # 1235
+vadds 1, s28, s7, s7 # 1236
+vbit 1, s7 # 1237
+vadds 1, s16, s28, s7 # 1238
+vadds 1, s28, s16, s16 # 1239
+vbit 1, s16 # 1240
+vadds 1, s7, s28, s16 # 1241
+vadds 1, s28, s7, s7 # 1242
+vbit 1, s7 # 1243
+vadds 1, s16, s28, s7 # 1244
+vadds 1, s28, s16, s16 # 1245
+vbit 1, s16 # 1246
+vadds 1, s7, s28, s16 # 1247
+vadds 1, s28, s7, s7 # 1248
+vbit 1, s7 # 1249
+vadds 1, s16, s28, s7 # 1250
+vadds 1, s28, s16, s16 # 1251
+vbit 1, s16 # 1252
+vadds 1, s7, s28, s16 # 1253
+vadds 1, s28, s7, s7 # 1254
+vbit 1, s7 # 1255
+vadds 1, s16, s28, s7 # 1256
+vadds 1, s28, s16, s16 # 1257
+vbit 1, s16 # 1258
+vadds 1, s7, s28, s16 # 1259
+vadds 1, s28, s7, s7 # 1260
+vbit 1, s7 # 1261
+vadds 1, s16, s28, s7 # 1262
+vadds 1, s28, s16, s16 # 1263
+vbit 1, s16 # 1264
+vadds 1, s7, s28, s16 # 1265
+vadds 1, s28, s7, s7 # 1266
+vbit 1, s7 # 1267
+vadds 1, s16, s28, s7 # 1268
+vadds 1, s28, s16, s16 # 1269
+vbit 1, s16 # 1270
+vadds 1, s7, s28, s16 # 1271
+vadds 1, s28, s7, s7 # 1272
+vbit 1, s7 # 1273
+vadds 1, s16, s28, s7 # 1274
+vadds 1, s28, s16, s16 # 1275
+vbit 1, s16 # 1276
+vadds 1, s7, s28, s16 # 1277
+vadds 1, s28, s7, s7 # 1278
+vbit 1, s7 # 1279
+vadds 1, s16, s28, s7 # 1280
+vadds 1, s28, s16, s16 # 1281
+vbit 1, s16 # 1282
+vadds 1, s7, s28, s16 # 1283
+vadds 1, s28, s7, s7 # 1284
+vbit 1, s7 # 1285
+vadds 1, s16, s28, s7 # 1286
+vadds 1, s28, s16, s16 # 1287
+vbit 1, s16 # 1288
+vadds 1, s7, s28, s16 # 1289
+vadds 1, s28, s7, s7 # 1290
+vbit 1, s7 # 1291
+vadds 1, s16, s28, s7 # 1292
+vbit 1, s28 # 1293
+vadds 1, s7, s28, s28 # 1294
+vbit 1, s53 # 1295
+vadds 1, s10, s7, s53 # 1296
+vadds 1, s7, s10, s10 # 1297
+vbit 1, s10 # 1298
+vadds 1, s56, s7, s10 # 1299
+vadds 1, s7, s56, s56 # 1300
+vbit 1, s56 # 1301
+vadds 1, s18, s7, s56 # 1302
+vadds 1, s7, s18, s18 # 1303
+vbit 1, s18 # 1304
+vadds 1, s59, s7, s18 # 1305
+vadds 1, s7, s59, s59 # 1306
+vbit 1, s59 # 1307
+vadds 1, s17, s7, s59 # 1308
+vadds 1, s7, s17, s17 # 1309
+vbit 1, s17 # 1310
+vadds 1, s62, s7, s17 # 1311
+vadds 1, s7, s62, s62 # 1312
+vbit 1, s62 # 1313
+vadds 1, s15, s7, s62 # 1314
+vadds 1, s7, s15, s15 # 1315
+vbit 1, s15 # 1316
+vadds 1, s65, s7, s15 # 1317
+vadds 1, s7, s65, s65 # 1318
+vbit 1, s65 # 1319
+vadds 1, s19, s7, s65 # 1320
+vadds 1, s7, s19, s19 # 1321
+vbit 1, s19 # 1322
+vadds 1, s68, s7, s19 # 1323
+vadds 1, s7, s68, s68 # 1324
+vbit 1, s68 # 1325
+vadds 1, s21, s7, s68 # 1326
+vadds 1, s7, s21, s21 # 1327
+vbit 1, s21 # 1328
+vadds 1, s71, s7, s21 # 1329
+vadds 1, s7, s71, s71 # 1330
+vbit 1, s71 # 1331
+vadds 1, s20, s7, s71 # 1332
+vadds 1, s7, s20, s20 # 1333
+vbit 1, s20 # 1334
+vadds 1, s74, s7, s20 # 1335
+vadds 1, s7, s74, s74 # 1336
+vbit 1, s74 # 1337
+vadds 1, s8, s7, s74 # 1338
+vadds 1, s7, s8, s8 # 1339
+vbit 1, s8 # 1340
+vadds 1, s77, s7, s8 # 1341
+vadds 1, s7, s77, s77 # 1342
+vbit 1, s77 # 1343
+vadds 1, s22, s7, s77 # 1344
+vadds 1, s7, s22, s22 # 1345
+vbit 1, s22 # 1346
+vadds 1, s80, s7, s22 # 1347
+vadds 1, s7, s80, s80 # 1348
+vbit 1, s80 # 1349
+vadds 1, s24, s7, s80 # 1350
+vadds 1, s7, s24, s24 # 1351
+vbit 1, s24 # 1352
+vadds 1, s83, s7, s24 # 1353
+vadds 1, s7, s83, s83 # 1354
+vbit 1, s83 # 1355
+vadds 1, s23, s7, s83 # 1356
+vadds 1, s7, s23, s23 # 1357
+vbit 1, s23 # 1358
+vadds 1, s86, s7, s23 # 1359
+vadds 1, s7, s86, s86 # 1360
+vbit 1, s86 # 1361
+vadds 1, s9, s7, s86 # 1362
+vadds 1, s7, s9, s9 # 1363
+vbit 1, s9 # 1364
+vadds 1, s89, s7, s9 # 1365
+vadds 1, s7, s89, s89 # 1366
+vbit 1, s89 # 1367
+vadds 1, s25, s7, s89 # 1368
+vadds 1, s7, s25, s25 # 1369
+vbit 1, s25 # 1370
+vadds 1, s92, s7, s25 # 1371
+vadds 1, s7, s92, s92 # 1372
+vbit 1, s92 # 1373
+vadds 1, s26, s7, s92 # 1374
+vadds 1, s7, s26, s26 # 1375
+vbit 1, s26 # 1376
+vadds 1, s5, s7, s26 # 1377
+vadds 1, s7, s5, s5 # 1378
+vbit 1, s5 # 1379
+vadds 1, s94, s7, s5 # 1380
+vadds 1, s7, s94, s94 # 1381
+vbit 1, s94 # 1382
+vadds 1, s49, s7, s94 # 1383
+vmovs 1, s7, s49 # 1384
+vldi 1, c1, 2 # 1385
+vmulci 1, c2, c1, 1073741824 # 1386
+vmovc 1, c1, c2 # 1387
+vmulm 1, s49, s16, c1 # 1388
+vldi 1, c2, 2 # 1389
+vmulci 1, c0, c2, 1073741824 # 1390
+vmovc 1, c2, c0 # 1391
+vaddm 1, s16, s4, c2 # 1392
+vadds 1, s51, s49, s16 # 1393
+vadds 1, s49, s51, s7 # 1394
+vasm_open 1, 3, True, c2, s49 # 1395
+vmodc 1, c0, c2, c1 # 1396
+vconvmodp 1, ci39, c0, 0 # 1397
+vbitdecint 1, 32, ci39, ci38, ci37, ci36, ci35, ci34, ci33, ci32, ci31, ci30, ci29, ci28, ci27, ci26, ci25, ci24, ci23, ci22, ci21, ci20, ci19, ci18, ci17, ci16, ci15, ci14, ci13, ci10, ci11, ci8, ci12, ci9 # 1398
+vconvint 1, c2, ci38 # 1399
+vconvint 1, c3, ci37 # 1400
+vconvint 1, c4, ci36 # 1401
+vconvint 1, c5, ci35 # 1402
+vconvint 1, c6, ci34 # 1403
+vconvint 1, c7, ci33 # 1404
+vconvint 1, c8, ci32 # 1405
+vconvint 1, c9, ci31 # 1406
+vconvint 1, c10, ci30 # 1407
+vconvint 1, c11, ci29 # 1408
+vconvint 1, c12, ci28 # 1409
+vconvint 1, c13, ci27 # 1410
+vconvint 1, c14, ci26 # 1411
+vconvint 1, c15, ci25 # 1412
+vconvint 1, c16, ci24 # 1413
+vconvint 1, c17, ci23 # 1414
+vconvint 1, c18, ci22 # 1415
+vconvint 1, c19, ci21 # 1416
+vconvint 1, c20, ci20 # 1417
+vconvint 1, c21, ci19 # 1418
+vconvint 1, c22, ci18 # 1419
+vconvint 1, c23, ci17 # 1420
+vconvint 1, c24, ci16 # 1421
+vconvint 1, c25, ci15 # 1422
+vconvint 1, c26, ci14 # 1423
+vconvint 1, c27, ci13 # 1424
+vconvint 1, c28, ci10 # 1425
+vconvint 1, c29, ci11 # 1426
+vconvint 1, c30, ci8 # 1427
+vconvint 1, c31, ci12 # 1428
+vconvint 1, c32, ci9 # 1429
+vsubsfi 1, s49, s94, 1 # 1430
+vsubsfi 1, s94, s5, 1 # 1431
+vsubsfi 1, s5, s26, 1 # 1432
+vsubsfi 1, s26, s92, 1 # 1433
+vsubsfi 1, s92, s25, 1 # 1434
+vsubsfi 1, s25, s89, 1 # 1435
+vsubsfi 1, s89, s9, 1 # 1436
+vsubsfi 1, s9, s86, 1 # 1437
+vsubsfi 1, s86, s23, 1 # 1438
+vsubsfi 1, s23, s83, 1 # 1439
+vsubsfi 1, s83, s24, 1 # 1440
+vsubsfi 1, s24, s80, 1 # 1441
+vsubsfi 1, s80, s22, 1 # 1442
+vsubsfi 1, s22, s77, 1 # 1443
+vsubsfi 1, s77, s8, 1 # 1444
+vsubsfi 1, s8, s74, 1 # 1445
+vsubsfi 1, s74, s20, 1 # 1446
+vsubsfi 1, s20, s71, 1 # 1447
+vsubsfi 1, s71, s21, 1 # 1448
+vsubsfi 1, s21, s68, 1 # 1449
+vsubsfi 1, s68, s19, 1 # 1450
+vsubsfi 1, s19, s65, 1 # 1451
+vsubsfi 1, s65, s15, 1 # 1452
+vsubsfi 1, s15, s62, 1 # 1453
+vsubsfi 1, s62, s17, 1 # 1454
+vsubsfi 1, s17, s59, 1 # 1455
+vsubsfi 1, s59, s18, 1 # 1456
+vsubsfi 1, s18, s56, 1 # 1457
+vsubsfi 1, s56, s10, 1 # 1458
+vsubsfi 1, s10, s53, 1 # 1459
+vsubsfi 1, s53, s28, 1 # 1460
+vmulm 1, s28, s53, c32 # 1461
+vaddm 1, s51, s53, c32 # 1462
+vmulsi 1, s53, s28, 2 # 1463
+vsubs 1, s16, s51, s53 # 1464
+vmulm 1, s51, s10, c31 # 1465
+vaddm 1, s53, s10, c31 # 1466
+vmulsi 1, s10, s51, 2 # 1467
+vsubs 1, s30, s53, s10 # 1468
+vmulm 1, s53, s56, c30 # 1469
+vaddm 1, s10, s56, c30 # 1470
+vmulsi 1, s56, s53, 2 # 1471
+vsubs 1, s52, s10, s56 # 1472
+vmulm 1, s10, s18, c29 # 1473
+vaddm 1, s56, s18, c29 # 1474
+vmulsi 1, s18, s10, 2 # 1475
+vsubs 1, s54, s56, s18 # 1476
+vmulm 1, s56, s59, c28 # 1477
+vaddm 1, s18, s59, c28 # 1478
+vmulsi 1, s59, s56, 2 # 1479
+vsubs 1, s55, s18, s59 # 1480
+vmulm 1, s18, s17, c27 # 1481
+vaddm 1, s59, s17, c27 # 1482
+vmulsi 1, s17, s18, 2 # 1483
+vsubs 1, s57, s59, s17 # 1484
+vmulm 1, s59, s62, c26 # 1485
+vaddm 1, s17, s62, c26 # 1486
+vmulsi 1, s62, s59, 2 # 1487
+vsubs 1, s58, s17, s62 # 1488
+vmulm 1, s17, s15, c25 # 1489
+vaddm 1, s62, s15, c25 # 1490
+vmulsi 1, s15, s17, 2 # 1491
+vsubs 1, s60, s62, s15 # 1492
+vmulm 1, s62, s65, c24 # 1493
+vaddm 1, s15, s65, c24 # 1494
+vmulsi 1, s65, s62, 2 # 1495
+vsubs 1, s61, s15, s65 # 1496
+vmulm 1, s15, s19, c23 # 1497
+vaddm 1, s65, s19, c23 # 1498
+vmulsi 1, s19, s15, 2 # 1499
+vsubs 1, s63, s65, s19 # 1500
+vmulm 1, s65, s68, c22 # 1501
+vaddm 1, s19, s68, c22 # 1502
+vmulsi 1, s68, s65, 2 # 1503
+vsubs 1, s64, s19, s68 # 1504
+vmulm 1, s19, s21, c21 # 1505
+vaddm 1, s68, s21, c21 # 1506
+vmulsi 1, s21, s19, 2 # 1507
+vsubs 1, s66, s68, s21 # 1508
+vmulm 1, s68, s71, c20 # 1509
+vaddm 1, s21, s71, c20 # 1510
+vmulsi 1, s71, s68, 2 # 1511
+vsubs 1, s67, s21, s71 # 1512
+vmulm 1, s21, s20, c19 # 1513
+vaddm 1, s71, s20, c19 # 1514
+vmulsi 1, s20, s21, 2 # 1515
+vsubs 1, s69, s71, s20 # 1516
+vmulm 1, s71, s74, c18 # 1517
+vaddm 1, s20, s74, c18 # 1518
+vmulsi 1, s74, s71, 2 # 1519
+vsubs 1, s70, s20, s74 # 1520
+vmulm 1, s20, s8, c17 # 1521
+vaddm 1, s74, s8, c17 # 1522
+vmulsi 1, s8, s20, 2 # 1523
+vsubs 1, s72, s74, s8 # 1524
+vmulm 1, s74, s77, c16 # 1525
+vaddm 1, s8, s77, c16 # 1526
+vmulsi 1, s77, s74, 2 # 1527
+vsubs 1, s73, s8, s77 # 1528
+vmulm 1, s8, s22, c15 # 1529
+vaddm 1, s77, s22, c15 # 1530
+vmulsi 1, s22, s8, 2 # 1531
+vsubs 1, s75, s77, s22 # 1532
+vmulm 1, s77, s80, c14 # 1533
+vaddm 1, s22, s80, c14 # 1534
+vmulsi 1, s80, s77, 2 # 1535
+vsubs 1, s76, s22, s80 # 1536
+vmulm 1, s22, s24, c13 # 1537
+vaddm 1, s80, s24, c13 # 1538
+vmulsi 1, s24, s22, 2 # 1539
+vsubs 1, s78, s80, s24 # 1540
+vmulm 1, s80, s83, c12 # 1541
+vaddm 1, s24, s83, c12 # 1542
+vmulsi 1, s83, s80, 2 # 1543
+vsubs 1, s79, s24, s83 # 1544
+vmulm 1, s24, s23, c11 # 1545
+vaddm 1, s83, s23, c11 # 1546
+vmulsi 1, s23, s24, 2 # 1547
+vsubs 1, s81, s83, s23 # 1548
+vmulm 1, s83, s86, c10 # 1549
+vaddm 1, s23, s86, c10 # 1550
+vmulsi 1, s86, s83, 2 # 1551
+vsubs 1, s82, s23, s86 # 1552
+vmulm 1, s23, s9, c9 # 1553
+vaddm 1, s86, s9, c9 # 1554
+vmulsi 1, s9, s23, 2 # 1555
+vsubs 1, s84, s86, s9 # 1556
+vmulm 1, s86, s89, c8 # 1557
+vaddm 1, s9, s89, c8 # 1558
+vmulsi 1, s89, s86, 2 # 1559
+vsubs 1, s85, s9, s89 # 1560
+vmulm 1, s9, s25, c7 # 1561
+vaddm 1, s89, s25, c7 # 1562
+vmulsi 1, s25, s9, 2 # 1563
+vsubs 1, s87, s89, s25 # 1564
+vmulm 1, s89, s92, c6 # 1565
+vaddm 1, s25, s92, c6 # 1566
+vmulsi 1, s92, s89, 2 # 1567
+vsubs 1, s88, s25, s92 # 1568
+vmulm 1, s25, s26, c5 # 1569
+vaddm 1, s92, s26, c5 # 1570
+vmulsi 1, s26, s25, 2 # 1571
+vsubs 1, s90, s92, s26 # 1572
+vmulm 1, s92, s5, c4 # 1573
+vaddm 1, s26, s5, c4 # 1574
+vmulsi 1, s5, s92, 2 # 1575
+vsubs 1, s91, s26, s5 # 1576
+vmulm 1, s26, s94, c3 # 1577
+vaddm 1, s5, s94, c3 # 1578
+vmulsi 1, s94, s26, 2 # 1579
+vsubs 1, s93, s5, s94 # 1580
+vmulm 1, s5, s49, c2 # 1581
+vaddm 1, s94, s49, c2 # 1582
+vmulsi 1, s49, s5, 2 # 1583
+vsubs 1, s50, s94, s49 # 1584
+vadds 1, s94, s5, s50 # 1585
+vmuls 1, 87, s29, s30, s52, s27, s30, s53, s31, s54, s55, s33, s54, s56, s32, s57, s58, s3, s57, s59, s34, s60, s61, s36, s60, s62, s35, s63, s64, s12, s63, s65, s37, s66, s67, s39, s66, s68, s38, s69, s70, s11, s69, s71, s40, s72, s73, s42, s72, s74, s41, s75, s76, s6, s75, s77, s43, s78, s79, s45, s78, s80, s44, s81, s82, s13, s81, s83, s46, s84, s85, s48, s84, s86, s47, s87, s88, s14, s87, s89, s49, s90, s91, s50, s90, s92, s5, s93, s94 # 1586
+vadds 1, s30, s27, s51 # 1587
+vadds 1, s27, s33, s10 # 1588
+vadds 1, s33, s3, s18 # 1589
+vadds 1, s3, s36, s17 # 1590
+vadds 1, s36, s12, s15 # 1591
+vadds 1, s12, s39, s19 # 1592
+vadds 1, s39, s11, s21 # 1593
+vadds 1, s11, s42, s20 # 1594
+vadds 1, s42, s6, s8 # 1595
+vadds 1, s6, s45, s22 # 1596
+vadds 1, s45, s13, s24 # 1597
+vadds 1, s13, s48, s23 # 1598
+vadds 1, s48, s14, s9 # 1599
+vadds 1, s14, s50, s25 # 1600
+vadds 1, s50, s5, s26 # 1601
+vmuls 1, 45, s10, s16, s29, s18, s16, s30, s17, s31, s32, s15, s31, s33, s19, s34, s35, s21, s34, s36, s20, s37, s38, s8, s37, s39, s22, s40, s41, s24, s40, s42, s23, s43, s44, s9, s43, s45, s25, s46, s47, s26, s46, s48, s5, s49, s50 # 1602
+vadds 1, s16, s18, s28 # 1603
+vadds 1, s18, s15, s27 # 1604
+vadds 1, s15, s21, s3 # 1605
+vadds 1, s21, s8, s12 # 1606
+vadds 1, s8, s24, s11 # 1607
+vadds 1, s24, s9, s6 # 1608
+vadds 1, s9, s26, s13 # 1609
+vadds 1, s26, s5, s14 # 1610
+vmuls 1, 21, s3, s10, s17, s12, s10, s18, s11, s19, s20, s6, s19, s21, s13, s22, s23, s14, s22, s24, s5, s25, s26 # 1611
+vadds 1, s10, s12, s16 # 1612
+vadds 1, s12, s6, s15 # 1613
+vadds 1, s6, s14, s8 # 1614
+vadds 1, s14, s5, s9 # 1615
+vmuls 1, 9, s8, s3, s11, s9, s3, s12, s5, s13, s14 # 1616
+vadds 1, s3, s9, s10 # 1617
+vadds 1, s9, s5, s6 # 1618
+vmuls 1, 3, s5, s8, s9 # 1619
+vadds 1, s8, s5, s3 # 1620
+vsubsfi 1, s5, s8, 1 # 1621
+vmovs 1, s8, s5 # 1622
+vmulm 1, s5, s8, c1 # 1623
+vsubmr 1, s8, c0, s7 # 1624
+vadds 1, s7, s8, s5 # 1625
+vinv2m 1, c0, 31 # 1626
+vsubs 1, s8, s4, s7 # 1627
+vmulm 1, s4, s8, c0 # 1628
+vsubsfi 1, s8, s4, 0 # 1629
+vmovs 1, s4, s8 # 1630
+movs s8, s4 # 1631
+ldint ci9, 1 # 1632
+addint ci12, ci7, ci9 # 1633
+ldint ci9, 8 # 1634
+ltc ci8, ci12, ci9 # 1635
+ldint ci9, 1 # 1636
+subint ci11, ci9, ci8 # 1637
+convint c0, ci11 # 1638
+cond_print_str c0, 1919252079 # 1639
+convint c0, ci11 # 1640
+cond_print_str c0, 2003790950 # 1641
+convint c0, ci11 # 1642
+cond_print_str c0, 8250 # 1643
+convint c0, ci12 # 1644
+convint c1, ci11 # 1645
+ldi c2, 0 # 1646
+cond_print_plain c1, c0, c2 # 1647
+convint c1, ci11 # 1648
+cond_print_str c1, 47 # 1649
+convint c1, ci11 # 1650
+cond_print_str c1, 56 # 1651
+convint c1, ci11 # 1652
+cond_print_str c1, 10 # 1653
+crash ci11 # 1654
+ldint ci11, 8210 # 1655
+addint ci9, ci12, ci11 # 1656
+ldmsi s4, ci9 # 1657
+ldsi s7, 0 # 1658
+ldms s7, 8218 # 1659
+ldsi s5, 0 # 1660
+subsfi s5, s7, 0 # 1661
+ldsi s3, 0 # 1662
+adds s3, s4, s5 # 1663
+ldsi s4, 0 # 1664
+ldsi s4, 0 # 1665
+ldsi s4, 0 # 1666
+ldint ci9, 1 # 1667
+addint ci12, ci7, ci9 # 1668
+ldint ci9, 8 # 1669
+ltc ci11, ci12, ci9 # 1670
+ldint ci9, 1 # 1671
+subint ci8, ci9, ci11 # 1672
+convint c1, ci8 # 1673
+cond_print_str c1, 1919252079 # 1674
+convint c1, ci8 # 1675
+cond_print_str c1, 2003790950 # 1676
+convint c1, ci8 # 1677
+cond_print_str c1, 8250 # 1678
+convint c1, ci12 # 1679
+convint c0, ci8 # 1680
+ldi c2, 0 # 1681
+cond_print_plain c0, c1, c2 # 1682
+convint c0, ci8 # 1683
+cond_print_str c0, 47 # 1684
+convint c0, ci8 # 1685
+cond_print_str c0, 56 # 1686
+convint c0, ci8 # 1687
+cond_print_str c0, 10 # 1688
+crash ci8 # 1689
+ldint ci8, 8192 # 1690
+addint ci9, ci12, ci8 # 1691
+ldmsi s4, ci9 # 1692
+ldms s5, 8219 # 1693
+subs s9, s4, s5 # 1694
+muls 6, s6, s3, s8, s4, s8, s9 # 1695
+adds s3, s6, s7 # 1696
+stms s3, 8218 # 1697
+adds s3, s4, s5 # 1698
+stms s3, 8219 # 1699
+ldint ci9, 1 # 1700
+addint ci7, ci7, ci9 # 1701
+ltc ci9, ci7, ci6 # 1702
+jmpnz ci9, -563 # 1703
+# bankers_bonus-0-end-if-31
+ldms s3, 8218 # 1704
+ldsi s4, 0 # 1705
+asm_open 3, True, c0, s3 # 1706
+ldi c1, 0 # 1707
+print_char4 1769496941 # 1708
+print_char4 980252013 # 1709
+print_char 32 # 1710
+ldi c1, -16 # 1711
+ldi c2, 0 # 1712
+ldi c3, 0 # 1713
+ldi c4, 0 # 1714
+print_float_plain c0, c1, c2, c3, c4 # 1715
+print_char 10 # 1716
+ldms s3, 8219 # 1717
+ldmint ci9, 8200 # 1718
+ldint ci12, 0 # 1719
+subint ci8, ci9, ci12 # 1720
+randomfulls s4 # 1721
+muls 3, s5, s3, s4 # 1722
+ldint ci9, 0 # 1723
+gtc ci12, ci8, ci9 # 1724
+ldint ci9, 0 # 1725
+jmpeqz ci12, 30 # 1726
+# bankers_bonus-0-begin-loop-33
+ltc ci12, ci9, ci8 # 1727
+ldint ci11, 1 # 1728
+subint ci10, ci11, ci12 # 1729
+convint c0, ci10 # 1730
+cond_print_str c0, 1919252079 # 1731
+convint c0, ci10 # 1732
+cond_print_str c0, 2003790950 # 1733
+convint c0, ci10 # 1734
+cond_print_str c0, 8250 # 1735
+convint c0, ci9 # 1736
+convint c1, ci10 # 1737
+ldi c2, 0 # 1738
+cond_print_plain c1, c0, c2 # 1739
+convint c1, ci10 # 1740
+cond_print_str c1, 47 # 1741
+convint c1, ci8 # 1742
+convint c0, ci10 # 1743
+ldi c2, 0 # 1744
+cond_print_plain c0, c1, c2 # 1745
+convint c0, ci10 # 1746
+cond_print_str c0, 10 # 1747
+crash ci10 # 1748
+ldint ci10, 8192 # 1749
+addint ci11, ci9, ci10 # 1750
+ldminti ci10, ci11 # 1751
+writesocketshare 6, ci10, 0, 1, s3, s4, s5 # 1752
+ldint ci10, 1 # 1753
+addint ci9, ci9, ci10 # 1754
+ltc ci10, ci9, ci8 # 1755
+jmpnz ci10, -30 # 1756
+# bankers_bonus-0-end-if-35
+ldmint ci10, 8200 # 1757
+ldint ci11, 0 # 1758
+gtc ci12, ci10, ci11 # 1759
+ldint ci10, 0 # 1760
+jmpeqz ci12, 6 # 1761
+# bankers_bonus-0-begin-loop-37
+closeclientconnection ci10 # 1762
+ldint ci12, 1 # 1763
+addint ci10, ci10, ci12 # 1764
+ldmint ci12, 8200 # 1765
+ltc ci11, ci10, ci12 # 1766
+jmpnz ci11, -6 # 1767
+# bankers_bonus-0-end-if-39
+ldint ci11, True # 1768
+jmpnz ci11, -1752 # 1769
+use 0, 2, -1 # 1770
+use 0, 0, -1 # 1771
+reqbl 106 # 1772
+# bankers_bonus-0-memory-usage-41
+ldmc c0, 8191 # 1773
+gldmc cg0, 8191 # 1774
+ldmint ci0, 8220 # 1775
+ldms s0, 8219 # 1776
+gldms sg0, 8191 # 1777

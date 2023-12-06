@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+exclude = ["benchmark/bencher"]
+
+
+[workspace.dependencies]
+# Use a workspace.forked remoc version which changes the default options for bincode to use varint encoding
+remoc = { path = "libs/remoc/remoc", default-features = false, features = ["rch", "codec-bincode"]}
+clap = { version = "4.2.2", features = ["derive"]}
+
+[profile.debug-release]
+inherits = "release"
+debug = 1

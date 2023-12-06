@@ -1,0 +1,6 @@
+[submodule "extern/relic"]
+	path = extern/relic
+	url = https://github.com/relic-toolkit/relic.git
+[submodule "extern/googletest"]
+	path = extern/googletest
+	url = https://github.com/google/googletest.git

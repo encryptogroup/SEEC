@@ -1,0 +1,12 @@
+body: ''
+mailfrom: smtp1.asd@meiliboxi.fi
+rcpttos:
+- toka
+secret_share_block: CDMLNFRsZAZwCjFGWUomQUNMXyo4Y211ZUYJbk4=
+secret_share_bucket_blocks:
+  45:
+  - LBw5KCImPxMQHjIbLigKND04OykVLTwkATUpJycOJjsmHDI6FgMZNzgRBjsj
+secret_share_truncated_block: Lx0jFiQ8GCMREAM7EC4bABcsAwQuKTQUHwspDw8=
+sequence_number: 0
+subject: FisQdTc1Z00NLmALVhRkQRhA
+uid: 6jPP9FBm
