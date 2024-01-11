@@ -1,19 +1,18 @@
 // //! TCP implementation of a channel.
 
-use super::util::{TrackingReader, TrackingWriter};
-use crate::TrackingChannel;
 use async_stream::stream;
-use futures::Stream;
-use remoc::{ConnectError, RemoteSend};
-
 use std::fmt::Debug;
 use std::io;
 use std::net::Ipv4Addr;
 use std::time::Duration;
-
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+
+use futures::Stream;
+use remoc::{ConnectError, RemoteSend};
 use tokio::time::Instant;
 use tracing::info;
+
+use crate::TrackingChannel;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -31,7 +30,7 @@ pub async fn listen<T: RemoteSend>(
     let listener = TcpListener::bind(addr).await?;
     let (socket, remote_addr) = listener.accept().await?;
     info!(?remote_addr, "Established connection to remote");
-    establish_remoc_connection(socket).await
+    establish_remoc_connection_tcp(socket).await
 }
 
 #[tracing::instrument(err)]
@@ -40,8 +39,8 @@ pub async fn connect<T: RemoteSend>(
 ) -> Result<TrackingChannel<T>, Error> {
     info!("Connecting to remote");
     let stream = TcpStream::connect(remote_addr).await?;
-    info!("Established connection to remote");
-    establish_remoc_connection(stream).await
+    info!("Established connection to server");
+    establish_remoc_connection_tcp(stream).await
 }
 
 #[tracing::instrument(err)]
@@ -66,7 +65,7 @@ pub async fn connect_with_timeout<T: RemoteSend>(
             }
         };
         info!("Established connection to remote");
-        match establish_remoc_connection(stream).await {
+        match establish_remoc_connection_tcp(stream).await {
             Ok(ch) => return Ok(ch),
             Err(err) => {
                 last_err = Some(err);
@@ -86,7 +85,7 @@ pub async fn server<T: RemoteSend>(
     let s = stream! {
         loop {
             let (socket, _) = listener.accept().await?;
-            yield establish_remoc_connection(socket).await;
+            yield establish_remoc_connection_tcp(socket).await;
 
         }
     };
@@ -114,40 +113,20 @@ pub async fn new_local_pair<T: RemoteSend>(
     let (server, client) = tokio::try_join!(accept, TcpStream::connect(addr))?;
 
     let (ch1, ch2) = tokio::try_join!(
-        establish_remoc_connection(server),
-        establish_remoc_connection(client),
+        establish_remoc_connection_tcp(server),
+        establish_remoc_connection_tcp(client),
     )?;
 
     Ok((ch1, ch2))
 }
 
-// TODO provide way of passing remoc::Cfg to method
-async fn establish_remoc_connection<T: RemoteSend>(
+async fn establish_remoc_connection_tcp<T: RemoteSend>(
     socket: TcpStream,
 ) -> Result<TrackingChannel<T>, Error> {
     // send data ASAP
     socket.set_nodelay(true)?;
     let (socket_rx, socket_tx) = socket.into_split();
-    let tracking_rx = TrackingReader::new(socket_rx);
-    let tracking_tx = TrackingWriter::new(socket_tx);
-    let bytes_read = tracking_rx.bytes_read();
-    let bytes_written = tracking_tx.bytes_written();
-
-    let mut cfg = remoc::Cfg::balanced();
-    cfg.receive_buffer = 16 * 1024 * 1024;
-    cfg.chunk_size = 1024 * 1024;
-
-    // Establish Remoc connection over TCP.
-    let (conn, tx, rx) = remoc::Connect::io_buffered::<_, _, _, _, remoc::codec::Bincode>(
-        cfg,
-        tracking_rx,
-        tracking_tx,
-        8096,
-    )
-    .await?;
-    tokio::spawn(conn);
-
-    Ok((tx, bytes_written, rx, bytes_read))
+    Ok(super::establish_remoc_connection(socket_rx, socket_tx).await?)
 }
 
 #[cfg(test)]
