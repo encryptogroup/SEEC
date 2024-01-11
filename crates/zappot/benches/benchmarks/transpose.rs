@@ -1,7 +1,7 @@
 use criterion::{criterion_group, BenchmarkId, Criterion};
 use rand::thread_rng;
 use rand_core::RngCore;
-#[cfg(feature = "c_sse")]
+#[cfg(feature = "c-sse")]
 use zappot::util::transpose::transpose_c_sse;
 use zappot::util::transpose::transpose_rs_sse;
 

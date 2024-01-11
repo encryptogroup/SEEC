@@ -1,0 +1,9 @@
+[submodule "libs/libote-rs/libOTe"]
+	path = libs/libote-rs/libOTe
+	url = https://github.com/robinhundt/libOTe.git
+[submodule "libs/libote-rs/thirdparty/libdivide"]
+	path = libs/libote-rs/thirdparty/libdivide
+	url = https://github.com/ridiculousfish/libdivide.git
+[submodule "libs/libote-rs/thirdparty/span-lite"]
+	path = libs/libote-rs/thirdparty/span-lite
+	url = https://github.com/martinmoene/span-lite.git

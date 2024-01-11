@@ -3,6 +3,9 @@ image: "instrumentisto/rust:nightly"
 .default:
   interruptible: true
 
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+
 # Use cargo to test the project
 run-tests:
   stage: test

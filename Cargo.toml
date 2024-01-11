@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["libs"]
 
 
 [workspace.dependencies]
@@ -11,3 +12,8 @@ clap = { version = "4.2.2", features = ["derive"]}
 [profile.debug-release]
 inherits = "release"
 debug = 1
+
+[profile.test-opt]
+inherits = "test"
+opt-level = 1
+debug-assertions = false

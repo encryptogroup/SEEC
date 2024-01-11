@@ -9,6 +9,8 @@ edition = "2021"
 _integration_tests = ["tracing-subscriber", "anyhow", "funty"]
 bench-api = ["anyhow"]
 aby2 = []
+silent-ot = ["zappot/silent-ot"]
+silent-ot-libote-codes = ["zappot/silent-ot-silver-code","zappot/silent-ot-ea-code", "zappot/silent-ot-ex-conv-code"]
 
 [[example]]
 name = "bristol"

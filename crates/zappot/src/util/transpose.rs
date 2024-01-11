@@ -13,7 +13,7 @@ pub fn transpose_128(bitmat: &mut [Block; 128]) {
     bytes.copy_from_slice(&transposed);
 }
 
-#[cfg(feature = "c_sse")]
+#[cfg(feature = "c-sse")]
 pub fn transpose_c_sse(bitmat: &[u8], rows: usize, cols: usize) -> Vec<u8> {
     let mut out = vec![0_u8; rows * cols / 8];
     assert_eq!(
@@ -29,7 +29,7 @@ pub fn transpose_c_sse(bitmat: &[u8], rows: usize, cols: usize) -> Vec<u8> {
     out
 }
 
-#[cfg(feature = "c_sse")]
+#[cfg(feature = "c-sse")]
 #[link(name = "transpose")]
 extern "C" {
     fn sse_trans(out: *mut u8, inp: *const u8, nrows: u64, ncols: u64);

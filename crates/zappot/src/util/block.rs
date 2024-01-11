@@ -1,7 +1,3 @@
-// This seems to be needed with the nightly clippy, as otherwise the Pod and Zeroable expansions
-// lead to this error
-#![allow(clippy::extra_unused_type_parameters)]
-
 //! 128 bit Block
 use crate::DefaultRom;
 use bitvec::order::Lsb0;
@@ -19,7 +15,7 @@ use std::ops::{Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssi
 use std::{array, mem};
 
 #[derive(Pod, Zeroable, Debug, Default, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
-#[repr(transparent)]
+#[repr(C, align(16))]
 pub struct Block {
     data: u128,
 }
@@ -29,7 +25,7 @@ impl Block {
     pub const fn zero() -> Self {
         Self { data: 0 }
     }
-    /// Block with the least significant bit set to 0.
+    /// Block with the least significant bit set to 1.
     pub const fn one() -> Self {
         Self { data: 1 }
     }
@@ -68,17 +64,15 @@ impl Block {
 
     /// Cast a mutable slice of Blocks into a mutable slice of `GenericArray<u8, U16>`.
     /// Intended to pass Blocks directly to the [aes](https://docs.rs/aes/) encryption methods.
-    #[cfg(feature = "silent_ot")]
-    pub(crate) fn cast_slice_mut(slice: &mut [Block]) -> &mut [GenericArray<u8, U16>] {
-        // Safety: GenericArray<u8, U16> works like a [u8; 16]. Since Block is a repr(transparent)
+    pub fn cast_slice_mut(slice: &mut [Block]) -> &mut [GenericArray<u8, U16>] {
+        // Safety: GenericArray<u8, U16> works like a [u8; 16]. Since Block is a repr(C)
         // struct with a u128 field, with an alignment greater than [u8; 16], the cast is legal.
         unsafe { &mut *(slice as *mut _ as *mut [GenericArray<u8, U16>]) }
     }
 
     /// Cast a slice of Blocks into a slice of `GenericArray<u8, U16>`. Intended to pass Blocks
     /// directly to the [aes](https://docs.rs/aes/) encryption methods.
-    #[cfg(feature = "silent_ot")]
-    pub(crate) fn cast_slice(slice: &[Block]) -> &[GenericArray<u8, U16>] {
+    pub fn cast_slice(slice: &[Block]) -> &[GenericArray<u8, U16>] {
         // See cast_slice_mut
         unsafe { &*(slice as *const _ as *const [GenericArray<u8, U16>]) }
     }
@@ -87,18 +81,6 @@ impl Block {
 impl Distribution<Block> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block {
         Block { data: rng.gen() }
-    }
-}
-
-impl From<u8> for Block {
-    fn from(val: u8) -> Self {
-        Self { data: val.into() }
-    }
-}
-
-impl From<u16> for Block {
-    fn from(val: u16) -> Self {
-        Self { data: val.into() }
     }
 }
 
