@@ -14,7 +14,7 @@ use blake2::{
 
 pub mod base_ot;
 pub mod ot_ext;
-#[cfg(feature = "silent_ot")]
+#[cfg(feature = "silent-ot")]
 pub mod silent_ot;
 pub mod traits;
 pub mod util;

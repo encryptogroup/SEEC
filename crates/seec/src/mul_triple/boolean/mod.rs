@@ -8,6 +8,8 @@ use std::ops::Index;
 
 pub mod insecure_provider;
 pub mod ot_ext;
+#[cfg(any(feature = "silent_ot", feature = "silent_ot_libote_codes"))]
+pub mod silent_ot;
 pub mod trusted_provider;
 pub mod trusted_seed_provider;
 

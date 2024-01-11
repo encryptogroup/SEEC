@@ -1,0 +1,17 @@
+[package]
+name = "libote"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytemuck = { version = "1.9.1", features = ["derive"]}
+cxx = "1.0.92"
+
+[dev-dependencies]
+aligned-vec = "0.5.0"
+
+[build-dependencies]
+cmake = "0.1.49"
+cxx-build = "1.0.92"

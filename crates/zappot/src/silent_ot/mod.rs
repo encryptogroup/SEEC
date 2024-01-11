@@ -3,44 +3,59 @@
 use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat};
 use crate::traits::{BaseROTReceiver, BaseROTSender};
 use crate::util::aes_hash::FIXED_KEY_HASH;
-use crate::util::aes_rng::AesRng;
+
 use crate::util::tokio_rayon::AsyncThreadPool;
-use crate::util::transpose::transpose_128;
+
 use crate::util::Block;
 use crate::{base_ot, BASE_OT_COUNT};
 use aligned_vec::typenum::U16;
 use aligned_vec::AlignedVec;
-use bitpolymul::{DecodeCache, FftPoly};
+
 use bitvec::order::Lsb0;
 use bitvec::slice::BitSlice;
 use bitvec::vec::BitVec;
-use bytemuck::{cast, cast_slice, cast_slice_mut};
+use bytemuck::cast_slice;
 use ndarray::Array2;
 use num_integer::Integer;
-use num_prime::nt_funcs::next_prime;
 use rand::Rng;
-use rand_core::{CryptoRng, RngCore, SeedableRng};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use rayon::slice::{ParallelSlice, ParallelSliceMut};
+use rand_core::{CryptoRng, RngCore};
+use seec_channel::CommunicationError;
+
+#[cfg(feature = "silent-ot-ea-code")]
+use crate::silent_ot::ex_acc_code::{ExAccConf, ExAccEncoder};
+#[cfg(feature = "silent-ot-ex-conv-code")]
+use crate::silent_ot::ex_conv_code::{ExConvConf, ExConvEncoder};
+use crate::silent_ot::quasi_cyclic_encode::QuasiCyclicEncoder;
+#[cfg(feature = "silent-ot-silver-code")]
+use crate::silent_ot::silver_code::{SilverConf, SilverEncoder};
+use aes::cipher::BlockEncrypt;
+use aes::Aes128;
+use quasi_cyclic_encode::QuasiCyclicConf;
+use rand::distributions::Standard;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use remoc::RemoteSend;
-use seec_channel::CommunicationError;
 use serde::{Deserialize, Serialize};
-use std::cmp::{max, min};
+use std::cmp::max;
 use std::fmt::Debug;
-use std::mem;
 use std::sync::Arc;
-use std::time::Instant;
+use std::thread::available_parallelism;
 
+#[cfg(feature = "silent-ot-ea-code")]
+pub mod ex_acc_code;
+#[cfg(feature = "silent-ot-ex-conv-code")]
+pub mod ex_conv_code;
 pub mod pprf;
+pub mod quasi_cyclic_encode;
+#[cfg(feature = "silent-ot-silver-code")]
+pub mod silver_code;
 
 /// The chosen security parameter of 128 bits.
 pub const SECURITY_PARAM: usize = 128;
 
 /// The SilentOT sender.
 pub struct Sender {
-    /// The quasi cyclic configuration
-    conf: QuasiCyclicConf,
+    enc: Encoder,
+    gap_ots: Vec<[Block; 2]>,
     /// The ggm tree that's used to generate the sparse vectors.
     gen: pprf::Sender,
     /// ThreadPool which is used to spawn the compute heavy functions on
@@ -49,8 +64,9 @@ pub struct Sender {
 
 /// The SilentOT receiver.
 pub struct Receiver {
-    /// The quasi cyclic configuration
-    conf: QuasiCyclicConf,
+    enc: Encoder,
+    gap_ots: Vec<Block>,
+    gap_choices: BitVec,
     /// The indices of the noisy locations in the sparse vector.
     S: Vec<usize>,
     /// The ggm tree thats used to generate the sparse vectors.
@@ -59,24 +75,48 @@ pub struct Receiver {
     thread_pool: Arc<ThreadPool>,
 }
 
-#[derive(Copy, Clone, Debug)]
-/// Configuration options  for the quasi cyclic silent OT implementation. Is created by
-/// calling the [configure()](`configure`) function.
-pub struct QuasiCyclicConf {
-    /// The prime for QuasiCyclic encoding
-    P: usize,
-    /// the number of OTs being requested.
-    requested_num_ots: usize,
-    /// The dense vector size, this will be at least as big as mRequestedNumOts.
-    N: usize,
-    /// The sparse vector size, this will be mN * mScaler.
-    N2: usize,
-    /// The scaling factor that the sparse vector will be compressed by.
-    scaler: usize,
-    /// The size of each regular section of the sparse vector.
-    size_per: usize,
-    /// The number of regular section of the sparse vector.
-    num_partitions: usize,
+#[derive(Debug)]
+pub enum Encoder {
+    QuasiCyclic(QuasiCyclicEncoder),
+    #[cfg(feature = "silent-ot-silver-code")]
+    Silver(SilverEncoder),
+    #[cfg(feature = "silent-ot-ea-code")]
+    ExpandAccumulate(ExAccEncoder),
+    #[cfg(feature = "silent-ot-ex-conv-code")]
+    ExpandConvolute(ExConvEncoder),
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+///
+/// - QuasiCyclic (https://eprint.iacr.org/2019/1159.pdf)
+/// - Silver (INSECURE! https://eprint.iacr.org/2021/1150, see https://eprint.iacr.org/2023/882 for attack)
+/// - ExpandAccumulate (https://eprint.iacr.org/2022/1014)
+/// - ExpandConvolute (https://eprint.iacr.org/2023/882)
+pub enum MultType {
+    QuasiCyclic {
+        scaler: usize,
+    },
+    #[cfg(feature = "silent-ot-silver-code")]
+    Silver5,
+    #[cfg(feature = "silent-ot-silver-code")]
+    Silver11,
+    #[cfg(feature = "silent-ot-ea-code")]
+    /// Fast
+    ExAcc7,
+    #[cfg(feature = "silent-ot-ea-code")]
+    /// Fast, but more conservative
+    ExAcc11,
+    #[cfg(feature = "silent-ot-ea-code")]
+    ExAcc21,
+    #[cfg(feature = "silent-ot-ea-code")]
+    /// Conservative
+    ExAcc40,
+    #[cfg(feature = "silent-ot-ex-conv-code")]
+    // Fastest
+    ExConv7x24,
+    #[cfg(feature = "silent-ot-ex-conv-code")]
+    /// Conservative
+    ExConv21x24,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -85,6 +125,7 @@ pub enum Msg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
     #[serde(bound = "")]
     BaseOTChannel(seec_channel::Receiver<BaseOTMsg>),
     Pprf(seec_channel::Receiver<pprf::Msg>),
+    GapValues(Vec<Block>),
 }
 
 pub enum ChoiceBitPacking {
@@ -92,17 +133,36 @@ pub enum ChoiceBitPacking {
     False,
 }
 
-#[derive(Clone)]
-/// Helper struct which manages parameters and cached values for the mult_add_reduce operation
-struct MultAddReducer<'a> {
-    a_polynomials: &'a [FftPoly],
-    conf: QuasiCyclicConf,
-    b_poly: FftPoly,
-    temp128: Vec<Block>,
-    cache: DecodeCache,
+#[derive(Debug, Clone)]
+enum ArrayOrVec {
+    Array(Array2<Block>),
+    Vec(Vec<Block>),
 }
 
 impl Sender {
+    #[tracing::instrument(skip(rng, sender, receiver))]
+    pub async fn new<RNG: RngCore + CryptoRng + Send>(
+        rng: &mut RNG,
+        num_ots: usize,
+        mult_type: MultType,
+        sender: &mut seec_channel::Sender<Msg>,
+        receiver: &mut seec_channel::Receiver<Msg>,
+    ) -> Self {
+        let num_threads = available_parallelism()
+            .expect("Unable to get parallelism")
+            .get();
+        Self::new_with_base_ot_sender(
+            base_ot::Sender::new(),
+            rng,
+            num_ots,
+            mult_type,
+            num_threads,
+            sender,
+            receiver,
+        )
+        .await
+    }
+
     /// Create a new Sender with the provided base OT sender. This will execute the needed
     /// base OTs.
     #[tracing::instrument(skip(base_ot_sender, rng, sender, receiver))]
@@ -110,7 +170,7 @@ impl Sender {
         mut base_ot_sender: BaseOT,
         rng: &mut RNG,
         num_ots: usize,
-        scaler: usize,
+        mult_type: MultType,
         num_threads: usize,
         sender: &mut seec_channel::Sender<Msg<BaseOT::Msg>>,
         receiver: &mut seec_channel::Receiver<Msg<BaseOT::Msg>>,
@@ -120,18 +180,17 @@ impl Sender {
         BaseOT::Msg: RemoteSend + Debug,
         RNG: RngCore + CryptoRng + Send,
     {
-        let conf = configure(num_ots, scaler, SECURITY_PARAM);
-        let pprf_conf: PprfConfig = conf.into();
+        let enc = Encoder::configure(num_ots, SECURITY_PARAM, mult_type);
         let silent_base_ots = {
             let (sender, mut receiver) = base_ot_channel(sender, receiver)
                 .await
                 .expect("Establishing sub channel");
             base_ot_sender
-                .send_random(pprf_conf.base_ot_count(), rng, &sender, &mut receiver)
+                .send_random(enc.base_ot_count(), rng, &sender, &mut receiver)
                 .await
                 .expect("Failed to generate base ots")
         };
-        Self::new_with_silent_base_ots(silent_base_ots, num_ots, scaler, num_threads)
+        Self::new_with_silent_base_ots(silent_base_ots, enc, num_threads)
     }
 
     /// Create a new Sender with the provided base OTs.
@@ -140,19 +199,17 @@ impl Sender {
     /// If the number of provided base OTs is unequal to
     /// [`QuasiCyclicConf::base_ot_count()`](`QuasiCyclicConf::base_ot_count()`).
     pub fn new_with_silent_base_ots(
-        silent_base_ots: Vec<[Block; 2]>,
-        num_ots: usize,
-        scaler: usize,
+        mut silent_base_ots: Vec<[Block; 2]>,
+        encoder: Encoder,
         num_threads: usize,
     ) -> Self {
-        let conf = configure(num_ots, scaler, SECURITY_PARAM);
-        let pprf_conf: PprfConfig = conf.into();
         assert_eq!(
-            pprf_conf.base_ot_count(),
+            encoder.base_ot_count(),
             silent_base_ots.len(),
             "Wrong number of silent base ots"
         );
-        let gen = pprf::Sender::new(pprf_conf, silent_base_ots);
+        let gap_ots = silent_base_ots.split_off(encoder.base_ot_count() - encoder.gap());
+        let gen = pprf::Sender::new(encoder.pprf_conf(), silent_base_ots);
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .build()
@@ -160,7 +217,8 @@ impl Sender {
             .into();
 
         Self {
-            conf,
+            enc: encoder,
+            gap_ots,
             gen,
             thread_pool,
         }
@@ -177,14 +235,13 @@ impl Sender {
         RNG: RngCore + CryptoRng,
     {
         let delta = rng.gen();
-        let conf = self.conf;
         let thread_pool = self.thread_pool.clone();
         let B = self
             .correlated_silent_send(delta, rng, sender, receiver)
             .await;
 
         thread_pool
-            .spawn_install_compute(move || Sender::hash(conf, delta, &B))
+            .spawn_install_compute(move || Sender::hash(delta, &B))
             .await
     }
 
@@ -202,75 +259,98 @@ impl Sender {
     where
         RNG: RngCore + CryptoRng,
     {
+        let pprf_format = self.enc.pprf_format();
         let rT = {
             let (sender, _receiver) = pprf_channel(&mut sender, &mut receiver)
                 .await
                 .expect("Establishing pprf channel");
             self.gen
-                .expand(sender, delta, rng, Some(Arc::clone(&self.thread_pool)))
+                .expand(
+                    sender,
+                    delta,
+                    pprf_format,
+                    rng,
+                    Some(Arc::clone(&self.thread_pool)),
+                )
                 .await
         };
-        let conf = self.conf;
-        let mut B = self
-            .thread_pool
+        let rT = self.derandomize_gap(rT, delta, &mut sender).await;
+        self.thread_pool
             .clone()
-            .spawn_install_compute(move || self.rand_mul_quasi_cyclic(rT))
-            .await;
-        B.truncate(conf.requested_num_ots);
-        B
+            .spawn_install_compute(move || self.enc.send_compress(rT))
+            .await
     }
 
-    fn rand_mul_quasi_cyclic(&self, rT: Array2<Block>) -> Vec<Block> {
-        let conf = self.conf;
-        let rows = QuasiCyclicConf::ROWS;
-        let a = init_a_polynomials(conf);
-        let mut c_mod_p1: Array2<Block> = Array2::zeros((rows, conf.n_blocks()));
-        let mut B = vec![Block::zero(); conf.N2];
-
-        c_mod_p1
-            .outer_iter_mut()
-            .into_par_iter()
-            .zip(rT.outer_iter())
-            .for_each_init(
-                || MultAddReducer::new(conf, &a),
-                |reducer, (mut cmod_row, rt_row)| {
-                    let cmod_row = cmod_row.as_slice_mut().unwrap();
-                    let rt_row = rt_row.as_slice().unwrap();
-                    reducer.reduce(cmod_row, rt_row);
-                },
+    async fn derandomize_gap(
+        &self,
+        rT: Array2<Block>,
+        delta: Block,
+        sender: &mut seec_channel::Sender<Msg>,
+    ) -> ArrayOrVec {
+        use aes::cipher::KeyInit;
+        if self.gap_ots.is_empty() {
+            #[cfg(feature = "silent-ot-silver-code")]
+            assert!(
+                !matches!(self.enc, Encoder::Silver(_)),
+                "gap_ots are empty but encoder is silver"
             );
-
-        let num_blocks = Integer::next_multiple_of(&conf.requested_num_ots, &128);
-        copy_out(&mut B[..num_blocks], &c_mod_p1);
-        B
-    }
-
-    fn hash(conf: QuasiCyclicConf, delta: Block, B: &[Block]) -> Vec<[Block; 2]> {
-        let mask = Block::all_ones() ^ Block::constant::<1>();
-        let d = delta & mask;
-        let mut messages: Vec<_> = B
-            .par_chunks(8)
-            .flat_map(|chunk| {
-                let mut messages = [Block::zero(); 2 * 8];
-                chunk
-                    .iter()
-                    .zip(messages.chunks_exact_mut(2))
-                    .for_each(|(blk, m)| {
-                        let r = *blk & mask;
-                        m[0] = r;
-                        m[1] = r ^ d;
-                    });
-                FIXED_KEY_HASH.cr_hash_blocks(&messages);
-                cast::<_, [[Block; 2]; 8]>(messages)
+            return ArrayOrVec::Array(rT);
+        }
+        let mut rT = rT.into_raw_vec();
+        let gap_vals: Vec<Block> = self
+            .gap_ots
+            .iter()
+            .map(|&[gap_ot0, gap_ot1]| {
+                rT.push(gap_ot0);
+                let v = gap_ot0 ^ delta;
+                let gap_val = Block::zero();
+                Aes128::new(&gap_ot1.into()).encrypt_block(&mut gap_val.into());
+                gap_val ^ v
             })
             .collect();
-        // Due to chunking, messages might be bigger than needed, so we truncate it
-        messages.truncate(conf.requested_num_ots);
+        sender.send(Msg::GapValues(gap_vals)).await.unwrap();
+        ArrayOrVec::Vec(rT)
+    }
+
+    fn hash(delta: Block, B: &[Block]) -> Vec<[Block; 2]> {
+        let mask = Block::all_ones() ^ Block::one();
+        let d = delta & mask;
+        let mut messages: Vec<_> = B
+            .iter()
+            .map(|block| {
+                let masked = *block & mask;
+                [masked, masked ^ d]
+            })
+            .collect();
+        FIXED_KEY_HASH.cr_hash_slice_mut(bytemuck::cast_slice_mut(&mut messages));
         messages
     }
 }
 
 impl Receiver {
+    #[tracing::instrument(skip(rng, sender, receiver))]
+    pub async fn new<RNG: RngCore + CryptoRng + Send>(
+        rng: &mut RNG,
+        num_ots: usize,
+        mult_type: MultType,
+        sender: &mut seec_channel::Sender<Msg>,
+        receiver: &mut seec_channel::Receiver<Msg>,
+    ) -> Self {
+        let num_threads = available_parallelism()
+            .expect("Unable to get parallelism")
+            .get();
+        Self::new_with_base_ot_receiver(
+            base_ot::Receiver::new(),
+            rng,
+            num_ots,
+            mult_type,
+            num_threads,
+            sender,
+            receiver,
+        )
+        .await
+    }
+
     /// Create a new Receiver with the provided base OT receiver. This will execute the needed
     /// base OTs.
     #[tracing::instrument(skip(base_ot_receiver, rng, sender, receiver))]
@@ -278,7 +358,7 @@ impl Receiver {
         mut base_ot_receiver: BaseOT,
         rng: &mut RNG,
         num_ots: usize,
-        scaler: usize,
+        mult_type: MultType,
         num_threads: usize,
         sender: &mut seec_channel::Sender<Msg<BaseOT::Msg>>,
         receiver: &mut seec_channel::Receiver<Msg<BaseOT::Msg>>,
@@ -288,8 +368,8 @@ impl Receiver {
         BaseOT::Msg: RemoteSend + Debug,
         RNG: RngCore + CryptoRng + Send,
     {
-        let conf = configure(num_ots, scaler, SECURITY_PARAM);
-        let silent_choice_bits = Self::sample_base_choice_bits(conf, rng);
+        let enc = Encoder::configure(num_ots, SECURITY_PARAM, mult_type);
+        let silent_choice_bits = Self::sample_base_choice_bits(&enc, rng);
         let silent_base_ots = {
             let choices = silent_choice_bits.as_bit_vec();
             let (sender, mut receiver) = base_ot_channel(sender, receiver)
@@ -300,13 +380,7 @@ impl Receiver {
                 .await
                 .expect("Failed to generate base ots")
         };
-        Self::new_with_silent_base_ots(
-            silent_base_ots,
-            silent_choice_bits,
-            num_ots,
-            scaler,
-            num_threads,
-        )
+        Self::new_with_silent_base_ots(silent_base_ots, silent_choice_bits, enc, num_threads)
     }
 
     /// Create a new Receiver with the provided base OTs and choice bits. The
@@ -317,24 +391,32 @@ impl Receiver {
     /// If the number of provided base OTs is unequal to
     /// [`QuasiCyclicConf::base_ot_count()`](`QuasiCyclicConf::base_ot_count()`).
     pub fn new_with_silent_base_ots(
-        base_ots: Vec<Block>,
-        base_choices: ChoiceBits,
-        num_ots: usize,
-        scaler: usize,
+        mut silent_base_ots: Vec<Block>,
+        mut silent_base_choices: ChoiceBits,
+        encoder: Encoder,
         num_threads: usize,
     ) -> Self {
-        let conf = configure(num_ots, scaler, 128);
-        let pprf_conf = conf.into();
-        let gen = pprf::Receiver::new(pprf_conf, base_ots, base_choices);
+        let gap_ots = silent_base_ots.split_off(encoder.base_ot_count() - encoder.gap());
+        let gap_choices = silent_base_choices.take_gap_choices();
+        let gen = pprf::Receiver::new(encoder.pprf_conf(), silent_base_ots, silent_base_choices);
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .build()
             .expect("Unable to initialize Sender threadpool")
             .into();
-
+        let mut S = gen.get_points(encoder.pprf_format());
+        for (idx, gap_choice) in
+            ((encoder.num_partitions() * encoder.size_per())..).zip(gap_choices.iter())
+        {
+            if *gap_choice {
+                S.push(idx)
+            }
+        }
         Self {
-            conf,
-            S: gen.get_points(PprfOutputFormat::InterleavedTransposed),
+            enc: encoder,
+            gap_ots,
+            gap_choices,
+            S,
             gen,
             thread_pool,
         }
@@ -350,14 +432,13 @@ impl Receiver {
         sender: seec_channel::Sender<Msg>,
         receiver: seec_channel::Receiver<Msg>,
     ) -> (Vec<Block>, BitVec) {
-        let conf = self.conf;
         let thread_pool = self.thread_pool.clone();
         let (A, _) = self
             .correlated_silent_receive(ChoiceBitPacking::True, sender, receiver)
             .await;
 
         thread_pool
-            .spawn_install_compute(move || Self::hash(conf, &A))
+            .spawn_install_compute(move || Self::hash(A))
             .await
     }
 
@@ -376,183 +457,87 @@ impl Receiver {
                 .await
                 .expect("Establishing pprf channel");
             self.gen
-                .expand(receiver, Some(Arc::clone(&self.thread_pool)))
+                .expand(
+                    receiver,
+                    self.enc.pprf_format(),
+                    Some(Arc::clone(&self.thread_pool)),
+                )
                 .await
         };
 
-        let conf = self.conf;
-        let (mut A, C) = self
-            .thread_pool
-            .clone()
-            .spawn_install_compute(move || self.rand_mul_quasi_cyclic(rT, choice_bit_packing))
-            .await;
+        let rT = self.derandomize_gap(rT, &mut receiver).await;
 
-        A.truncate(conf.requested_num_ots);
-        let C = C.map(|mut cvec| {
-            cvec.truncate(conf.requested_num_ots);
-            cvec
-        });
-        (A, C)
+        self.thread_pool
+            .clone()
+            .spawn_install_compute(move || self.enc.recv_compress(rT, &self.S, choice_bit_packing))
+            .await
     }
 
-    pub fn rand_mul_quasi_cyclic(
+    async fn derandomize_gap(
         &self,
         rT: Array2<Block>,
-        choice_bit_packing: ChoiceBitPacking,
-    ) -> (Vec<Block>, Option<Vec<u8>>) {
-        let conf = self.conf;
-        // assert_eq!(conf.n2_blocks(), rT.ncols());
-        let a = init_a_polynomials(conf);
-        let rows = QuasiCyclicConf::ROWS;
-        let mut c_mod_p1: Array2<Block> = Array2::zeros((rows, conf.n_blocks()));
-        let mut A = vec![Block::zero(); conf.N2];
+        receiver: &mut seec_channel::Receiver<Msg>,
+    ) -> ArrayOrVec {
+        use aes::cipher::KeyInit;
 
-        let end = match choice_bit_packing {
-            ChoiceBitPacking::True => rows,
-            ChoiceBitPacking::False => rows + 1,
-        };
-        let mut sb: AlignedVec<u8, U16> = AlignedVec::new();
-        let sb_blocks = {
-            assert_eq!(conf.N2 % 8, 0);
-            let n2_bytes = conf.N2 / mem::size_of::<u8>();
-            sb.resize(n2_bytes, 0);
+        if self.gap_ots.is_empty() {
+            #[cfg(feature = "silent-ot-silver-code")]
+            assert!(!matches!(self.enc, Encoder::Silver(_)));
+            return ArrayOrVec::Array(rT);
+        }
 
-            let sb_bits: &mut BitSlice<u8, Lsb0> = BitSlice::from_slice_mut(sb.as_mut_slice());
-            for noisy_idx in &self.S {
-                sb_bits.set(*noisy_idx, true);
-            }
-            cast_slice(sb.as_slice())
+        let Msg::GapValues(gap_vals) = receiver.recv().await.unwrap().unwrap() else {
+            panic!("Wrong message. Expected GapValues");
         };
 
-        let mut reducer = MultAddReducer::new(conf, &a);
-        c_mod_p1
-            .outer_iter_mut() // equivalent to .rows() but offers into_par_iter
-            .into_par_iter()
-            .take(end)
-            .zip(rT.outer_iter())
-            .enumerate()
-            .for_each_init(
-                || reducer.clone(),
-                |reducer, (i, (mut cmod_row, rt_row))| {
-                    let compute_c_vec = i == 0 && choice_bit_packing.packed();
-                    let cmod_row = cmod_row.as_slice_mut().unwrap();
-                    let rt_row = rt_row.as_slice().unwrap();
-
-                    if compute_c_vec {
-                        reducer.reduce(cmod_row, sb_blocks);
-                    } else {
-                        reducer.reduce(cmod_row, rt_row);
-                    }
-                },
-            );
-
-        let C = choice_bit_packing.unpacked().then(|| {
-            let mut c128 = vec![Block::zero(); conf.n_blocks()];
-            reducer.reduce(&mut c128, sb_blocks);
-
-            let mut C = vec![0; conf.requested_num_ots];
-
-            let c128_bits: &BitSlice<usize, Lsb0> = BitSlice::from_slice(cast_slice(&c128));
-            C.iter_mut()
-                .zip(c128_bits.iter().by_vals())
-                .for_each(|(c, bit)| {
-                    *c = bit as u8;
-                });
-            C
-        });
-
-        let num_blocks = Integer::next_multiple_of(&conf.requested_num_ots, &128);
-        copy_out(&mut A[..num_blocks], &c_mod_p1);
-
-        (A, C)
+        let mut rT = rT.into_raw_vec();
+        let derand_iter = self
+            .gap_ots
+            .iter()
+            .zip(self.gap_choices.iter().by_vals())
+            .zip(gap_vals)
+            .map(|((&gap_ot, gap_choice), gap_val)| {
+                if gap_choice {
+                    let t = Block::zero();
+                    Aes128::new(&gap_ot.into()).encrypt_block(&mut t.into());
+                    t ^ gap_val
+                } else {
+                    gap_ot
+                }
+            });
+        rT.extend(derand_iter);
+        ArrayOrVec::Vec(rT)
     }
 
-    fn hash(conf: QuasiCyclicConf, A: &[Block]) -> (Vec<Block>, BitVec) {
+    fn hash(mut A: Vec<Block>) -> (Vec<Block>, BitVec) {
         let mask = Block::all_ones() ^ Block::constant::<1>();
-        let (mut messages, mut choices): (Vec<_>, Vec<_>) =
-            A.par_chunks(8)
-                .map(|chunk| {
-                    let mut messages = [Block::zero(); 8];
-                    let mut choices = [false; 8];
-                    chunk.iter().zip(&mut messages).zip(&mut choices).for_each(
-                        |((blk, m), choice)| {
-                            *m = *blk & mask;
-                            *choice = blk.lsb();
-                        },
-                    );
-                    FIXED_KEY_HASH.cr_hash_blocks(&messages);
-                    messages.into_iter().zip(choices)
-                })
-                .flatten_iter()
-                .unzip();
-        // Due to chunking, messages might be bigger than needed, so we truncate it
-        messages.truncate(conf.requested_num_ots);
-        choices.truncate(conf.requested_num_ots);
-        let choices = BitVec::from_iter(choices);
-        (messages, choices)
+        let choices = A
+            .iter_mut()
+            .map(|block| {
+                let choice = block.lsb();
+                *block &= mask;
+                choice
+            })
+            .collect();
+        FIXED_KEY_HASH.cr_hash_slice_mut(&mut A);
+        (A, choices)
     }
 
     /// Sample the choice bits for the base OTs.
     pub fn sample_base_choice_bits<RNG: RngCore + CryptoRng>(
-        conf: QuasiCyclicConf,
+        encoder: &Encoder,
         rng: &mut RNG,
     ) -> ChoiceBits {
-        let pprf_conf = conf.into();
-        pprf::Receiver::sample_choice_bits(
-            pprf_conf,
-            conf.N2,
-            PprfOutputFormat::InterleavedTransposed,
+        let mut base_choices = pprf::Receiver::sample_choice_bits(
+            encoder.pprf_conf(),
+            encoder.N2(),
+            encoder.pprf_format(),
             rng,
-        )
-    }
-}
-
-impl QuasiCyclicConf {
-    pub const ROWS: usize = 128;
-
-    pub fn n_blocks(&self) -> usize {
-        self.N / Self::ROWS
-    }
-
-    pub fn n2_blocks(&self) -> usize {
-        self.N2 / Self::ROWS
-    }
-
-    pub fn n64(self) -> usize {
-        self.n_blocks() * 2
-    }
-
-    pub fn P(&self) -> usize {
-        self.P
-    }
-    pub fn requested_num_ots(&self) -> usize {
-        self.requested_num_ots
-    }
-    pub fn N(&self) -> usize {
-        self.N
-    }
-    pub fn N2(&self) -> usize {
-        self.N2
-    }
-    pub fn scaler(&self) -> usize {
-        self.scaler
-    }
-    pub fn size_per(&self) -> usize {
-        self.size_per
-    }
-    pub fn num_partitions(&self) -> usize {
-        self.num_partitions
-    }
-    /// Returns the amount of base OTs needed for this configuration.
-    pub fn base_ot_count(&self) -> usize {
-        let pprf_conf = PprfConfig::from(*self);
-        pprf_conf.base_ot_count()
-    }
-}
-
-impl From<QuasiCyclicConf> for PprfConfig {
-    fn from(conf: QuasiCyclicConf) -> Self {
-        PprfConfig::new(conf.size_per, conf.num_partitions)
+        );
+        base_choices
+            .gap
+            .extend(rng.sample_iter::<bool, _>(Standard).take(encoder.gap()));
+        base_choices
     }
 }
 
@@ -566,163 +551,319 @@ impl ChoiceBitPacking {
     }
 }
 
-impl<'a> MultAddReducer<'a> {
-    fn new(conf: QuasiCyclicConf, a_polynomials: &'a [FftPoly]) -> Self {
-        Self {
-            a_polynomials,
-            conf,
-            b_poly: FftPoly::new(),
-            temp128: vec![Block::zero(); 2 * conf.n_blocks()],
-            cache: DecodeCache::default(),
-        }
-    }
-
-    fn reduce(&mut self, dest: &mut [Block], b128: &[Block]) {
-        let n64 = self.conf.n64();
-        let mut c_poly = FftPoly::new();
-        for s in 1..self.conf.scaler {
-            let a_poly = &self.a_polynomials[s - 1];
-            let b64 = &cast_slice(b128)[s * n64..(s + 1) * n64];
-            let _now = Instant::now();
-            self.b_poly.encode(b64);
-            if s == 1 {
-                c_poly.mult(a_poly, &self.b_poly);
-            } else {
-                self.b_poly.mult_eq(a_poly);
-                c_poly.add_eq(&self.b_poly);
+impl Encoder {
+    fn configure(num_ots: usize, sec_param: usize, mult_type: MultType) -> Self {
+        match mult_type {
+            MultType::QuasiCyclic { scaler } => Encoder::QuasiCyclic(QuasiCyclicEncoder::new(
+                QuasiCyclicConf::configure(num_ots, scaler, sec_param),
+            )),
+            #[cfg(feature = "silent-ot-silver-code")]
+            MultType::Silver5 => {
+                let conf = SilverConf::configure(num_ots, 5, sec_param);
+                let enc = libote::SilverEncoder::new(libote::SilverCode::Weight5, conf.N as u64);
+                Encoder::Silver(SilverEncoder { enc, conf })
+            }
+            #[cfg(feature = "silent-ot-silver-code")]
+            MultType::Silver11 => {
+                let conf = SilverConf::configure(num_ots, 11, sec_param);
+                let enc = libote::SilverEncoder::new(libote::SilverCode::Weight11, conf.N as u64);
+                Encoder::Silver(SilverEncoder { enc, conf })
+            }
+            #[cfg(feature = "silent-ot-ea-code")]
+            MultType::ExAcc7 | MultType::ExAcc11 | MultType::ExAcc21 | MultType::ExAcc40 => {
+                let conf = ExAccConf::configure(num_ots, mult_type, sec_param);
+                let enc = libote::EACode::new(
+                    conf.requested_num_ots as u64,
+                    conf.code_size as u64,
+                    conf.weight as u64,
+                );
+                Encoder::ExpandAccumulate(ExAccEncoder { conf, enc })
+            }
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            MultType::ExConv7x24 | MultType::ExConv21x24 => {
+                let conf = ExConvConf::configure(num_ots, mult_type, sec_param);
+                let enc = libote::ExConvCode::new(
+                    conf.requested_num_ots as u64,
+                    conf.code_size as u64,
+                    conf.weight as u64,
+                    conf.accumulator_size as u64,
+                );
+                Encoder::ExpandConvolute(ExConvEncoder { conf, enc })
             }
         }
-        c_poly.decode_with_cache(&mut self.cache, cast_slice_mut(&mut self.temp128));
+    }
 
-        self.temp128
-            .iter_mut()
-            .zip(b128)
-            .take(self.conf.n_blocks())
-            .for_each(|(t, b)| *t ^= *b);
+    fn send_compress(&mut self, rT: ArrayOrVec) -> Vec<Block> {
+        match (self, rT) {
+            (Encoder::QuasiCyclic(enc), ArrayOrVec::Array(rT)) => enc.dual_encode(rT),
+            #[cfg(feature = "silent-ot-silver-code")]
+            (Encoder::Silver(enc), ArrayOrVec::Vec(mut c)) => {
+                {
+                    let c = bytemuck::cast_slice_mut(&mut c);
+                    enc.enc.dual_encode(c);
+                }
+                let mut b = bytemuck::allocation::cast_vec(c);
+                b.truncate(enc.conf.requested_num_ots);
+                b
+            }
+            #[cfg(feature = "silent-ot-ea-code")]
+            (Encoder::ExpandAccumulate(enc), ArrayOrVec::Array(rT)) => {
+                let mut b = bytemuck::cast_vec(rT.into_raw_vec());
+                let mut b2 = vec![Block::default(); enc.conf.requested_num_ots];
+                {
+                    let b2 = bytemuck::cast_slice_mut(&mut b2);
+                    enc.enc.dual_encode_block(&mut b[0..enc.conf.code_size], b2);
+                }
+                b2
+            }
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            (Encoder::ExpandConvolute(enc), ArrayOrVec::Array(rT)) => {
+                let mut b = rT.into_raw_vec();
+                {
+                    let b = bytemuck::cast_slice_mut(&mut b[..enc.conf.code_size]);
+                    enc.enc.dual_encode_block(b);
+                }
+                b
+            }
+            _ => panic!("called dual_encode with illegal combination of Encoder and ArrayOrVec"),
+        }
+    }
 
-        modp(dest, &self.temp128, self.conf.P);
+    fn recv_compress(
+        &mut self,
+        mut rT: ArrayOrVec,
+        S: &[usize],
+        choice_bit_packing: ChoiceBitPacking,
+    ) -> (Vec<Block>, Option<Vec<u8>>) {
+        fn calc_sb_blocks<'a>(
+            sb: &'a mut AlignedVec<u8, U16>,
+            N2: usize,
+            S: &'_ [usize],
+        ) -> &'a [Block] {
+            assert_eq!(N2 % 16, 0, "N2 must be divisible by 16");
+            let n2_bits_as_bytes = N2 / u8::BITS as usize;
+            sb.resize(n2_bits_as_bytes, 0);
+
+            let sb_bits: &mut BitSlice<u8, Lsb0> = BitSlice::from_slice_mut(sb.as_mut_slice());
+            for noisy_idx in S {
+                sb_bits.set(*noisy_idx, true);
+            }
+            cast_slice(sb.as_slice())
+        }
+
+        if choice_bit_packing.packed() {
+            let a = match &mut rT {
+                ArrayOrVec::Array(arr) => arr.as_slice_mut().unwrap(),
+                ArrayOrVec::Vec(v) => &mut v[..],
+            };
+            // TODO, this is a little weird. The quasi cyclic code fails with
+            //  when storing the choice bit in the lsb.
+            match &self {
+                Encoder::QuasiCyclic(enc) => {
+                    let mut sb: AlignedVec<u8, U16> = AlignedVec::new();
+                    let sb_blocks = calc_sb_blocks(&mut sb, self.N2(), S);
+                    a[..enc.conf.n2_blocks()].copy_from_slice(sb_blocks);
+                }
+                _other => {
+                    // zero out last bit
+                    let mask = Block::one() ^ Block::all_ones();
+                    for block in a.iter_mut() {
+                        *block &= mask;
+                    }
+                    // store choice bit in last bit
+                    for noisy_idx in S {
+                        a[*noisy_idx] |= Block::one();
+                    }
+                }
+            }
+
+            let a = match (self, rT) {
+                (Encoder::QuasiCyclic(enc), ArrayOrVec::Array(rT)) => enc.dual_encode(rT),
+                #[cfg(feature = "silent-ot-silver-code")]
+                (Encoder::Silver(enc), ArrayOrVec::Vec(mut c)) => {
+                    enc.enc.dual_encode(bytemuck::cast_slice_mut(&mut c));
+                    c.truncate(enc.conf.requested_num_ots);
+                    c
+                }
+                #[cfg(feature = "silent-ot-ea-code")]
+                (Encoder::ExpandAccumulate(enc), ArrayOrVec::Array(rT)) => {
+                    let mut a = bytemuck::cast_vec(rT.into_raw_vec());
+                    let mut a2 = vec![Block::default(); enc.conf.requested_num_ots];
+                    {
+                        let a2 = bytemuck::cast_slice_mut(&mut a2);
+                        enc.enc.dual_encode_block(&mut a[0..enc.conf.code_size], a2)
+                    };
+                    a2
+                }
+                #[cfg(feature = "silent-ot-ex-conv-code")]
+                (Encoder::ExpandConvolute(enc), ArrayOrVec::Array(rT)) => {
+                    let mut a = bytemuck::cast_vec(rT.into_raw_vec());
+                    {
+                        let a = bytemuck::cast_slice_mut(&mut a[..enc.conf.code_size]);
+                        enc.enc.dual_encode_block(a)
+                    };
+                    a
+                }
+                _ => {
+                    panic!("called dual_encode with illegal combination of Encoder and ArrayOrVec")
+                }
+            };
+            (a, None)
+        } else {
+            let (a, c) = match (self, rT) {
+                (Encoder::QuasiCyclic(enc), ArrayOrVec::Array(rT)) => {
+                    let a = enc.dual_encode(rT);
+                    let mut sb: AlignedVec<u8, U16> = AlignedVec::new();
+                    let sb_blocks = calc_sb_blocks(&mut sb, enc.conf.N2(), S);
+                    let c = enc.dual_encode_choice(sb_blocks);
+                    (a, c)
+                }
+                (other_enc, rT) => {
+                    let mut c1 = vec![0_u8; other_enc.N2()];
+                    for noisy_idx in S {
+                        c1[*noisy_idx] = 1;
+                    }
+                    match (other_enc, rT) {
+                        #[cfg(feature = "silent-ot-silver-code")]
+                        (Encoder::Silver(enc), ArrayOrVec::Vec(mut c)) => {
+                            let c0 = bytemuck::cast_slice_mut(&mut c);
+
+                            enc.enc.dual_encode2(c0, &mut c1);
+                            c.truncate(enc.conf.requested_num_ots);
+                            (c, c1)
+                        }
+                        #[cfg(feature = "silent-ot-ea-code")]
+                        (Encoder::ExpandAccumulate(enc), ArrayOrVec::Array(rT)) => {
+                            let mut a = bytemuck::cast_vec(rT.into_raw_vec());
+                            let mut a2 = vec![Block::default(); enc.conf.requested_num_ots];
+                            let mut c2 = vec![0; enc.conf.requested_num_ots];
+                            {
+                                let a2 = bytemuck::cast_slice_mut(&mut a2);
+                                enc.enc.dual_encode2_block(
+                                    &mut a[..enc.conf.code_size],
+                                    a2,
+                                    &mut c1[..enc.conf.code_size],
+                                    &mut c2,
+                                )
+                            };
+                            (a2, c2)
+                        }
+                        #[cfg(feature = "silent-ot-ex-conv-code")]
+                        (Encoder::ExpandConvolute(enc), ArrayOrVec::Array(rT)) => {
+                            let mut a = bytemuck::cast_vec(rT.into_raw_vec());
+                            {
+                                let a = bytemuck::cast_slice_mut(&mut a[..enc.conf.code_size]);
+                                enc.enc.dual_encode2_block(a, &mut c1[..enc.conf.code_size]);
+                            };
+                            (a, c1)
+                        }
+
+                        _ => panic!(
+                            "called dual_encode with illegal combination of Encoder and ArrayOrVec"
+                        ),
+                    }
+                }
+            };
+            (a, Some(c))
+        }
+    }
+
+    fn base_ot_count(&self) -> usize {
+        let pprf_conf = self.pprf_conf();
+        match self {
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => pprf_conf.base_ot_count() + enc.conf.gap,
+            _other_code => pprf_conf.base_ot_count(),
+        }
+    }
+
+    fn gap(&self) -> usize {
+        match self {
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => enc.conf.gap,
+            _ => 0,
+        }
+    }
+
+    fn pprf_conf(&self) -> PprfConfig {
+        match self {
+            Encoder::QuasiCyclic(enc) => enc.conf.into(),
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => enc.conf.into(),
+            #[cfg(feature = "silent-ot-ea-code")]
+            Encoder::ExpandAccumulate(enc) => enc.conf.into(),
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            Encoder::ExpandConvolute(enc) => enc.conf.into(),
+        }
+    }
+
+    fn pprf_format(&self) -> PprfOutputFormat {
+        match self {
+            Encoder::QuasiCyclic(_) => PprfOutputFormat::InterleavedTransposed,
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(_) => PprfOutputFormat::Interleaved,
+            #[cfg(feature = "silent-ot-ea-code")]
+            Encoder::ExpandAccumulate(_) => PprfOutputFormat::Interleaved,
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            Encoder::ExpandConvolute(_) => PprfOutputFormat::Interleaved,
+        }
+    }
+
+    #[allow(unused)]
+    fn requested_num_ots(&self) -> usize {
+        match self {
+            Encoder::QuasiCyclic(enc) => enc.conf.requested_num_ots,
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => enc.conf.requested_num_ots,
+            #[cfg(feature = "silent-ot-ea-code")]
+            Encoder::ExpandAccumulate(enc) => enc.conf.requested_num_ots,
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            Encoder::ExpandConvolute(enc) => enc.conf.requested_num_ots,
+        }
+    }
+
+    fn N2(&self) -> usize {
+        match self {
+            Encoder::QuasiCyclic(enc) => enc.conf.N2,
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => enc.conf.N2,
+            #[cfg(feature = "silent-ot-ea-code")]
+            Encoder::ExpandAccumulate(enc) => enc.conf.N2,
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            Encoder::ExpandConvolute(enc) => enc.conf.N2,
+        }
+    }
+
+    fn num_partitions(&self) -> usize {
+        match self {
+            Encoder::QuasiCyclic(enc) => enc.conf.num_partitions,
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => enc.conf.num_partitions,
+            #[cfg(feature = "silent-ot-ea-code")]
+            Encoder::ExpandAccumulate(enc) => enc.conf.num_partitions,
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            Encoder::ExpandConvolute(enc) => enc.conf.num_partitions,
+        }
+    }
+
+    fn size_per(&self) -> usize {
+        match self {
+            Encoder::QuasiCyclic(enc) => enc.conf.size_per,
+            #[cfg(feature = "silent-ot-silver-code")]
+            Encoder::Silver(enc) => enc.conf.size_per,
+            #[cfg(feature = "silent-ot-ea-code")]
+            Encoder::ExpandAccumulate(enc) => enc.conf.size_per,
+            #[cfg(feature = "silent-ot-ex-conv-code")]
+            Encoder::ExpandConvolute(enc) => enc.conf.size_per,
+        }
     }
 }
 
-fn init_a_polynomials(conf: QuasiCyclicConf) -> Vec<FftPoly> {
-    let mut temp = vec![0_u64; 2 * conf.n_blocks()];
-    (0..conf.scaler - 1)
-        .map(|s| {
-            let mut fft_poly = FftPoly::new();
-            let mut pub_rng = AesRng::from_seed((s + 1).into());
-            pub_rng.fill(&mut temp[..]);
-            fft_poly.encode(&temp);
-            fft_poly
-        })
-        .collect()
-}
-
-fn copy_out(dest: &mut [Block], c_mod_p1: &Array2<Block>) {
-    assert_eq!(dest.len() % 128, 0, "Dest must have a length of 128");
-    dest.par_chunks_exact_mut(128)
-        .enumerate()
-        .for_each(|(i, chunk)| {
-            chunk
-                .iter_mut()
-                .zip(c_mod_p1.column(i))
-                .for_each(|(block, cmod)| *block = *cmod);
-            transpose_128(chunk.try_into().unwrap());
-        });
-}
-
-/// Create a new [QuasiCyclicConf](`QuasiCyclicConf`) given the provided values.
-pub fn configure(num_ots: usize, scaler: usize, sec_param: usize) -> QuasiCyclicConf {
-    let P = next_prime(&max(num_ots, 128 * 128), None).unwrap();
-    let num_partitions = get_partitions(scaler, P, sec_param);
-    let ss = (P * scaler + num_partitions - 1) / num_partitions;
-    let size_per = Integer::next_multiple_of(&ss, &8);
-    let N2 = size_per * num_partitions;
-    let N = N2 / scaler;
-    QuasiCyclicConf {
-        P,
-        num_partitions,
-        size_per,
-        N2,
-        N,
-        scaler,
-        requested_num_ots: num_ots,
-    }
-}
-
-fn get_partitions(scaler: usize, prime: usize, sec_param: usize) -> usize {
-    assert!(scaler >= 2, "scaler must be 2 or greater");
-    let mut ret = 1;
-    let mut ss = sec_level(scaler, prime, ret);
-    while ss < sec_param {
-        ret += 1;
-        ss = sec_level(scaler, prime, ret);
-        assert!(ret <= 1000, "failed to find silentOt parameters");
-    }
-    Integer::next_multiple_of(&ret, &8)
-}
-
-fn sec_level(scale: usize, p: usize, points: usize) -> usize {
-    let x1 = ((scale * p) as f64 / p as f64).log2();
-    let x2 = ((scale * p) as f64).log2() / 2.0;
-    let sec_level = points as f64 * x1 + x2;
-    sec_level as usize
-}
-
-fn modp(dest: &mut [Block], inp: &[Block], prime: usize) {
-    let p: usize = prime;
-
-    let p_blocks = (p + 127) / 128;
-    let p_bytes = (p + 7) / 8;
-    let dest_len = dest.len();
-    assert!(dest_len >= p_blocks);
-    assert!(inp.len() >= p_blocks);
-    let count = (inp.len() * 128 + p - 1) / p;
-    {
-        let dest_bytes = cast_slice_mut::<_, u8>(dest);
-        let inp_bytes = cast_slice::<_, u8>(inp);
-        dest_bytes[..p_bytes].copy_from_slice(&inp_bytes[..p_bytes]);
-    }
-
-    for i in 1..count {
-        let begin = i * p;
-        let begin_block = begin / 128;
-        let end_block = min(i * p + p, inp.len() * 128);
-        let end_block = (end_block + 127) / 128;
-        assert!(end_block <= inp.len());
-        // TODO the above calculations seem redundant
-        let in_i = &inp[begin_block..end_block];
-        let shift = begin & 127;
-        bit_shift_xor(dest, in_i, shift as u8);
-    }
-    let dest_bytes = cast_slice_mut::<_, u8>(dest);
-
-    let offset = p & 7;
-    if offset != 0 {
-        let mask = ((1 << offset) - 1) as u8;
-        let idx = p / 8;
-        dest_bytes[idx] &= mask;
-    }
-    let rem = dest_len * 16 - p_bytes;
-    if rem != 0 {
-        dest_bytes[p_bytes..p_bytes + rem].fill(0);
-    }
-}
-
-pub fn bit_shift_xor(dest: &mut [Block], inp: &[Block], bit_shift: u8) {
-    assert!(bit_shift <= 127, "bit_shift must be less than 127");
-
-    dest.iter_mut()
-        .zip(inp)
-        .zip(&inp[1..])
-        .for_each(|((d, inp), inp_off)| {
-            let mut shifted = *inp >> bit_shift;
-            shifted |= *inp_off << (128 - bit_shift);
-            *d ^= shifted;
-        });
-    if dest.len() >= inp.len() {
-        let inp_last = *inp.last().expect("empty input");
-        dest[inp.len() - 1] ^= inp_last >> bit_shift;
-    }
+fn get_reg_noise_weight(min_dist_ratio: f64, sec_param: usize) -> u64 {
+    assert!(min_dist_ratio <= 0.5 && min_dist_ratio > 0.0);
+    let d = (1.0 - 2.0 * min_dist_ratio).log2();
+    let t = max(128, (-(sec_param as f64) / d) as u64);
+    Integer::next_multiple_of(&t, &8)
 }
 
 async fn base_ot_channel<BaseMsg: RemoteSend>(
@@ -763,10 +904,13 @@ async fn pprf_channel<BaseMsg: RemoteSend>(
 
 #[cfg(test)]
 mod test {
-    use crate::silent_ot::{bit_shift_xor, configure, modp, ChoiceBitPacking, Receiver, Sender};
+    use crate::silent_ot::{ChoiceBitPacking, Encoder, Receiver, Sender, SECURITY_PARAM};
 
     use crate::silent_ot::pprf::tests::fake_base;
     use crate::silent_ot::pprf::PprfOutputFormat;
+    use crate::silent_ot::quasi_cyclic_encode::{
+        bit_shift_xor, modp, QuasiCyclicConf, QuasiCyclicEncoder,
+    };
     use crate::util::Block;
     use bitvec::order::Lsb0;
     use bitvec::slice::BitSlice;
@@ -774,6 +918,8 @@ mod test {
     use rand::rngs::StdRng;
     use rand_core::SeedableRng;
     use std::cmp::min;
+
+    const NUM_OTS: usize = 128 * 10;
 
     fn check_correlated(A: &[Block], B: &[Block], choice: Option<&[u8]>, delta: Block) {
         let n = A.len();
@@ -795,7 +941,7 @@ mod test {
                 choice[i] as usize
             } else {
                 // extract choice bit from m1
-                ((m1 & Block::from(1_u64)) == Block::from(1_u64)) as usize
+                ((m1 & Block::one()) == Block::one()) as usize
             };
             let m1 = m1 & mask;
             let m2a = B[i] & mask;
@@ -809,17 +955,23 @@ mod test {
 
     fn check_random(send_messages: &[[Block; 2]], recv_messages: &[Block], choice: &BitSlice) {
         let n = send_messages.len();
+        dbg!(&send_messages[..10]);
+        dbg!(&recv_messages[..10]);
+        dbg!(&choice[..10]);
         assert_eq!(recv_messages.len(), n);
         assert_eq!(choice.len(), n);
         for i in 0..n {
             let m1 = recv_messages[i];
             let m2a = send_messages[i][0];
             let m2b = send_messages[i][1];
-            let c = choice[i] as usize;
-
-            let eqq = [m1 == m2a, m1 == m2b];
-
-            assert!(eqq[c] ^ eqq[c ^ 1], "ROT Block {i} failed");
+            let c = choice[i];
+            if c {
+                assert_eq!(m1, m2b, "ROT Block {i} failed");
+                assert_ne!(m1, m2a, "ROT Block {i} failed");
+            } else {
+                assert_eq!(m1, m2a, "ROT Block {i} failed");
+                assert_ne!(m1, m2b, "ROT Block {i} failed");
+            }
         }
     }
 
@@ -864,34 +1016,36 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn correlated_silent_ot() {
-        let num_ots = 1000;
         let scaler = 2;
         let num_threads = 2;
         let delta = Block::all_ones();
-        let conf = configure(num_ots, scaler, 128);
+        let enc = Encoder::QuasiCyclic(QuasiCyclicEncoder::new(QuasiCyclicConf::configure(
+            NUM_OTS,
+            scaler,
+            SECURITY_PARAM,
+        )));
+        let enc_c = Encoder::QuasiCyclic(QuasiCyclicEncoder::new(QuasiCyclicConf::configure(
+            NUM_OTS,
+            scaler,
+            SECURITY_PARAM,
+        )));
         let (ch1, ch2) = seec_channel::in_memory::new_pair(128);
         let mut rng = StdRng::seed_from_u64(42);
         let (sender_base_ots, receiver_base_ots, base_choices) = fake_base(
-            conf.into(),
-            conf.N2,
+            enc.pprf_conf(),
+            enc.N2(),
             PprfOutputFormat::InterleavedTransposed,
             &mut rng,
         );
 
         let send = tokio::spawn(async move {
-            let sender =
-                Sender::new_with_silent_base_ots(sender_base_ots, num_ots, scaler, num_threads);
+            let sender = Sender::new_with_silent_base_ots(sender_base_ots, enc_c, num_threads);
             sender
                 .correlated_silent_send(delta, &mut rng, ch1.0, ch1.1)
                 .await
         });
-        let receiver = Receiver::new_with_silent_base_ots(
-            receiver_base_ots,
-            base_choices,
-            num_ots,
-            scaler,
-            num_threads,
-        );
+        let receiver =
+            Receiver::new_with_silent_base_ots(receiver_base_ots, base_choices, enc, num_threads);
         let receive = tokio::spawn(async move {
             receiver
                 .correlated_silent_receive(ChoiceBitPacking::False, ch2.0, ch2.1)
@@ -903,61 +1057,247 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn random_silent_ot() {
-        let num_ots = 1000;
         let scaler = 2;
         let num_threads = 2;
-        let conf = configure(num_ots, scaler, 128);
+        let enc = Encoder::QuasiCyclic(QuasiCyclicEncoder::new(QuasiCyclicConf::configure(
+            NUM_OTS,
+            scaler,
+            SECURITY_PARAM,
+        )));
+        let enc_c = Encoder::QuasiCyclic(QuasiCyclicEncoder::new(QuasiCyclicConf::configure(
+            NUM_OTS,
+            scaler,
+            SECURITY_PARAM,
+        )));
         let (ch1, ch2) = seec_channel::in_memory::new_pair(128);
         let mut rng = StdRng::seed_from_u64(42);
         let (sender_base_ots, receiver_base_ots, base_choices) = fake_base(
-            conf.into(),
-            conf.N2,
+            enc.pprf_conf(),
+            enc.N2(),
             PprfOutputFormat::InterleavedTransposed,
             &mut rng,
         );
 
         let send = tokio::spawn(async move {
-            let sender =
-                Sender::new_with_silent_base_ots(sender_base_ots, num_ots, scaler, num_threads);
+            let sender = Sender::new_with_silent_base_ots(sender_base_ots, enc_c, num_threads);
             sender.random_silent_send(&mut rng, ch1.0, ch1.1).await
         });
-        let receiver = Receiver::new_with_silent_base_ots(
-            receiver_base_ots,
-            base_choices,
-            num_ots,
-            scaler,
-            num_threads,
-        );
+        let receiver =
+            Receiver::new_with_silent_base_ots(receiver_base_ots, base_choices, enc, num_threads);
         let receive =
             tokio::spawn(async move { receiver.random_silent_receive(ch2.0, ch2.1).await });
         let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
         check_random(&s_out, &r_out.0, &r_out.1);
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::silent_ot::get_partitions;
-    use num_prime::nt_funcs::next_prime;
-    use std::cmp::max;
+    #[tokio::test(flavor = "multi_thread")]
+    async fn random_silent_ot_2() {
+        use super::MultType;
+        let scaler = 2;
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42 * 42);
 
-    #[test]
-    fn test_get_partitions() {
-        let num_ots_exp = [4, 5, 6, 7];
-        let scaler = [2, 4];
-        let kappa = [80, 128];
+        let send = tokio::spawn(async move {
+            let sender = Sender::new(
+                &mut rng1,
+                NUM_OTS,
+                MultType::QuasiCyclic { scaler },
+                &mut ch1.0,
+                &mut ch1.1,
+            )
+            .await;
+            sender.random_silent_send(&mut rng1, ch1.0, ch1.1).await
+        });
 
-        for k in kappa {
-            for s in scaler {
-                for n in num_ots_exp {
-                    let num_ot = 10_usize.pow(n);
-                    let P = next_prime(&max(num_ot, 128 * 128), None).unwrap();
-                    let part = get_partitions(s, P, k);
-                    println!("10^{n}\t{part}\t{s}\t{k}");
-                }
-                println!("-------------------------------");
-            }
-            println!("-------------------------------");
-        }
+        let receive = tokio::spawn(async move {
+            let receiver = Receiver::new(
+                &mut rng2,
+                NUM_OTS,
+                MultType::QuasiCyclic { scaler },
+                &mut ch2.0,
+                &mut ch2.1,
+            )
+            .await;
+            receiver.random_silent_receive(ch2.0, ch2.1).await
+        });
+        let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
+        check_random(&s_out, &r_out.0, &r_out.1);
+    }
+
+    #[cfg(feature = "silent-ot-silver-code")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn random_silent_ot_silver_code() {
+        use super::MultType;
+        let _num_threads = 2;
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42 * 42);
+
+        let send = tokio::spawn(async move {
+            let sender = Sender::new(
+                &mut rng1,
+                NUM_OTS,
+                MultType::Silver5,
+                &mut ch1.0,
+                &mut ch1.1,
+            )
+            .await;
+            sender.random_silent_send(&mut rng1, ch1.0, ch1.1).await
+        });
+
+        let receive = tokio::spawn(async move {
+            let receiver = Receiver::new(
+                &mut rng2,
+                NUM_OTS,
+                MultType::Silver5,
+                &mut ch2.0,
+                &mut ch2.1,
+            )
+            .await;
+            receiver.random_silent_receive(ch2.0, ch2.1).await
+        });
+        let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
+        check_random(&s_out, &r_out.0, &r_out.1);
+    }
+
+    #[cfg(feature = "silent-ot-ea-code")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn random_silent_ot_ea_code() {
+        use super::MultType;
+        // TODO this and the other tests that use the libote codes work for small numbers of OTs but fail for
+        //  large numbers. In these cases, it seems that only the choice bits are wrong
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42 * 42);
+
+        let send = tokio::spawn(async move {
+            let sender = Sender::new(
+                &mut rng1,
+                NUM_OTS,
+                MultType::ExAcc11,
+                &mut ch1.0,
+                &mut ch1.1,
+            )
+            .await;
+            sender.random_silent_send(&mut rng1, ch1.0, ch1.1).await
+        });
+
+        let receive = tokio::spawn(async move {
+            let receiver = Receiver::new(
+                &mut rng2,
+                NUM_OTS,
+                MultType::ExAcc11,
+                &mut ch2.0,
+                &mut ch2.1,
+            )
+            .await;
+            receiver.random_silent_receive(ch2.0, ch2.1).await
+        });
+        let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
+        check_random(&s_out, &r_out.0, &r_out.1);
+    }
+
+    #[cfg(feature = "silent-ot-ea-code")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn correlated_silent_ot_ea_code() {
+        use super::MultType;
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42 * 42);
+        let delta = Block::all_ones();
+
+        let send = tokio::spawn(async move {
+            let sender =
+                Sender::new(&mut rng1, NUM_OTS, MultType::ExAcc7, &mut ch1.0, &mut ch1.1).await;
+            sender
+                .correlated_silent_send(delta, &mut rng1, ch1.0, ch1.1)
+                .await
+        });
+
+        let receive = tokio::spawn(async move {
+            let receiver =
+                Receiver::new(&mut rng2, NUM_OTS, MultType::ExAcc7, &mut ch2.0, &mut ch2.1).await;
+            receiver
+                .correlated_silent_receive(ChoiceBitPacking::False, ch2.0, ch2.1)
+                .await
+        });
+        let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
+        check_correlated(&s_out, &r_out.0, r_out.1.as_deref(), delta);
+    }
+
+    #[cfg(feature = "silent-ot-ex-conv-code")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn random_silent_ot_ex_conv_code() {
+        use super::MultType;
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42 * 42);
+
+        let send = tokio::spawn(async move {
+            let sender = Sender::new(
+                &mut rng1,
+                NUM_OTS,
+                MultType::ExConv7x24,
+                &mut ch1.0,
+                &mut ch1.1,
+            )
+            .await;
+            sender.random_silent_send(&mut rng1, ch1.0, ch1.1).await
+        });
+
+        let receive = tokio::spawn(async move {
+            let receiver = Receiver::new(
+                &mut rng2,
+                NUM_OTS,
+                MultType::ExConv7x24,
+                &mut ch2.0,
+                &mut ch2.1,
+            )
+            .await;
+            receiver.random_silent_receive(ch2.0, ch2.1).await
+        });
+        let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
+        check_random(&s_out, &r_out.0, &r_out.1);
+    }
+
+    #[cfg(feature = "silent-ot-ex-conv-code")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn correlated_silent_ot_ex_conv_code() {
+        use super::MultType;
+        let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(128);
+        let mut rng1 = StdRng::seed_from_u64(42);
+        let mut rng2 = StdRng::seed_from_u64(42 * 42);
+        let delta = Block::all_ones();
+
+        let send = tokio::spawn(async move {
+            let sender = Sender::new(
+                &mut rng1,
+                NUM_OTS,
+                MultType::ExConv7x24,
+                &mut ch1.0,
+                &mut ch1.1,
+            )
+            .await;
+            sender
+                .correlated_silent_send(delta, &mut rng1, ch1.0, ch1.1)
+                .await
+        });
+
+        let receive = tokio::spawn(async move {
+            let receiver = Receiver::new(
+                &mut rng2,
+                NUM_OTS,
+                MultType::ExConv7x24,
+                &mut ch2.0,
+                &mut ch2.1,
+            )
+            .await;
+            receiver
+                .correlated_silent_receive(ChoiceBitPacking::False, ch2.0, ch2.1)
+                .await
+        });
+        let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
+        check_correlated(&s_out, &r_out.0, r_out.1.as_deref(), delta);
     }
 }
