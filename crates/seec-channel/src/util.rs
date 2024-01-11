@@ -33,6 +33,15 @@ pub struct TrackingReader<AsyncReader> {
     bytes_read: Counter,
 }
 
+/// Combined asynchronous reader and writer that tracks bytes received and sent.
+#[pin_project]
+pub struct TrackingReadWrite<AsyncReader, AsyncWriter> {
+    #[pin]
+    reader: TrackingReader<AsyncReader>,
+    #[pin]
+    writer: TrackingWriter<AsyncWriter>,
+}
+
 #[derive(Clone, Default, Debug)]
 /// A counter that tracks communication in bytes sent or received. Can be used with the
 /// [`Statistics`] struct to track communication in different phases.
@@ -178,6 +187,30 @@ impl<AsyncReader> TrackingReader<AsyncReader> {
     }
 }
 
+impl<AR, AW> TrackingReadWrite<AR, AW> {
+    pub fn new(reader: AR, writer: AW) -> Self {
+        Self {
+            reader: TrackingReader::new(reader),
+            writer: TrackingWriter::new(writer),
+        }
+    }
+
+    #[inline]
+    pub fn bytes_read(&self) -> Counter {
+        self.reader.bytes_read()
+    }
+
+    #[inline]
+    pub fn bytes_written(&self) -> Counter {
+        self.writer.bytes_written()
+    }
+
+    pub fn reset(&mut self) {
+        self.reader.reset();
+        self.writer.reset();
+    }
+}
+
 impl<AW: AsyncWrite> AsyncWrite for TrackingWriter<AW> {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -273,6 +306,51 @@ impl<S: Stream<Item = Bytes>> Stream for TrackingReader<S> {
             *this.bytes_read += bytes.len() + mem::size_of::<u32>();
         }
         poll
+    }
+}
+
+impl<AR, AW: AsyncWrite> AsyncWrite for TrackingReadWrite<AR, AW> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, Error>> {
+        let this = self.project();
+        this.writer.poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        let this = self.project();
+        this.writer.poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        let this = self.project();
+        this.writer.poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<Result<usize, Error>> {
+        let this = self.project();
+        this.writer.poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.writer.is_write_vectored()
+    }
+}
+
+impl<AR: AsyncRead, AW> AsyncRead for TrackingReadWrite<AR, AW> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.project();
+        this.reader.poll_read(cx, buf)
     }
 }
 

@@ -1,14 +1,17 @@
 //! Channel abstraction for communication
-use crate::util::Counter;
+use crate::util::{Counter, TrackingReader, TrackingWriter};
 use async_trait::async_trait;
 use remoc::rch::{base, mpsc};
-use remoc::{codec, RemoteSend};
+use remoc::{codec, ConnectError, RemoteSend};
 use serde::{Deserialize, Serialize};
+use tokio::io;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub use seec_channel_macros::sub_channels_for;
 
 pub mod in_memory;
 pub mod tcp;
+pub mod tls;
 pub mod util;
 
 pub type BaseSender<T> = base::Sender<T, codec::Bincode>;
@@ -184,4 +187,36 @@ impl<T> From<mpsc::SendError<T>> for CommunicationError {
     fn from(err: mpsc::SendError<T>) -> Self {
         CommunicationError::Send(err.without_item())
     }
+}
+
+// TODO provide way of passing remoc::Cfg to method
+async fn establish_remoc_connection<R, W, T>(
+    reader: R,
+    writer: W,
+) -> Result<TrackingChannel<T>, ConnectError<io::Error, io::Error>>
+where
+    R: AsyncRead + Send + Sync + Unpin + 'static,
+    W: AsyncWrite + Send + Sync + Unpin + 'static,
+    T: RemoteSend,
+{
+    let tracking_rx = TrackingReader::new(reader);
+    let tracking_tx = TrackingWriter::new(writer);
+    let bytes_read = tracking_rx.bytes_read();
+    let bytes_written = tracking_tx.bytes_written();
+
+    let mut cfg = remoc::Cfg::balanced();
+    cfg.receive_buffer = 16 * 1024 * 1024;
+    cfg.chunk_size = 1024 * 1024;
+
+    // Establish Remoc connection over TCP.
+    let (conn, tx, rx) = remoc::Connect::io_buffered::<_, _, _, _, remoc::codec::Bincode>(
+        cfg,
+        tracking_rx,
+        tracking_tx,
+        8096,
+    )
+    .await?;
+    tokio::spawn(conn);
+
+    Ok((tx, bytes_written, rx, bytes_read))
 }

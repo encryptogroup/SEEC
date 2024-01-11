@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser};
-use seec::bench::BenchParty;
+use seec::bench::{BenchParty, ServerTlsConfig};
 use seec::circuit::base_circuit::Load;
 use seec::circuit::{BaseCircuit, ExecutableCircuit};
 use seec::protocols::boolean_gmw::BooleanGmw;
@@ -59,6 +59,16 @@ struct ExecuteArgs {
     /// Address of server to bind or connect to. Localhost if not provided
     #[clap(long)]
     server: Option<SocketAddr>,
+
+    /// Only use if communication should be TLS encrypted.
+    #[clap(long)]
+    domain: Option<String>,
+    /// Path to server TLS certificate.
+    #[clap(long)]
+    cert: Option<PathBuf>,
+    /// Path to server TLS certificate private key.
+    #[clap(long)]
+    cert_pk: Option<PathBuf>,
 
     /// Performs insecure setup by randomly generating MTs based on fixed seed (no OTs)
     #[clap(long)]
@@ -159,18 +169,36 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
             .repeat(execute_args.repeat)
             .insecure_setup(execute_args.insecure_setup)
             .metadata(circ_name.clone());
+        if let Some(domain) = &execute_args.domain {
+            party = party.tls_domain(domain.clone());
+        }
+        match (&execute_args.cert, &execute_args.cert_pk) {
+            (Some(cert), Some(pk)) => {
+                party = party.tls_config(ServerTlsConfig {
+                    private_key_file: pk.clone(),
+                    certificate_chain_file: cert.clone(),
+                });
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                anyhow::bail!("Must provide both --cert and --cert-pk or neither")
+            }
+            _ => {}
+        }
         if let Some(path) = &execute_args.stored_mts {
             party = party.stored_mts(path);
         }
-        party
+        if let Some(server) = execute_args.server {
+            party = party.server(server)
+        }
+        Ok(party)
     };
 
     let results = if let Some(id) = execute_args.id {
-        let party = create_party(id, circuit);
+        let party = create_party(id, circuit)?;
         party.bench().await.context("Failed to run benchmark")?
     } else {
-        let party0 = create_party(0, circuit.clone());
-        let party1 = create_party(1, circuit);
+        let party0 = create_party(0, circuit.clone())?;
+        let party1 = create_party(1, circuit)?;
         let bench0 = tokio::spawn(party0.bench());
         let bench1 = tokio::spawn(party1.bench());
         let (res0, _res1) = tokio::try_join!(bench0, bench1).context("Failed to join parties")?;

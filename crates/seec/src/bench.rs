@@ -92,6 +92,13 @@ pub struct BenchParty<P: Protocol, Idx> {
     precompute_layers: bool,
     interleave_setup: bool,
     repeat: usize,
+    tls_config: Option<ServerTlsConfig>,
+    tls_domain: Option<String>,
+}
+
+pub struct ServerTlsConfig {
+    pub private_key_file: PathBuf,
+    pub certificate_chain_file: PathBuf,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,6 +127,8 @@ where
             precompute_layers: true,
             interleave_setup: false,
             repeat: 1,
+            tls_config: None,
+            tls_domain: None,
         }
     }
 
@@ -172,16 +181,41 @@ where
         self
     }
 
+    pub fn tls_config(mut self, tls_config: ServerTlsConfig) -> Self {
+        self.tls_config = Some(tls_config);
+        self
+    }
+
+    pub fn tls_domain(mut self, tls_domain: String) -> Self {
+        self.tls_domain = Some(tls_domain);
+        self
+    }
+
     #[tracing::instrument(level = "debug", skip(self))]
     #[allow(clippy::manual_async_fn)] // I want ot force the Send bound here
     pub fn bench(self) -> impl Future<Output = anyhow::Result<BenchResult>> + Send {
         async move {
             let server = self.server.unwrap_or("127.0.0.1:7744".parse().unwrap());
             let (mut sender, bytes_written, mut receiver, bytes_read) = match self.id {
-                0 => seec_channel::tcp::listen(&server).await?,
-                1 => {
-                    seec_channel::tcp::connect_with_timeout(&server, Duration::from_secs(120))
+                0 => {
+                    if let Some(tls_config) = self.tls_config {
+                        seec_channel::tls::listen(
+                            &server,
+                            tls_config.private_key_file,
+                            tls_config.certificate_chain_file,
+                        )
                         .await?
+                    } else {
+                        seec_channel::tcp::listen(&server).await?
+                    }
+                }
+                1 => {
+                    if let Some(domain) = self.tls_domain {
+                        seec_channel::tls::connect(&domain, &server).await?
+                    } else {
+                        seec_channel::tcp::connect_with_timeout(&server, Duration::from_secs(120))
+                            .await?
+                    }
                 }
                 illegal => anyhow::bail!("Illegal party id {illegal}. Must be 0 or 1."),
             };
