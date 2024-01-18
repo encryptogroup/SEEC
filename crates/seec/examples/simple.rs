@@ -52,7 +52,7 @@ async fn party(circuit: Circuit, party_id: usize) -> Result<bool> {
     // triples consisting of zeros. The sha256 and trusted_party_mts examples show how to use
     // a trusted provider. This example also shows how to use dynamic dispatch for the MTProvider.
     let mt_provider: Box<dyn MTProvider<Output = _, Error = _> + Send> =
-        Box::<InsecureMTProvider>::default();
+        InsecureMTProvider::default().into_dyn();
     // Create a new Executor for the circuit. It's important that the party_id is either 0 or 1,
     // as otherwise wrong results might be computed. In the future, there might be support for more
     // than two parties

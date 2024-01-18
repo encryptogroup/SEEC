@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
             )
             .await?
     } else {
-        let mt_provider = InsecureMTProvider;
+        let mt_provider = InsecureMTProvider::default();
         comm_stats
             .record(
                 Phase::FunctionDependentSetup,

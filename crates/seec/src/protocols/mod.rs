@@ -210,6 +210,8 @@ pub trait SetupStorage: Default + Sized + Send + Sync {
     /// Split of the last `count` mul triples.
     fn split_off_last(&mut self, count: usize) -> Self;
 
+    fn reserve(&mut self, additional: usize);
+
     fn append(&mut self, other: Self);
 
     fn is_empty(&self) -> bool {

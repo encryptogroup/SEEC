@@ -78,6 +78,12 @@ impl<R: Default + Send + Sync> SetupStorage for MulTriples<R> {
         self.a.len()
     }
 
+    fn reserve(&mut self, additional: usize) {
+        self.a.reserve(additional);
+        self.b.reserve(additional);
+        self.c.reserve(additional);
+    }
+
     fn split_off_last(&mut self, count: usize) -> Self {
         let split_at = self.len() - count;
         let a = self.a.split_off(split_at);

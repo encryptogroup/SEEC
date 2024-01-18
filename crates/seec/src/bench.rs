@@ -15,7 +15,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use seec_channel::util::{Phase, RunResult, Statistics};
 use seec_channel::{sub_channels_for, Channel, Receiver};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fs::File;
 use std::future::Future;
@@ -36,7 +36,7 @@ pub trait BenchProtocol: Protocol + Default + Debug {
 
 impl BenchProtocol for BooleanGmw {
     fn insecure_setup() -> DynMTP<Self> {
-        Box::new(ErasedError(boolean::InsecureMTProvider))
+        Box::new(ErasedError(boolean::InsecureMTProvider::default()))
     }
 
     fn ot_setup(ch: Channel<Receiver<ExtOTMsg>>) -> DynMTP<Self> {
@@ -48,7 +48,7 @@ impl BenchProtocol for BooleanGmw {
 
     fn stored(path: &Path) -> DynMTP<Self> {
         let file = BufReader::new(File::open(path).expect("opening MT file"));
-        MTStorage::new(file).into_dyn()
+        MTStorage::new(file).insecure_loop_file(true).into_dyn()
     }
 }
 
@@ -101,11 +101,11 @@ pub struct ServerTlsConfig {
     pub certificate_chain_file: PathBuf,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchResult {
-    protocol: String,
-    metadata: String,
-    data: Vec<RunResult>,
+    pub protocol: String,
+    pub metadata: String,
+    pub data: Vec<RunResult>,
 }
 
 impl<P, Idx> BenchParty<P, Idx>

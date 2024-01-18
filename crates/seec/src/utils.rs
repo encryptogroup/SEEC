@@ -88,7 +88,7 @@ where
     [T]: Fill,
     R: CryptoRng + Rng,
 {
-    let bitstore_items = div_ceil(size, mem::size_of::<T>());
+    let bitstore_items = div_ceil(size, mem::size_of::<T>() * 8);
     let mut buf = vec![T::ZERO; bitstore_items];
     rng.fill(&mut buf[..]);
     let mut bv = BitVec::from_vec(buf);

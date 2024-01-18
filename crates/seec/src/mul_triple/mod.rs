@@ -74,6 +74,8 @@ impl<ShareStorage: Sync, G: Send + Sync, Idx: Send + Sync, Mtp: MTProvider + Sen
         _shares: &GateOutputs<ShareStorage>,
         _circuit: &ExecutableCircuit<G, Idx>,
     ) -> Result<(), Self::Error> {
+        // TODO, should this call precompute_mts ? Mhh, currently I call it explicitly
+        //  when I want to perform FIP
         Ok(())
     }
 

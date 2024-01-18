@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::net::SocketAddr;
 use std::ops::Not;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::{io, iter, mem};
 
 use anyhow::{ensure, Context, Result};
@@ -54,7 +54,7 @@ struct CompileArgs {
     static_layers: bool,
 
     /// Output path of the compile circuit
-    #[arg(default_value = "aes_circ.seec")]
+    #[arg(short, long, default_value = "aes_circ.seec")]
     output: PathBuf,
 }
 
@@ -360,7 +360,7 @@ async fn encrypt(
     input.extend_from_bitslice(shared_file);
 
     let mtp = match ot_channel {
-        None => InsecureMTProvider.into_dyn(),
+        None => InsecureMTProvider::default().into_dyn(),
         Some(ot_channel) => mul_triple::boolean::ot_ext::OtMTProvider::new_with_default_ot_ext(
             OsRng,
             ot_channel.0,
@@ -428,12 +428,12 @@ fn aes128(
     use_sc: bool,
 ) -> Vec<Secret<BooleanGmw, usize>> {
     static AES_CIRC: Lazy<SharedCircuit<BooleanGate, usize>> = Lazy::new(|| {
-        BaseCircuit::load_bristol(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("test_resources/bristol-circuits/AES-non-expanded.txt"),
+        let aes_circ_str = include_str!("../test_resources/bristol-circuits/aes_128.bristol");
+        BaseCircuit::from_bristol(
+            seec::bristol::circuit(aes_circ_str).expect("parsing AES circuit failed"),
             Load::SubCircuit,
         )
-        .expect("Loading Aes circuit")
+        .expect("converting AES circuit failed")
         .into_shared()
     });
 
