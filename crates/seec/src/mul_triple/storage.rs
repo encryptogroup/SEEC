@@ -18,6 +18,8 @@ pub struct MTStorage<F, MulTriples> {
     file: F,
     write_batch_size: usize,
     stored_mts: MulTriples,
+    /// can only be set when feature bench-api is enabled
+    insecure_loop_file: bool,
 }
 
 const DEFAULT_BATCH_SIZE: usize = 1_000;
@@ -33,6 +35,7 @@ where
             file: BufWriter::new(file),
             write_batch_size: DEFAULT_BATCH_SIZE,
             stored_mts: Default::default(),
+            insecure_loop_file: false,
         })
     }
 }
@@ -46,7 +49,17 @@ where
             file,
             write_batch_size: DEFAULT_BATCH_SIZE,
             stored_mts: Default::default(),
+            insecure_loop_file: false,
         }
+    }
+
+    /// WARNING: This is an insecure option. By setting loop_file = true, the mt storage
+    /// file is simply read from the beginning when the end is reached. This is only intended for
+    /// benchmarking, and thus only available with the "bench-api" feature enabled.
+    #[cfg(feature = "bench-api")]
+    pub fn insecure_loop_file(mut self, loop_file: bool) -> Self {
+        self.insecure_loop_file = loop_file;
+        self
     }
 }
 impl<F, MulTriples> MTStorage<F, MulTriples>
@@ -84,7 +97,7 @@ where
 }
 
 #[async_trait]
-impl<F: Read + Debug + Send, MulTriples> MTProvider for MTStorage<F, MulTriples>
+impl<F: Read + Seek + Debug + Send, MulTriples> MTProvider for MTStorage<F, MulTriples>
 where
     MulTriples: DeserializeOwned + SetupStorage,
 {
@@ -96,8 +109,23 @@ where
 
         // TODO this calls append in a loop which will lead to frequent reallocations
         //  this could be mitigated by adding a reserve function to the SetupStorage trait
+        self.stored_mts.reserve(amount);
         while added < amount {
+            #[cfg(not(feature = "bench-api"))]
             let batch = self.read_batch()?;
+            #[cfg(feature = "bench-api")]
+            let batch = match self.read_batch() {
+                Ok(batch) => batch,
+                Err(StorageError::MTDeserialization(io))
+                    if self.insecure_loop_file && matches!(*io, bincode::ErrorKind::Io(_)) =>
+                {
+                    self.rewind_file()?;
+                    self.read_batch()?
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            };
             added += batch.len();
             self.stored_mts.append(batch);
         }
@@ -169,7 +197,10 @@ mod tests {
         let file = Cursor::new(vec![0_u8; 1500]);
         let mut mt_store = MTStorage::new(file);
         mt_store.set_batch_size(4);
-        mt_store.store_mts(25, InsecureMTProvider).await.unwrap();
+        mt_store
+            .store_mts(25, InsecureMTProvider::default())
+            .await
+            .unwrap();
         mt_store.rewind_file().unwrap();
 
         mt_store.precompute_mts(14).await.unwrap();

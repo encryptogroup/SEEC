@@ -211,6 +211,11 @@ impl SetupStorage for MulTriples {
         self.len()
     }
 
+    fn reserve(&mut self, additional: usize) {
+        self.a.reserve(additional);
+        self.b.reserve(additional);
+        self.c.reserve(additional);
+    }
     /// Split of the last `count` many multiplication triples into a new `MulTriples`.
     fn split_off_last(&mut self, count: usize) -> Self {
         let len = self.len();
@@ -224,6 +229,15 @@ impl SetupStorage for MulTriples {
         self.a.append(&mut other.a);
         self.b.append(&mut other.b);
         self.c.append(&mut other.c);
+    }
+
+    /// WARNIGN: We implement remove_first as split_off_last for performance reasons.
+    /// This should generally be fine, as the order of MTs is not important. However, this
+    /// can lead to problems when e.g. mixing mt storage with different batch sizes for the
+    /// parties. But there is currently no way to create stored MT files which would have this
+    /// problem.
+    fn remove_first(&mut self, count: usize) -> Self {
+        self.split_off_last(count)
     }
 }
 

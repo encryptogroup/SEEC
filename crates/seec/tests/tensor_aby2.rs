@@ -120,8 +120,8 @@ async fn simple_matmul() -> anyhow::Result<()> {
     let state2 = BoolTensorAby2::new(sharing_state2.clone());
 
     let (ch1, ch2) = seec_channel::in_memory::new_pair(16);
-    let delta_provider1 = AbySetupProvider::new(0, InsecureMTProvider, ch1.0, ch1.1);
-    let delta_provider2 = AbySetupProvider::new(1, InsecureMTProvider, ch2.0, ch2.1);
+    let delta_provider1 = AbySetupProvider::new(0, InsecureMTProvider::default(), ch1.0, ch1.1);
+    let delta_provider2 = AbySetupProvider::new(1, InsecureMTProvider::default(), ch2.0, ch2.1);
     let gate_output = [
         state1.clone().setup_gate_outputs(0, &circ),
         state2.clone().setup_gate_outputs(1, &circ),

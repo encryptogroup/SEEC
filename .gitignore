@@ -1,5 +1,9 @@
-/target
+target
 Cargo.lock
 *.dot
 *.log
+cmake-build-*
+*.seec
+*.svg
+*.tar.gz
 *.zst

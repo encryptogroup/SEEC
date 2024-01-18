@@ -628,6 +628,10 @@ impl SetupStorage for SetupData {
         self.eval_shares.len()
     }
 
+    fn reserve(&mut self, additional: usize) {
+        self.eval_shares.reserve(additional);
+    }
+
     fn split_off_last(&mut self, count: usize) -> Self {
         Self {
             eval_shares: self.eval_shares.split_off(self.len() - count),

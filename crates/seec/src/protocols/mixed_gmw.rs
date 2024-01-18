@@ -303,6 +303,10 @@ impl<R: Ring> SetupStorage for MixedSetupStorage<R> {
     fn append(&mut self, _other: Self) {
         todo!()
     }
+
+    fn reserve(&mut self, _additional: usize) {
+        todo!()
+    }
 }
 
 #[derive(Default, Clone)]
@@ -332,7 +336,7 @@ where
             arith: vec![R::ZERO; amount * R::BITS],
         };
         Ok(MixedSetupStorage {
-            bool: boolean::InsecureMTProvider
+            bool: boolean::InsecureMTProvider::default()
                 .request_mts(amount)
                 .await
                 .unwrap(),

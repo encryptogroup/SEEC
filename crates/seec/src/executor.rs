@@ -358,7 +358,6 @@ where
                     &mut setup_storage,
                 )
             });
-
             let msg = ExecutorMsg {
                 scalar: scalar_msg.clone(),
                 simd: simd_msg.clone(),

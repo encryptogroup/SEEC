@@ -35,7 +35,7 @@ struct CompileArgs {
     #[arg(long)]
     simd: Option<NonZeroUsize>,
 
-    /// Output path of the compile circuit. `.seec` extension is added
+    /// Output path of the compile circuit.
     #[arg(short, long)]
     output: PathBuf,
 
@@ -139,8 +139,8 @@ fn compile(compile_args: CompileArgs) -> Result<()> {
     if !compile_args.dyn_layers {
         circ = circ.precompute_layers();
     }
-    let out_path = compile_args.output.with_extension("seec");
-    let out = BufWriter::new(File::create(out_path).context("failed to create output file")?);
+    let out =
+        BufWriter::new(File::create(&compile_args.output).context("failed to create output file")?);
     bincode::serialize_into(out, &circ).context("failed to serialize circuit")?;
     Ok(())
 }
@@ -168,6 +168,7 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
             .explicit_circuit(circ)
             .repeat(execute_args.repeat)
             .insecure_setup(execute_args.insecure_setup)
+            .interleave_setup(execute_args.interleave_setup)
             .metadata(circ_name.clone());
         if let Some(domain) = &execute_args.domain {
             party = party.tls_domain(domain.clone());
