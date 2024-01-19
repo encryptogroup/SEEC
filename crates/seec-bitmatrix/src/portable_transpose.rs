@@ -1,6 +1,7 @@
 use crate::Storage;
 use std::mem;
-use std::simd::{u16x8, u8x16, Simd};
+use std::simd::num::SimdUint;
+use std::simd::{i8x16, u16x8, u64x2, u8x16, Mask, Simd};
 
 #[inline]
 #[allow(unused)]
@@ -123,34 +124,16 @@ pub(crate) fn transpose<T: Storage>(input: &[T], nrows: usize, ncols: usize) -> 
 }
 
 fn _mm_movemask_epi8(a: Simd<u8, 16>) -> u16 {
-    #[cfg(target_feature = "sse2")]
-    {
-        use std::arch::x86_64::_mm_movemask_epi8 as op;
-        unsafe { op(a.into()) as u16 }
-    }
-    #[cfg(not(target_feature = "sse2"))]
-    {
-        use std::simd::{i8x16, Mask, ToBitMask};
-        let a: i8x16 = a.cast();
-        let msb = a >> i8x16::splat(7);
-        let mask = unsafe { Mask::from_int_unchecked(msb) };
-        mask.to_bitmask()
-    }
+    let a: i8x16 = a.cast();
+    let msb = a >> i8x16::splat(7);
+    let mask = unsafe { Mask::from_int_unchecked(msb) };
+    mask.to_bitmask() as u16
 }
 
 fn _mm_slli_epi64<const IMM8: i32>(a: Simd<u8, 16>) -> Simd<u8, 16> {
-    #[cfg(target_feature = "sse2")]
-    {
-        use std::arch::x86_64::_mm_slli_epi64 as op;
-        unsafe { op::<IMM8>(a.into()).into() }
-    }
-    #[cfg(not(target_feature = "sse2"))]
-    {
-        use std::simd::u64x2;
-        let mut a: u64x2 = unsafe { mem::transmute(a) };
-        a <<= u64x2::splat(IMM8 as u64);
-        unsafe { mem::transmute(a) }
-    }
+    let mut a: u64x2 = unsafe { mem::transmute(a) };
+    a <<= u64x2::splat(IMM8 as u64);
+    unsafe { mem::transmute(a) }
 }
 
 #[cfg(test)]

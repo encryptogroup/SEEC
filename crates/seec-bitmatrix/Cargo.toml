@@ -1,11 +1,12 @@
 [package]
-name = "mpc-bitmatrix"
+name = "seec-bitmatrix"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+rayon = ["dep:rayon"]
 
 [build-dependencies]
 rustversion = "1.0.14"
@@ -16,6 +17,7 @@ bytemuck = { version = "1.12.1", features = ["extern_crate_alloc"]}
 cfg-if = "1.0.0"
 rand = "0.8.5"
 serde = { version = "1.0.152", features = ["derive"]}
+rayon = { version = "1.8.0", optional = true}
 
 [dev-dependencies]
 proptest = "1.0.0"

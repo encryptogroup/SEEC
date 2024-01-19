@@ -6,14 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-silent-ot = ["bitpolymul", "aligned-vec"]
+silent-ot = ["aligned-vec"]
+silent-ot-quasi-cyclic-code = ["silent-ot"]
 # this feature needs libote which provides bindings to libOTe
 # but since gcc seems to not care about backwards compat, this is prone to break...
 silent-ot-silver-code = ["libote", "silent-ot"]
 silent-ot-ea-code = ["libote", "silent-ot"]
 silent-ot-ex-conv-code = ["libote", "silent-ot"]
-
-c-sse = []
+silent-ot-libote-codes = ["silent-ot-silver-code", "silent-ot-ea-code", "silent-ot-ex-conv-code"]
 
 [dependencies]
 aes = "0.8.1"
@@ -45,6 +45,7 @@ thiserror = "1.0.31"
 tracing = "0.1.35"
 remoc = { workspace = true }
 libote = { path = "../../libs/libote-rs", optional = true }
+seec-bitmatrix = {path = "../seec-bitmatrix", features = ["rayon"]}
 
 [dev-dependencies]
 criterion = { version = "0.3.5", features = ["async_tokio"]}
@@ -62,8 +63,8 @@ cc = "1.0.73"
 [[bench]]
 name = "bench_main"
 harness = false
-required-features = ["c-sse", "silent-ot"]
+required-features = ["silent-ot", "silent-ot-quasi-cyclic-code"]
 
 [[example]]
 name = "silent_ot"
-required-features = ["silent-ot"]
+required-features = ["silent-ot", "silent-ot-quasi-cyclic-code"]

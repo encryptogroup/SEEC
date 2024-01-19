@@ -9,6 +9,8 @@ use hex_literal::hex;
 use seec::common::BitVec;
 use seec::private_test_utils::{execute_bristol, init_tracing, TestChannel};
 
+const CHANNEL_TYPE: TestChannel = TestChannel::Tcp;
+
 #[tokio::test]
 async fn eval_8_bit_adder() -> Result<()> {
     let _guard = init_tracing();
@@ -17,7 +19,7 @@ async fn eval_8_bit_adder() -> Result<()> {
     let out = execute_bristol(
         "test_resources/bristol-circuits/int_add8_depth.bristol",
         (12_u8, 30_u8),
-        TestChannel::Tcp,
+        CHANNEL_TYPE,
     )
     .await?;
     assert_eq!(exp_output, out);
@@ -45,7 +47,7 @@ async fn eval_aes_circuit() -> Result<()> {
             u128::from_be_bytes(block).reverse_bits(),
             u128::from_be_bytes(key).reverse_bits(),
         ),
-        TestChannel::Tcp,
+        CHANNEL_TYPE,
     )
     .await?;
     assert_eq!(exp_output, out);
@@ -67,7 +69,7 @@ async fn eval_sha_256_circuit_zeros() -> Result<()> {
     let out = execute_bristol(
         "test_resources/bristol-circuits/sha-256.txt",
         [inputs_0, inputs_1],
-        TestChannel::Tcp,
+        CHANNEL_TYPE,
     )
     .await?;
     assert_eq!(exp_output, out);
@@ -89,7 +91,7 @@ async fn eval_sha_256_circuit_ones() -> Result<()> {
     let out = execute_bristol(
         "test_resources/bristol-circuits/sha-256.txt",
         [inputs_0, inputs_1],
-        TestChannel::Tcp,
+        CHANNEL_TYPE,
     )
     .await?;
     assert_eq!(exp_output, out);
@@ -107,7 +109,7 @@ async fn eval_sha_256_low_depth() -> Result<()> {
     let out = execute_bristol(
         "test_resources/bristol-circuits/sha-256-low_depth.txt",
         [inputs_0, inputs_1],
-        TestChannel::Tcp,
+        CHANNEL_TYPE,
     )
     .await?;
     assert_eq!(exp_output, out);

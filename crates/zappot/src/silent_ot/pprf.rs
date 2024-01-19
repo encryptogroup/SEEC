@@ -4,7 +4,6 @@
 use crate::util::aes_hash::FIXED_KEY_HASH;
 use crate::util::aes_rng::AesRng;
 use crate::util::tokio_rayon::{spawn_compute, AsyncThreadPool};
-use crate::util::transpose::transpose;
 use crate::util::{log2_ceil, Block};
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
@@ -16,6 +15,7 @@ use rand::Rng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::ThreadPool;
+use seec_bitmatrix::BitMatrixView;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -808,7 +808,10 @@ fn copy_out(
             while i < end {
                 // get 128 blocks
                 let input_128: &[u8] = bytemuck::cast_slice(&lvl[k * 16..(k + 1) * 16]);
-                let transposed = transpose(input_128, 128, 128);
+                let bm_view = BitMatrixView::from_slice(input_128, 128, 128);
+                // TODO ughh, this is really inefficient. I should really have an in-place transpose
+                //  or maybe one that takes an out buffer so that i don;t allocate all the time
+                let transposed = bm_view.transpose().into_vec();
                 let transposed_blocks = transposed
                     .chunks_exact(16)
                     .map(|chunk| Block::try_from(chunk).expect("Blocks are 16 bytes"));
@@ -832,11 +835,11 @@ fn copy_out(
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat, Receiver, Sender};
-    use crate::util::transpose::transpose;
     use crate::util::Block;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
     use rand_core::{CryptoRng, RngCore};
+    use seec_bitmatrix::BitMatrixView;
     use tokio::time::Instant;
 
     pub(crate) fn fake_base<RNG: RngCore + CryptoRng>(
@@ -899,12 +902,17 @@ pub(crate) mod tests {
         let (r_out, s_out) = futures::future::try_join(receive, send).await.unwrap();
         println!("Total time: {}", now.elapsed().as_secs_f32());
         let out = r_out ^ s_out;
-        let out_t = transpose(
-            bytemuck::cast_slice(out.as_slice().unwrap()),
-            out.nrows(),
-            out.ncols() * 128, // * 128 because of Block size
-        );
-        let out_t: &[Block] = bytemuck::cast_slice(&out_t);
+        let out_t =
+            BitMatrixView::from_slice(out.as_slice().unwrap(), out.nrows(), out.ncols() * 128)
+                .fast_transpose()
+                .into_vec();
+        //
+        //     transpose(
+        //     bytemuck::cast_slice(out.as_slice().unwrap()),
+        //     out.nrows(),
+        //     out.ncols() * 128, // * 128 because of Block size
+        // );
+        // let out_t: &[Block] = bytemuck::cast_slice(&out_t);
         for (i, blk) in out_t.iter().enumerate() {
             let f = points.contains(&i);
             let exp = if f { Block::all_ones() } else { Block::zero() };

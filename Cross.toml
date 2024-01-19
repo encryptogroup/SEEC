@@ -1,0 +1,13 @@
+[target.armv7-linux-androideabi]
+image = "ghcr.io/cross-rs/armv7-linux-androideabi:edge"
+
+[target.thumbv7neon-linux-androideabi]
+image = "ghcr.io/cross-rs/thumbv7neon-linux-androideabi:edge"
+
+# TODO the passthrough does not seem to work correctly
+[build.env]
+passthrough = [
+    "RUST_BACKTRACE",
+    "RUST_LOG",
+    "RUSTFLAGS"
+]

@@ -3,8 +3,6 @@ pub mod aes_hash;
 pub mod aes_rng;
 pub mod block;
 pub mod tokio_rayon;
-pub mod transpose;
-
 pub use block::Block;
 
 #[cfg(any(feature = "silent-ot", test))]

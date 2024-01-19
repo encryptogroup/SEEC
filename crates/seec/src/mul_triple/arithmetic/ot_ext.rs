@@ -3,8 +3,7 @@ use crate::mul_triple::MTProvider;
 use crate::protocols::{Ring, SetupStorage};
 use async_trait::async_trait;
 use bitvec::slice::BitSlice;
-use bitvec::store::BitStore;
-use bytemuck::Pod;
+use bytemuck::{cast_slice, Pod};
 use itertools::izip;
 use num_integer::Integer;
 use rand::distributions::{Distribution, Standard};
@@ -48,8 +47,7 @@ impl<R: Ring, RNG: RngCore + CryptoRng + Send, OtS: ExtROTSender, OtR: ExtROTRec
 
 impl<R, RNG, OtS, OtR> OtMTProvider<R, RNG, OtS, OtR>
 where
-    R: Ring + From<u8> + BitStore + Pod,
-    <R as BitStore>::Unalias: Pod,
+    R: Ring + From<u8> + Pod,
     Block: From<R>,
     Standard: Distribution<R>,
     RNG: RngCore + CryptoRng + Send,
@@ -97,7 +95,8 @@ where
             &mut ch_receiver2,
         );
 
-        let choices = BitSlice::from_slice(&b_i);
+        // cast choices to BitSlice<u8> so we don't need R:BitStore
+        let choices = BitSlice::from_slice(cast_slice::<_, u8>(&b_i));
 
         let receive = self.ot_receiver.receive_correlated(
             choices,
@@ -137,8 +136,7 @@ where
 #[async_trait]
 impl<R, RNG, OtS, OtR> MTProvider for OtMTProvider<R, RNG, OtS, OtR>
 where
-    R: Ring + From<u8> + BitStore + Pod,
-    <R as BitStore>::Unalias: Pod,
+    R: Ring + From<u8> + Pod,
     Block: From<R>,
     Standard: Distribution<R>,
     RNG: RngCore + CryptoRng + Send,
@@ -210,7 +208,9 @@ mod tests {
             .for_each(|((idx, mt1), mt2)| {
                 assert_eq!(
                     mt1.c.wrapping_add(mt2.c),
-                    (mt1.a.wrapping_add(mt2.a)).wrapping_mul(mt1.b.wrapping_add(mt2.b)),
+                    mt1.a
+                        .wrapping_add(mt2.a)
+                        .wrapping_mul(mt1.b.wrapping_add(mt2.b)),
                     "Wrong MTs for idx {idx}"
                 )
             });
