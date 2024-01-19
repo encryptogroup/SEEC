@@ -3,7 +3,6 @@ use crate::traits::{BaseROTReceiver, BaseROTSender, Error, ExtROTReceiver, ExtRO
 use crate::util::aes_hash::FIXED_KEY_HASH;
 use crate::util::aes_rng::AesRng;
 use crate::util::tokio_rayon::spawn_compute;
-use crate::util::transpose::transpose;
 use crate::util::Block;
 use crate::{base_ot, BASE_OT_COUNT};
 use async_trait::async_trait;
@@ -16,6 +15,7 @@ use rand::{CryptoRng, Rng, RngCore};
 use rand_core::SeedableRng;
 use rayon::prelude::*;
 use remoc::RemoteSend;
+use seec_bitmatrix::BitMatrix;
 use seec_channel::channel;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -117,12 +117,12 @@ where
             .expect("BASE_OT_COUNT must be size of a Block");
 
         let rows = BASE_OT_COUNT;
-        let cols = count / 8; // div by 8 because of u8
+        let cols = count;
         let mut v_mat = spawn_compute(move || {
             let mut base_ot_rngs = base_ot_rngs.lock().unwrap();
-            let mut v_mat = vec![0_u8; rows * cols];
+            let mut v_mat = BitMatrix::<u8>::new(rows, cols);
             v_mat
-                .chunks_exact_mut(cols)
+                .iter_raw_rows_mut()
                 .zip(&mut base_ot_rngs[..])
                 .for_each(|(row, prg)| {
                     prg.fill_bytes(row);
@@ -137,11 +137,11 @@ where
                 msg => return Err(Error::WrongOrder(msg)),
             };
             let r = choices[idx];
-            let v_row = &mut v_mat[idx * cols..(idx + 1) * cols];
-            for el in &mut u_row {
-                // computes r_j * u_j
-                // TODO cleanup, also const time?
-                *el = if r { *el } else { 0 };
+            let mut vmat_view = v_mat.view_mut();
+            let v_row = vmat_view.raw_row_mut(idx).unwrap();
+            // TODO not constant time
+            if !r {
+                u_row.fill(0);
             }
             v_row.iter_mut().zip(u_row).for_each(|(v, u)| {
                 *v ^= u;
@@ -153,10 +153,11 @@ where
         }
 
         let ots = spawn_compute(move || {
-            let v_mat = transpose(&v_mat, rows, count);
+            let v_mat = v_mat.view().transpose();
+
             v_mat
                 // TODO benchmark parallelization
-                .par_chunks_exact(BASE_OT_COUNT / u8::BITS as usize)
+                .par_iter_raw_rows()
                 .map(|row| {
                     let block = row
                         .try_into()
@@ -298,22 +299,23 @@ where
         let base_ot_rngs = self.base_rngs.clone().unwrap();
 
         let rows = BASE_OT_COUNT;
-        let cols = count / 8; // div by 8 because of u8
+        let cols = count;
 
         let choices = choices.to_bitvec();
         let sender = sender.clone();
         let t_mat = spawn_compute(move || {
             let mut base_ot_rngs = base_ot_rngs.lock().unwrap();
             let choices = cast_slice::<_, u8>(choices.as_raw_slice());
-            let mut t_mat = vec![0_u8; rows * cols];
+
+            let mut t_mat = BitMatrix::new(rows, cols);
             t_mat
-                .par_chunks_exact_mut(cols)
+                .par_iter_raw_rows_mut()
                 .enumerate()
                 .zip(&mut base_ot_rngs[..])
                 .for_each(|((idx, t_row), [prg0, prg1])| {
                     prg0.fill_bytes(t_row);
                     let u_row = {
-                        let mut row = vec![0_u8; cols];
+                        let mut row = vec![0_u8; t_row.len()];
                         prg1.fill_bytes(&mut row);
                         row.iter_mut().zip(t_row).zip(choices).for_each(
                             |((val, rand_val), choice)| {
@@ -331,10 +333,9 @@ where
         .await;
 
         let ots = spawn_compute(move || {
-            let t_mat = transpose(&t_mat, rows, count);
+            let t_mat = t_mat.view().transpose();
             t_mat
-                // TODO parallelize this code
-                .par_chunks_exact(BASE_OT_COUNT / u8::BITS as usize)
+                .par_iter_raw_rows()
                 .map(|rows| {
                     let block = rows
                         .try_into()

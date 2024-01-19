@@ -9,8 +9,10 @@ edition = "2021"
 _integration_tests = ["tracing-subscriber", "anyhow", "funty"]
 bench-api = ["anyhow"]
 aby2 = []
-silent-ot = ["zappot/silent-ot"]
-silent-ot-libote-codes = ["zappot/silent-ot-silver-code","zappot/silent-ot-ea-code", "zappot/silent-ot-ex-conv-code"]
+# depends on AVX2, therefore not platform idepedent
+silent-ot-quasi-cyclic = ["zappot/silent-ot-quasi-cyclic-code"]
+# using the libote codes should work on ARM
+silent-ot = ["zappot/silent-ot-libote-codes"]
 
 [[example]]
 name = "bristol"
@@ -61,7 +63,7 @@ seec-channel = {path = "../seec-channel"}
 remoc = { workspace = true }
 zappot = {path = "../zappot"}
 typemap = "0.3.3"
-mpc-bitmatrix = {path = "../mpc-bitmatrix"}
+seec-bitmatrix = {path = "../seec-bitmatrix"}
 either = "1.8.1"
 flatbuffers = "23.5.26"
 

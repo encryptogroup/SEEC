@@ -1,5 +1,5 @@
 #![cfg_attr(is_nightly, feature(portable_simd))]
-//! MPC-BitMatrix
+//! SEEC-BitMatrix
 //!
 //! A library for fast bitmatrix transpose intended for MPC implementations.
 
@@ -11,9 +11,14 @@ use cfg_if::cfg_if;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::Rng;
+#[cfg(feature = "rayon")]
+use rayon::iter::IndexedParallelIterator;
+#[cfg(feature = "rayon")]
+use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Binary, Debug, Formatter};
-use std::ops::{BitAnd, BitXor};
+use std::ops::{BitAnd, BitXor, Range};
+use std::slice::{ChunksExact, ChunksExactMut};
 
 #[cfg(is_nightly)]
 mod portable_transpose;
@@ -35,13 +40,26 @@ pub struct BitMatrixView<'a, T> {
     data: &'a [T],
 }
 
-pub trait Storage: bytemuck::Pod + BitXor<Output = Self> + BitAnd<Output = Self> {
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BitMatrixViewMut<'a, T> {
+    rows: usize,
+    cols: usize,
+    data: &'a mut [T],
+}
+
+pub trait Storage:
+    bytemuck::Pod + BitXor<Output = Self> + BitAnd<Output = Self> + Send + Sync
+{
     const BITS: usize;
 
     fn zero() -> Self;
 }
 
 impl<T: Storage> BitMatrix<T> {
+    pub fn new(rows: usize, cols: usize) -> Self {
+        Self::zeros(rows, cols)
+    }
+
     pub fn from_vec(data: Vec<T>, rows: usize, cols: usize) -> Self {
         Self { rows, cols, data }
     }
@@ -75,6 +93,14 @@ impl<T: Storage> BitMatrix<T> {
         }
     }
 
+    pub fn view_mut(&mut self) -> BitMatrixViewMut<'_, T> {
+        BitMatrixViewMut {
+            rows: self.rows,
+            cols: self.cols,
+            data: self.data.as_mut_slice(),
+        }
+    }
+
     // Returns dimensions (rows, columns).
     pub fn dim(&self) -> (usize, usize) {
         (self.rows, self.cols)
@@ -89,7 +115,35 @@ impl<T: Storage> BitMatrix<T> {
     }
 
     pub fn iter_rows(&self) -> Rows<'_, T> {
-        Rows { view: self.view() }
+        Rows::new(self.view())
+    }
+
+    pub fn iter_raw_rows(&self) -> RawRows<'_, T> {
+        RawRows::new(self.view())
+    }
+
+    pub fn iter_raw_rows_mut(&mut self) -> RawRowsMut<'_, T> {
+        RawRowsMut::new(self.view_mut())
+    }
+
+    #[cfg(feature = "rayon")]
+    pub fn par_iter_raw_rows(&self) -> impl IndexedParallelIterator<Item = &[T]> {
+        assert_eq!(
+            0,
+            self.cols % T::BITS,
+            "cols must be divisable by bits for raw iterator"
+        );
+        self.data.par_chunks_exact(self.cols / T::BITS)
+    }
+
+    #[cfg(feature = "rayon")]
+    pub fn par_iter_raw_rows_mut(&mut self) -> impl IndexedParallelIterator<Item = &mut [T]> {
+        assert_eq!(
+            0,
+            self.cols % T::BITS,
+            "cols must be divisable by bits for raw iterator"
+        );
+        self.data.par_chunks_exact_mut(self.cols / T::BITS)
     }
 
     pub fn scalar_and(&self, rhs: &Self) -> Self {
@@ -151,8 +205,7 @@ where
         let rhs = rhs.view().transpose();
         let bits = self
             .iter_rows()
-            .into_iter()
-            .flat_map(|l_row| rhs.iter_rows().into_iter().map(|r_row| dotp(l_row, r_row)));
+            .flat_map(|l_row| rhs.iter_rows().map(|r_row| dotp(l_row, r_row)));
         let mut bv: BitVec<T> = BitVec::with_capacity(self.rows * rhs.rows);
         bv.extend(bits);
         Self::from_vec(bv.into_vec(), self.rows, rhs.rows)
@@ -165,6 +218,11 @@ where
 
 impl<'a, T: Storage> BitMatrixView<'a, T> {
     pub fn from_slice(data: &'a [T], rows: usize, cols: usize) -> Self {
+        assert_eq!(
+            data.len() * T::BITS,
+            rows * cols,
+            "data.len() does not match rows * cols"
+        );
         Self { rows, cols, data }
     }
 
@@ -172,17 +230,23 @@ impl<'a, T: Storage> BitMatrixView<'a, T> {
         cfg_if! {
             if #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))] {
                 let transposed = sse2_transpose::transpose(self.data, self.rows, self.cols);
-            } else if #[cfg(feature = "portable_transpose")] {
+            } else if #[cfg(is_nightly)] {
                 let transposed = portable_transpose::transpose(self.data, self.rows, self.cols);
             } else {
                 use std::compile_error;
 
-                compile_error!("Target must either be x86_64 with sse2 enabled of crate \
+                compile_error!("Target must either be x86_64 with sse2 enabled or crate \
                 feature \"portable_transpose\" must be enabled (requires nightly)")
             }
-        };
+        }
 
         BitMatrix::from_vec(transposed, self.cols, self.rows)
+    }
+
+    #[inline]
+    pub fn raw_row(&self, row: usize) -> Option<&'a [T]> {
+        let idx = raw_row_idx::<T>(row, self.cols);
+        self.data.get(idx)
     }
 
     fn can_do_sse_trans(&self) -> bool {
@@ -190,16 +254,29 @@ impl<'a, T: Storage> BitMatrixView<'a, T> {
     }
 }
 
+impl<'a, T: BitStore<Unalias = T>> BitMatrixView<'a, T> {
+    pub fn as_bitslice(&self) -> &'a BitSlice<T> {
+        BitSlice::from_slice(self.data)
+    }
+
+    #[inline]
+    pub fn row(&self, row: usize) -> Option<&'a BitSlice<T>> {
+        let data = self.as_bitslice();
+        let start_idx = row * self.cols;
+        let end_idx = (row + 1) * self.cols;
+        data.get(start_idx..end_idx)
+    }
+}
+
 impl<'a, T: Storage + BitStore<Unalias = T>> BitMatrixView<'a, T> {
     pub fn transpose(&self) -> BitMatrix<T> {
         let transposed = if self.can_do_sse_trans()
-            && (cfg!(feature = "portable_transpose")
-                || cfg!(all(target_arch = "x86_64", target_feature = "sse2")))
+            && (cfg!(is_nightly) || cfg!(all(target_arch = "x86_64", target_feature = "sse2")))
         {
             cfg_if! {
                 if #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))] {
                     sse2_transpose::transpose(self.data, self.rows, self.cols)
-                } else if #[cfg(feature = "portable_transpose")] {
+                } else if #[cfg(is_nightly)] {
                     portable_transpose::transpose(self.data, self.rows, self.cols)
                 } else {
                     simple::transpose(self.data, self.rows, self.cols)
@@ -210,6 +287,26 @@ impl<'a, T: Storage + BitStore<Unalias = T>> BitMatrixView<'a, T> {
         };
         BitMatrix::from_vec(transposed, self.cols, self.rows)
     }
+}
+
+impl<'a, T: Storage> BitMatrixViewMut<'a, T> {
+    pub fn raw_row_mut(&'a mut self, row: usize) -> Option<&'a mut [T]> {
+        let idx = raw_row_idx::<T>(row, self.cols);
+        self.data.get_mut(idx)
+    }
+}
+
+#[inline]
+fn raw_row_idx<T: Storage>(row: usize, cols: usize) -> Range<usize> {
+    assert_eq!(
+        0,
+        cols % T::BITS,
+        "cols must be divisable by T::BITS for raw_row. Use row() instead."
+    );
+    let cols_el = cols / T::BITS;
+    let start_idx = row * cols_el;
+    let end_idx = (row + 1) * cols_el;
+    start_idx..end_idx
 }
 
 impl<T: Storage> BitXor for BitMatrix<T> {
@@ -290,35 +387,75 @@ impl Storage for u128 {
 #[derive(Clone, Debug)]
 pub struct Rows<'a, T> {
     view: BitMatrixView<'a, T>,
-}
-
-#[derive(Clone, Debug)]
-pub struct RowIter<'a, T> {
-    view: BitMatrixView<'a, T>,
     row: usize,
 }
 
-impl<'a, T: BitStore<Unalias = T>> IntoIterator for Rows<'a, T> {
-    type Item = &'a BitSlice<T>;
-    type IntoIter = RowIter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        RowIter {
-            view: self.view,
-            row: 0,
-        }
+impl<'a, T> Rows<'a, T> {
+    pub fn new(view: BitMatrixView<'a, T>) -> Self {
+        Self { view, row: 0 }
     }
 }
 
-impl<'a, T: BitStore<Unalias = T>> Iterator for RowIter<'a, T> {
+impl<'a, T: BitStore<Unalias = T>> Iterator for Rows<'a, T> {
     type Item = &'a BitSlice<T>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let data = BitSlice::from_slice(self.view.data);
-        let start_idx = self.row * self.view.cols;
-        let end_idx = (self.row + 1) * self.view.cols;
+        let ret = self.view.row(self.row);
         self.row += 1;
-        data.get(start_idx..end_idx)
+        ret
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RawRows<'a, T> {
+    chunks: ChunksExact<'a, T>,
+}
+
+impl<'a, T: Storage> RawRows<'a, T> {
+    pub fn new(view: BitMatrixView<'a, T>) -> Self {
+        assert_eq!(
+            0,
+            view.cols % T::BITS,
+            "cols of BitMatrix must be multiple of T::BITS for raw rows iterator"
+        );
+        let chunks = view.data.chunks_exact(view.cols / T::BITS);
+        Self { chunks }
+    }
+}
+
+impl<'a, T: Storage> Iterator for RawRows<'a, T> {
+    type Item = &'a [T];
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.chunks.next()
+    }
+}
+
+#[derive(Debug)]
+pub struct RawRowsMut<'a, T> {
+    chunks: ChunksExactMut<'a, T>,
+}
+
+impl<'a, T: Storage> RawRowsMut<'a, T> {
+    pub fn new(view: BitMatrixViewMut<'a, T>) -> Self {
+        assert_eq!(
+            0,
+            view.cols % T::BITS,
+            "cols of BitMatrix must be multiple of T::BITS for raw rows iterator"
+        );
+        let chunks = view.data.chunks_exact_mut(view.cols / T::BITS);
+        Self { chunks }
+    }
+}
+
+impl<'a, T: Storage> Iterator for RawRowsMut<'a, T> {
+    type Item = &'a mut [T];
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.chunks.next()
     }
 }
 

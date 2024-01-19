@@ -12,12 +12,12 @@ use rand::Rng;
 use rand_core::SeedableRng;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
+use seec_bitmatrix::BitMatrixView;
 use std::time::Instant;
 
 use crate::silent_ot::get_reg_noise_weight;
 use crate::silent_ot::pprf::PprfConfig;
 use crate::util::aes_rng::AesRng;
-use crate::util::transpose::transpose_128;
 use crate::util::Block;
 
 #[derive(Debug, Clone)]
@@ -100,7 +100,11 @@ fn copy_out(dest: &mut [Block], c_mod_p1: &Array2<Block>) {
                 .iter_mut()
                 .zip(c_mod_p1.column(i))
                 .for_each(|(block, cmod)| *block = *cmod);
-            transpose_128(chunk.try_into().unwrap());
+            // TODO don't allocate in loop...
+            let transposed = BitMatrixView::from_slice(chunk, 128, 128)
+                .fast_transpose()
+                .into_vec();
+            chunk.copy_from_slice(&transposed);
         });
 }
 
@@ -294,5 +298,54 @@ pub fn bit_shift_xor(dest: &mut [Block], inp: &[Block], bit_shift: u8) {
     if dest.len() >= inp.len() {
         let inp_last = *inp.last().expect("empty input");
         dest[inp.len() - 1] ^= inp_last >> bit_shift;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::silent_ot::quasi_cyclic_encode::{bit_shift_xor, modp};
+    use crate::util::Block;
+    use bitvec::order::Lsb0;
+    use bitvec::prelude::{BitSlice, BitVec};
+    use std::cmp::min;
+
+    #[test]
+    fn basic_bit_shift_xor() {
+        let dest = &mut [Block::zero(), Block::zero()];
+        let inp = &[Block::all_ones(), Block::all_ones()];
+        let bit_shift = 10;
+        bit_shift_xor(dest, inp, bit_shift);
+        assert_eq!(Block::all_ones(), dest[0]);
+        let exp = Block::from(u128::MAX >> bit_shift);
+        assert_eq!(exp, dest[1]);
+    }
+
+    #[test]
+    fn basic_modp() {
+        let i_bits = 1026;
+        let n_bits = 223;
+        let n = (n_bits + 127) / 128;
+        let c = (i_bits + n_bits - 1) / n_bits;
+        let mut dest = vec![Block::zero(); n];
+        let mut inp = vec![Block::all_ones(); (i_bits + 127) / 128];
+        let p = n_bits;
+        let inp_bits: &mut BitSlice<usize, Lsb0> =
+            BitSlice::from_slice_mut(bytemuck::cast_slice_mut(&mut inp));
+        inp_bits[i_bits..].fill(false);
+        let mut dv: BitVec<usize, Lsb0> = BitVec::repeat(true, p);
+        let mut iv: BitVec<usize, Lsb0> = BitVec::new();
+        for j in 1..c {
+            let rem = min(p, i_bits - j * p);
+            iv.clear();
+            let inp = &inp_bits[j * p..(j * p) + rem];
+            iv.extend_from_bitslice(inp);
+            iv.resize(p, false);
+            dv ^= &iv;
+        }
+        modp(&mut dest, &inp, p);
+        let dest_bits: &BitSlice<usize, Lsb0> = BitSlice::from_slice(bytemuck::cast_slice(&dest));
+        let dv2 = &dest_bits[..p];
+        assert_eq!(dv, dv2);
     }
 }

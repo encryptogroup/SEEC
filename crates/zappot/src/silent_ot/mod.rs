@@ -25,12 +25,12 @@ use seec_channel::CommunicationError;
 use crate::silent_ot::ex_acc_code::{ExAccConf, ExAccEncoder};
 #[cfg(feature = "silent-ot-ex-conv-code")]
 use crate::silent_ot::ex_conv_code::{ExConvConf, ExConvEncoder};
-use crate::silent_ot::quasi_cyclic_encode::QuasiCyclicEncoder;
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
+use crate::silent_ot::quasi_cyclic_encode::{QuasiCyclicConf, QuasiCyclicEncoder};
 #[cfg(feature = "silent-ot-silver-code")]
 use crate::silent_ot::silver_code::{SilverConf, SilverEncoder};
 use aes::cipher::BlockEncrypt;
 use aes::Aes128;
-use quasi_cyclic_encode::QuasiCyclicConf;
 use rand::distributions::Standard;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use remoc::RemoteSend;
@@ -45,6 +45,7 @@ pub mod ex_acc_code;
 #[cfg(feature = "silent-ot-ex-conv-code")]
 pub mod ex_conv_code;
 pub mod pprf;
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
 pub mod quasi_cyclic_encode;
 #[cfg(feature = "silent-ot-silver-code")]
 pub mod silver_code;
@@ -77,6 +78,7 @@ pub struct Receiver {
 
 #[derive(Debug)]
 pub enum Encoder {
+    #[cfg(feature = "silent-ot-quasi-cyclic-code")]
     QuasiCyclic(QuasiCyclicEncoder),
     #[cfg(feature = "silent-ot-silver-code")]
     Silver(SilverEncoder),
@@ -93,9 +95,8 @@ pub enum Encoder {
 /// - ExpandAccumulate (https://eprint.iacr.org/2022/1014)
 /// - ExpandConvolute (https://eprint.iacr.org/2023/882)
 pub enum MultType {
-    QuasiCyclic {
-        scaler: usize,
-    },
+    #[cfg(feature = "silent-ot-quasi-cyclic-code")]
+    QuasiCyclic { scaler: usize },
     #[cfg(feature = "silent-ot-silver-code")]
     Silver5,
     #[cfg(feature = "silent-ot-silver-code")]
@@ -554,6 +555,7 @@ impl ChoiceBitPacking {
 impl Encoder {
     fn configure(num_ots: usize, sec_param: usize, mult_type: MultType) -> Self {
         match mult_type {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             MultType::QuasiCyclic { scaler } => Encoder::QuasiCyclic(QuasiCyclicEncoder::new(
                 QuasiCyclicConf::configure(num_ots, scaler, sec_param),
             )),
@@ -595,6 +597,7 @@ impl Encoder {
 
     fn send_compress(&mut self, rT: ArrayOrVec) -> Vec<Block> {
         match (self, rT) {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             (Encoder::QuasiCyclic(enc), ArrayOrVec::Array(rT)) => enc.dual_encode(rT),
             #[cfg(feature = "silent-ot-silver-code")]
             (Encoder::Silver(enc), ArrayOrVec::Vec(mut c)) => {
@@ -659,6 +662,7 @@ impl Encoder {
             // TODO, this is a little weird. The quasi cyclic code fails with
             //  when storing the choice bit in the lsb.
             match &self {
+                #[cfg(feature = "silent-ot-quasi-cyclic-code")]
                 Encoder::QuasiCyclic(enc) => {
                     let mut sb: AlignedVec<u8, U16> = AlignedVec::new();
                     let sb_blocks = calc_sb_blocks(&mut sb, self.N2(), S);
@@ -678,6 +682,7 @@ impl Encoder {
             }
 
             let a = match (self, rT) {
+                #[cfg(feature = "silent-ot-quasi-cyclic-code")]
                 (Encoder::QuasiCyclic(enc), ArrayOrVec::Array(rT)) => enc.dual_encode(rT),
                 #[cfg(feature = "silent-ot-silver-code")]
                 (Encoder::Silver(enc), ArrayOrVec::Vec(mut c)) => {
@@ -711,6 +716,7 @@ impl Encoder {
             (a, None)
         } else {
             let (a, c) = match (self, rT) {
+                #[cfg(feature = "silent-ot-quasi-cyclic-code")]
                 (Encoder::QuasiCyclic(enc), ArrayOrVec::Array(rT)) => {
                     let a = enc.dual_encode(rT);
                     let mut sb: AlignedVec<u8, U16> = AlignedVec::new();
@@ -787,6 +793,7 @@ impl Encoder {
 
     fn pprf_conf(&self) -> PprfConfig {
         match self {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             Encoder::QuasiCyclic(enc) => enc.conf.into(),
             #[cfg(feature = "silent-ot-silver-code")]
             Encoder::Silver(enc) => enc.conf.into(),
@@ -799,6 +806,7 @@ impl Encoder {
 
     fn pprf_format(&self) -> PprfOutputFormat {
         match self {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             Encoder::QuasiCyclic(_) => PprfOutputFormat::InterleavedTransposed,
             #[cfg(feature = "silent-ot-silver-code")]
             Encoder::Silver(_) => PprfOutputFormat::Interleaved,
@@ -812,6 +820,7 @@ impl Encoder {
     #[allow(unused)]
     fn requested_num_ots(&self) -> usize {
         match self {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             Encoder::QuasiCyclic(enc) => enc.conf.requested_num_ots,
             #[cfg(feature = "silent-ot-silver-code")]
             Encoder::Silver(enc) => enc.conf.requested_num_ots,
@@ -824,6 +833,7 @@ impl Encoder {
 
     fn N2(&self) -> usize {
         match self {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             Encoder::QuasiCyclic(enc) => enc.conf.N2,
             #[cfg(feature = "silent-ot-silver-code")]
             Encoder::Silver(enc) => enc.conf.N2,
@@ -836,6 +846,7 @@ impl Encoder {
 
     fn num_partitions(&self) -> usize {
         match self {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             Encoder::QuasiCyclic(enc) => enc.conf.num_partitions,
             #[cfg(feature = "silent-ot-silver-code")]
             Encoder::Silver(enc) => enc.conf.num_partitions,
@@ -848,6 +859,7 @@ impl Encoder {
 
     fn size_per(&self) -> usize {
         match self {
+            #[cfg(feature = "silent-ot-quasi-cyclic-code")]
             Encoder::QuasiCyclic(enc) => enc.conf.size_per,
             #[cfg(feature = "silent-ot-silver-code")]
             Encoder::Silver(enc) => enc.conf.size_per,
@@ -904,20 +916,12 @@ async fn pprf_channel<BaseMsg: RemoteSend>(
 
 #[cfg(test)]
 mod test {
-    use crate::silent_ot::{ChoiceBitPacking, Encoder, Receiver, Sender, SECURITY_PARAM};
-
+    use super::*;
     use crate::silent_ot::pprf::tests::fake_base;
-    use crate::silent_ot::pprf::PprfOutputFormat;
-    use crate::silent_ot::quasi_cyclic_encode::{
-        bit_shift_xor, modp, QuasiCyclicConf, QuasiCyclicEncoder,
-    };
-    use crate::util::Block;
-    use bitvec::order::Lsb0;
+
     use bitvec::slice::BitSlice;
-    use bitvec::vec::BitVec;
     use rand::rngs::StdRng;
     use rand_core::SeedableRng;
-    use std::cmp::min;
 
     const NUM_OTS: usize = 128 * 10;
 
@@ -975,46 +979,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn basic_bit_shift_xor() {
-        let dest = &mut [Block::zero(), Block::zero()];
-        let inp = &[Block::all_ones(), Block::all_ones()];
-        let bit_shift = 10;
-        bit_shift_xor(dest, inp, bit_shift);
-        assert_eq!(Block::all_ones(), dest[0]);
-        let exp = Block::from(u128::MAX >> bit_shift);
-        assert_eq!(exp, dest[1]);
-    }
-
-    #[test]
-    fn basic_modp() {
-        let i_bits = 1026;
-        let n_bits = 223;
-        let n = (n_bits + 127) / 128;
-        let c = (i_bits + n_bits - 1) / n_bits;
-        let mut dest = vec![Block::zero(); n];
-        let mut inp = vec![Block::all_ones(); (i_bits + 127) / 128];
-        let p = n_bits;
-        let inp_bits: &mut BitSlice<usize, Lsb0> =
-            BitSlice::from_slice_mut(bytemuck::cast_slice_mut(&mut inp));
-        inp_bits[i_bits..].fill(false);
-        let mut dv: BitVec<usize, Lsb0> = BitVec::repeat(true, p);
-        let mut iv: BitVec<usize, Lsb0> = BitVec::new();
-        for j in 1..c {
-            let rem = min(p, i_bits - j * p);
-            iv.clear();
-            let inp = &inp_bits[j * p..(j * p) + rem];
-            iv.extend_from_bitslice(inp);
-            iv.resize(p, false);
-            dv ^= &iv;
-        }
-        modp(&mut dest, &inp, p);
-        let dest_bits: &BitSlice<usize, Lsb0> = BitSlice::from_slice(bytemuck::cast_slice(&dest));
-        let dv2 = &dest_bits[..p];
-        assert_eq!(dv, dv2);
-    }
-
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(feature = "silent-ot-quasi-cyclic-code")]
     async fn correlated_silent_ot() {
         let scaler = 2;
         let num_threads = 2;
@@ -1056,6 +1022,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(feature = "silent-ot-quasi-cyclic-code")]
     async fn random_silent_ot() {
         let scaler = 2;
         let num_threads = 2;
@@ -1091,6 +1058,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(feature = "silent-ot-quasi-cyclic-code")]
     async fn random_silent_ot_2() {
         use super::MultType;
         let scaler = 2;

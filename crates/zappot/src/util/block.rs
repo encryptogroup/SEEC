@@ -9,6 +9,7 @@ use bytemuck::{Pod, Zeroable};
 use generic_array::{typenum::U16, GenericArray};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use seec_bitmatrix::Storage;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::ops::{Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Shl, Shr};
@@ -256,5 +257,13 @@ impl Add for Block {
         Block {
             data: self.data + rhs.data,
         }
+    }
+}
+
+impl Storage for Block {
+    const BITS: usize = 128;
+
+    fn zero() -> Self {
+        Block::zero()
     }
 }

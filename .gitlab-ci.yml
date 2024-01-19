@@ -11,7 +11,7 @@ run-tests:
   stage: test
   script:
     - rustc --version && cargo --version && cargo +nightly --version  # Print version info for debugging
-    - cargo +nightly test --workspace --verbose --all-features
+    - cargo +nightly test --workspace --verbose --all-features --no-fail-fast
 
 # For this job, the Settings -> Merge requests -> "Enable merged results pipelines" option should be enabled.
 # This ensures that the main branch will always have working tests and no formatting/Clippy issues
@@ -21,7 +21,7 @@ merge-request:
     - rustup component add rustfmt
     - rustup component add clippy
   script:
-    - cargo +nightly test --workspace --verbose --all-features
+    - cargo +nightly test --workspace --verbose --all-features --no-fail-fast
     - cargo fmt --all --check
     - cargo +nightly clippy --workspace --all-features --examples --tests -- -D warnings
   rules:

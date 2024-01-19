@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use mpc_bitmatrix::BitMatrix;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 use seec::circuit::base_circuit::BaseGate;
@@ -13,6 +12,7 @@ use seec::protocols::tensor_aby2::{
 };
 use seec::protocols::{DynDim, FunctionDependentSetup, Protocol, SetupStorage};
 use seec::Circuit;
+use seec_bitmatrix::BitMatrix;
 
 #[derive(Clone, Debug)]
 struct MockSetupProvider {

@@ -24,14 +24,17 @@ fn main() {
     )
     .unwrap();
 
-    let (sse_enabled, aes_enabled, avx_enabled) = {
-        let env = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-        let target_features: Vec<_> = env.split(',').collect();
-        let sse = target_features.contains(&"sse2");
-        let aes = target_features.contains(&"aes");
-        let avx2 = target_features.contains(&"avx2");
-        (sse, aes, avx2)
-    };
+    let (sse_enabled, aes_enabled, avx_enabled) =
+        if &env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() != "x86_64" {
+            (false, false, false)
+        } else {
+            let env = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+            let target_features: Vec<_> = env.split(',').collect();
+            let sse = target_features.contains(&"sse2");
+            let aes = target_features.contains(&"aes");
+            let avx2 = target_features.contains(&"avx2");
+            (sse, aes, avx2)
+        };
 
     let mut build = cxx_build::bridge("src/lib.rs");
     build
@@ -58,7 +61,7 @@ fn main() {
         ])
         .warnings(false)
         .flag("-std=c++17")
-        .flag("-march=native")
+        .flag_if_supported("-march=native")
         .define("ENABLE_INSECURE_SILVER", "ON");
 
     if sse_enabled {
