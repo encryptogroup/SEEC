@@ -1,39 +1,36 @@
 //! SilentOT extension protocol.
 #![allow(non_snake_case)]
-use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat};
-use crate::traits::{BaseROTReceiver, BaseROTSender};
-use crate::util::aes_hash::FIXED_KEY_HASH;
-
-use crate::util::tokio_rayon::AsyncThreadPool;
-
-use crate::util::Block;
-use crate::{base_ot, BASE_OT_COUNT};
-use aligned_vec::typenum::U16;
-use aligned_vec::AlignedVec;
-
-use bitvec::order::Lsb0;
-use bitvec::slice::BitSlice;
-use bitvec::vec::BitVec;
-use bytemuck::cast_slice;
-use ndarray::Array2;
-use num_integer::Integer;
-use rand::Rng;
-use rand_core::{CryptoRng, RngCore};
-use seec_channel::CommunicationError;
-
 #[cfg(feature = "silent-ot-ea-code")]
 use crate::silent_ot::ex_acc_code::{ExAccConf, ExAccEncoder};
 #[cfg(feature = "silent-ot-ex-conv-code")]
 use crate::silent_ot::ex_conv_code::{ExConvConf, ExConvEncoder};
+use crate::silent_ot::pprf::{ChoiceBits, PprfConfig, PprfOutputFormat};
 #[cfg(feature = "silent-ot-quasi-cyclic-code")]
 use crate::silent_ot::quasi_cyclic_encode::{QuasiCyclicConf, QuasiCyclicEncoder};
 #[cfg(feature = "silent-ot-silver-code")]
 use crate::silent_ot::silver_code::{SilverConf, SilverEncoder};
+use crate::traits::{BaseROTReceiver, BaseROTSender};
+use crate::util::aes_hash::FIXED_KEY_HASH;
+use crate::util::tokio_rayon::AsyncThreadPool;
+use crate::util::Block;
+use crate::{base_ot, BASE_OT_COUNT};
 use aes::cipher::BlockEncrypt;
 use aes::Aes128;
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
+use aligned_vec::{typenum::U16, AlignedVec};
+use bitvec::vec::BitVec;
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
+use bitvec::{order::Lsb0, slice::BitSlice};
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
+use bytemuck::cast_slice;
+use ndarray::Array2;
+use num_integer::Integer;
 use rand::distributions::Standard;
+use rand::Rng;
+use rand_core::{CryptoRng, RngCore};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use remoc::RemoteSend;
+use seec_channel::CommunicationError;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::fmt::Debug;
@@ -90,10 +87,10 @@ pub enum Encoder {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 ///
-/// - QuasiCyclic (https://eprint.iacr.org/2019/1159.pdf)
-/// - Silver (INSECURE! https://eprint.iacr.org/2021/1150, see https://eprint.iacr.org/2023/882 for attack)
-/// - ExpandAccumulate (https://eprint.iacr.org/2022/1014)
-/// - ExpandConvolute (https://eprint.iacr.org/2023/882)
+/// - QuasiCyclic (<https://eprint.iacr.org/2019/1159.pdf>)
+/// - Silver (INSECURE! <https://eprint.iacr.org/2021/1150>, see <https://eprint.iacr.org/2023/882> for attack)
+/// - ExpandAccumulate (<https://eprint.iacr.org/2022/1014>)
+/// - ExpandConvolute (<https://eprint.iacr.org/2023/882>)
 pub enum MultType {
     #[cfg(feature = "silent-ot-quasi-cyclic-code")]
     QuasiCyclic { scaler: usize },
@@ -638,6 +635,7 @@ impl Encoder {
         S: &[usize],
         choice_bit_packing: ChoiceBitPacking,
     ) -> (Vec<Block>, Option<Vec<u8>>) {
+        #[cfg(feature = "silent-ot-quasi-cyclic-code")]
         fn calc_sb_blocks<'a>(
             sb: &'a mut AlignedVec<u8, U16>,
             N2: usize,
@@ -955,7 +953,11 @@ mod test {
         }
     }
 
-    fn check_random(send_messages: &[[Block; 2]], recv_messages: &[Block], choice: &BitSlice) {
+    fn check_random(
+        send_messages: &[[Block; 2]],
+        recv_messages: &[Block],
+        choice: &bitvec::slice::BitSlice,
+    ) {
         let n = send_messages.len();
         dbg!(&send_messages[..10]);
         dbg!(&recv_messages[..10]);

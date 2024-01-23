@@ -1,3 +1,4 @@
+//! Boolean MTs and providers.
 use crate::common::BitVec;
 use crate::protocols::SetupStorage;
 use crate::utils;

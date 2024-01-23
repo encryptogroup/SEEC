@@ -2,13 +2,16 @@ name: rustdoc
 
 on:
   push:
-#    branches:
-#      - "main"
+    branches:
+      - "main"
 
 jobs:
   # Build job
   build:
     runs-on: "ubuntu-latest"
+    env:
+      # deny rustdoc warnings
+      RUSTDOCFLAGS: -D warnings
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -18,14 +21,14 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: nightly-2024-01-12
+          toolchain: nightly-2024-05-03
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo --version
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Create Docs
-        run: cargo doc --workspace --verbose --all-features --no-deps
+        run: cargo doc --workspace --verbose --all-features --no-deps -Zunstable-options -Zrustdoc-scrape-examples
       - name: Fix permissions
         run: |
           chmod -c -R +rX "target/doc/" | while read line; do

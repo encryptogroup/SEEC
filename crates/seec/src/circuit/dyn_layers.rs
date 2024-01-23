@@ -1,3 +1,4 @@
+//! Dynamic layer aggregate circuit.
 use crate::circuit::base_circuit::{BaseGate, Load};
 use crate::circuit::circuit_connections::CrossCircuitConnections;
 use crate::circuit::{base_circuit, BaseCircuit, CircuitId, DefaultIdx, GateIdx, LayerIterable};

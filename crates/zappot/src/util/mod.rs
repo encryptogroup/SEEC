@@ -5,13 +5,13 @@ pub mod block;
 pub mod tokio_rayon;
 pub use block::Block;
 
-#[cfg(any(feature = "silent-ot", test))]
+#[allow(unused)]
 pub(crate) fn log2_floor(val: usize) -> u32 {
     assert!(val > 0);
     usize::BITS - val.leading_zeros() - 1
 }
 
-#[cfg(any(feature = "silent-ot", test))]
+#[allow(unused)]
 pub(crate) fn log2_ceil(val: usize) -> u32 {
     let floor = log2_floor(val);
     if val > (1 << floor) {

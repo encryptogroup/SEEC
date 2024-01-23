@@ -1,3 +1,5 @@
+//! High-level [`Secret`] API to construct a circuit.
+
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};

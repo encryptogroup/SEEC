@@ -12,6 +12,7 @@ use bitvec::prelude::*;
 use tokio::time::sleep;
 use tracing_subscriber::EnvFilter;
 
+use seec::channel::sub_channels_for;
 use seec::circuit::{dyn_layers::Circuit, DefaultIdx, ExecutableCircuit};
 use seec::executor::{Executor, Input, Message};
 use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
@@ -19,7 +20,6 @@ use seec::mul_triple::MTProvider;
 use seec::protocols::boolean_gmw::BooleanGmw;
 use seec::secret::inputs;
 use seec::CircuitBuilder;
-use seec_channel::sub_channels_for;
 
 fn build_circuit() {
     // The `inputs` method is a convenience method to create n input gates for the circuit.

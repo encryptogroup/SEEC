@@ -197,6 +197,8 @@ where
             self.cols, rhs.rows,
             "Illegal dimensions for matrix multiplication"
         );
+        // TODO this can likely be heavily optimized. One option is to use the raw_rows iterator
+        //  if possible to do the dotp on the raw elements. This should be significantly faster.
         let dotp = |l_row: &BitSlice<T>, r_row| -> bool {
             let and = l_row.to_bitvec() & r_row;
             and.iter().by_vals().reduce(BitXor::bitxor).unwrap()

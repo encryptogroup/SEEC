@@ -1,3 +1,4 @@
+//! [`CircuitBuilder`] is used to build an aggregate circuit of [`BaseCircuit`]s.
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
@@ -28,14 +29,13 @@ use crate::utils::ByAddress;
 pub type SharedCircuit<G = BooleanGate, Idx = DefaultIdx, W = ()> =
     Arc<Mutex<BaseCircuit<G, Idx, W>>>;
 
-// /// Lazily initialized global CircuitBuilder. This is used by the Secret API's and the
-// /// #[sub_circuit] macro to construct a circuit without having direct access to the circuits.
-// pub(crate) static CIRCUIT_BUILDER: Lazy<Mutex<CircuitBuilder<BooleanGate>>> =
-//     Lazy::new(|| Mutex::new(CircuitBuilder::new()));
-
+/// Lazily initialized global CircuitBuilders. This is used by the Secret API's and the
+/// #[sub_circuit] macro to construct a circuit without having direct access to the circuits.
+/// The ShareMap stores one builder per Gate type.
 pub(crate) static CIRCUIT_BUILDER_MAP: Lazy<Mutex<ShareMap>> =
     Lazy::new(|| Mutex::new(ShareMap::custom()));
 
+/// Needed for the ShareMap.
 struct KeyWrapper<G, Idx>(PhantomData<(G, Idx)>);
 
 impl<G: Gate, Idx: GateIdx> Key for KeyWrapper<G, Idx> {

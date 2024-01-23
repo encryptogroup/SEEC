@@ -1,3 +1,4 @@
+//! Error types used in SEEC.
 use remoc::rch::base;
 use std::io;
 

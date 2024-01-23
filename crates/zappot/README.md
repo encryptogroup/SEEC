@@ -54,4 +54,10 @@ Omitting the `--help` flag will run the example with default values.
 ## Cargo Features
 This library provides cargo feature flags to optionally enable additional functionality. Usage: `cargo test --features <features...>`
 
-- `silent_ot` This feature enables the SilentOT implementation. Only compiles with the `avx2` target feature enabled.
+- `silent-ot-quasi-cyclic-code`: Enables Silent-OT and the quasi-cyclic code, which requires the `avx2` target feature to be enabled.
+- `silent-ot-silver-code`: Enables Silent-OT and the Silver code. This reuses parts of libOTe. (WARNING: Insecure code!)
+- `silent-ot-ea-code`: Enables Silent-OT and Expand Accumulate code. This reuses parts of libOTe.
+- `silent-ot-ex-conv-code`: Enables Silent-OT and the Expand Convolute code. This reuses parts of libOTe.
+- `silent-ot-libote-codes`: Enables all three codes which are based on libOTe.
+
+These features are additive and can be combined with each other.
