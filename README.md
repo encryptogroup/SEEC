@@ -1,9 +1,18 @@
-# SEEC
+# SEEC Executes Enormous Circuits
 
-This framework implements secure 2-party secret-sharing based multi party computation protocols. Currently, we implement the Boolean and arithmetic versions of GMW87 with multiplication triple preprocessing. Additionally, we implement the Boolean part of the ABY2.0 protocol. 
+This framework implements secure 2-party secret-sharing-based multi party computation protocols. Currently, we implement the Boolean and arithmetic versions of GMW87 with multiplication triple preprocessing. Additionally, we implement the Boolean part of the ABY2.0 protocol.
+
+## Secure Multi-Party Computation
+In secure multi-party computation (MPC), there are n parties, each with their private input x_i. Given a public function f(x_1, ..., x_n), the parties execute a protocol π that correctly and securely realizes the functionality f. In other words, at the end of the protocol, the parties know the output of f, but have no information about the input of the other parties other than what is revealed by the output itself. Currently, SEEC is limited to the n = 2 party case, also known as secure two-party computation. We hope to extend this in the future to n parties.
+
+### Security
+The two most prevalent security models are
+- semi-honest security, where an attacker can corrupt parties, but they follow the protocol as specified.
+- malicious security, where corrupted parties can arbitrarily deviate from the protocol.
+
+SEEC currently only implements semi-honestly secure protocols (GMW, ABY2.0). 
 
 ## Development
-
 ### Installing Rust
 
 The project is implemented in the [Rust](https://www.rust-lang.org/) programming language. To compile it, the latest stable toolchain is needed (older toolchains might work but are not guaranteed). The recommended way to install it, is via the toolchain manager [rustup](https://rustup.rs/).

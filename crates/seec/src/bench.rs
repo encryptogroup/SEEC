@@ -1,3 +1,9 @@
+//! Insecure Benchmarking API - Do not use in Production!
+//!
+//! The [`BenchParty`] API provides an easy way of benchmarking an MPC application
+//! or protocol implemented in SEEC. An example of its usage is e.g. located in the
+//! `crates/seec/examples/bristol.rs` binary.
+
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::executor::{Executor, Input, Message};
 use crate::mul_triple::storage::MTStorage;
