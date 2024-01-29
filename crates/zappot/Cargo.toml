@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 silent-ot = ["aligned-vec"]
-silent-ot-quasi-cyclic-code = ["silent-ot"]
+silent-ot-quasi-cyclic-code = ["silent-ot", "bitpolymul"]
 # this feature needs libote which provides bindings to libOTe
 # but since gcc seems to not care about backwards compat, this is prone to break...
 silent-ot-silver-code = ["libote", "silent-ot"]
