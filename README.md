@@ -1,4 +1,5 @@
 # SEEC Executes Enormous Circuits
+![ci badge](https://github.com/encryptogroup/SEEC/actions/workflows/push.yml/badge.svg?branch=main)
 
 This framework implements secure 2-party secret-sharing-based multi party computation protocols. Currently, we implement the Boolean and arithmetic versions of GMW87 with multiplication triple preprocessing. Additionally, we implement the Boolean part of the ABY2.0 protocol.
 
@@ -23,7 +24,7 @@ One way of installing `rustup`:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-As a starting point to learn Rust, have a look at the superb official [material](https://www.rust-lang.org/learn). To quickly look up syntax and idioms, we recommend https://cheats.rs/.
+As a starting point to learn Rust, have a look at the superb official [learning material](https://www.rust-lang.org/learn). To quickly look up syntax and idioms, we recommend https://cheats.rs/.
 
 ### Checking for compilation errors
 
@@ -67,6 +68,8 @@ cargo --version
 # output should include nightly
 ```
 
+If on an ARM platform, building and testing all crates in this repository won't work, as some (e.g. `crates/bitpolymul`), require x86_64 intrinsics. Offending packages can be `--exclude`d or you can simply change into the main `crates/seec` directory and run cargo there.
+
 ## Silent-OT
 Our OT library [ZappOT](./crates/zappot) has optional support for Silent-OT. 
 Using the quasi-cyclic code (https://eprint.iacr.org/2019/1159.pdf) requires an x86-64 CPU with AVX2 support. ZappOT has WIP support for newer codes offered by libOTe (https://github.com/osu-crypto/libOTe). For these, we build and link to the code implementations in libOTe. These should work on other architectures, e.g., ARM, but we currently do not test this in CI.
@@ -76,6 +79,9 @@ Using the quasi-cyclic code (https://eprint.iacr.org/2019/1159.pdf) requires an 
 - ExpandConvolute (https://eprint.iacr.org/2023/882).
 
 SEEC currently supports generating Boolean MTs with Silent-OT when enabling the `silent-ot` feature.
+
+> [!NOTE]  
+> Silent-OT with the quasi-cyclic code (`--feature silent-ot-quasi-cyclic` in SEEC) only works on x86_64 linux with AVX2 support. The libOTe codes (`--feature silent-ot`) currently work on x86_64 linux and aarch64 ARM (M1 Macs). Other targets might work, but are not tested.
 
 ## Organization
 This project is organized as a Cargo workspace with multiple crates in the `crates/` directory. The main crate is located at `crates/seec` and it depends on most of the other crates.
