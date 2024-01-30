@@ -13,6 +13,14 @@ jobs:
     runs-on: "${{ matrix.os }}"
     strategy:
       matrix:
+        include:
+          - os: "ubuntu-latest"
+          - os: "windows-latest"
+            exclude: "--exclude 'bitpolymul*'"
+            features: "aby2,bench-api"
+          - os: "macos-14"
+            exclude: "--exclude 'bitpolymul*'"
+            features: "aby2,bench-api,silent-ot,silent-ot-libote-codes"
         os: ["ubuntu-latest", "windows-latest", "macos-14"]
     steps:
       - name: Check out repository
@@ -28,8 +36,12 @@ jobs:
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - name: Cache
         uses: Swatinem/rust-cache@v2
-      - name: Test
+      - name: Run tests
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: cargo test --workspace --verbose --all-features --no-fail-fast
+      - name: Run tests
+        if: ${{ matrix.os != 'ubuntu-latest' }}
+        run: cargo test --workspace --verbose ${{ matrix.exclude }} --features ${{ matrix.features }}
   lint:
     name: Lint
     runs-on: "ubuntu-latest"

@@ -330,7 +330,6 @@ unsafe impl<T: Sync, ALIGN: Unsigned + PowerOfTwo> Sync for AlignedVec<T, ALIGN>
 #[cfg(test)]
 mod tests {
     use crate::AlignedVec;
-    use std::arch::x86_64::{__m128i, _mm_load_si128};
     use typenum::U32;
 
     #[test]
@@ -361,8 +360,11 @@ mod tests {
         dbg!(av[64]);
     }
 
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn load_si128_from_vec() {
+        use std::arch::x86_64::{__m128i, _mm_load_si128};
+
         let av: AlignedVec<u64, U32> = (&[42; 2][..]).into();
         let bits = unsafe { _mm_load_si128(&av[0] as *const _ as *const __m128i) };
         dbg!(bits);
