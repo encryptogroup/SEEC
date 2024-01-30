@@ -10,7 +10,10 @@ env:
 jobs:
   test:
     name: Test
-    runs-on: "ubuntu-latest"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        os: ["ubuntu-latest", "windows-latest", "macos-14"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
