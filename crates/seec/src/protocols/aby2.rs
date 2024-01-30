@@ -21,6 +21,7 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
 use std::ops::Not;
+use itertools::Itertools;
 
 pub struct BooleanAby2 {
     delta_sharing_state: DeltaSharing,
@@ -61,14 +62,14 @@ pub enum Msg {
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
 pub enum BooleanGate {
     Base(BaseGate<Share, ScalarDim>),
-    And2,
-    And3,
-    And4,
+    And {
+        n: u8
+    },
     Xor,
     Inv,
 }
 
-/// Contains preprocessing data ([\delta_ab]_i for interactive gates in
+/// Contains preprocessing data (`[\delta_ab]_i`) for interactive gates in
 /// **reverse** topological order. This is needed to evaluate interactive gates.
 #[derive(Clone, Default)]
 pub struct SetupData {
@@ -118,7 +119,7 @@ impl Protocol for BooleanAby2 {
         let delta: BitVec = interactive_gates
             .zip(gate_outputs)
             .map(|(gate, output)| {
-                assert!(matches!(gate, BooleanGate::And2));
+                assert!(matches!(gate, BooleanGate::And {n: 2}));
                 let inputs = inputs.by_ref().take(gate.input_size());
                 gate.compute_delta_share(party_id, inputs, preprocessing_data, output)
             })
@@ -195,7 +196,7 @@ impl BooleanGate {
         output_share: Share,
     ) -> bool {
         assert!(matches!(party_id, 0 | 1));
-        assert!(matches!(self, BooleanGate::And2));
+        assert!(matches!(self, BooleanGate::And {n: 2}));
         let a = inputs.next().expect("Empty input");
         let b = inputs.next().expect("Insufficient input");
         let plain_ab = a.public & b.public;
@@ -236,34 +237,31 @@ impl BooleanGate {
                 | BaseGate::ConnectToMain(_)
                 | BaseGate::Debug
                 | BaseGate::Identity => inputs.next().expect("Empty input"),
-                BaseGate::Constant(_) => todo!(),
+                BaseGate::Constant(c) => {
+                    // TODO is it correct to just output the stored constant here?
+                    c.clone()
+                },
                 BaseGate::ConnectToMainFromSimd(_) => {
                     unimplemented!("SIMD currently not supported for ABY2")
                 }
             },
-            BooleanGate::And2 => {
+            BooleanGate::And {..} => {
                 // input is not actually needed at this stage
                 Share {
-                    // Todo this should really use a configurable Rng
-                    private: rng.gen(), //thread_rng().gen(),
+                    private: rng.gen(),
                     public: Default::default(),
                 }
-            }
-            BooleanGate::And3 => {
-                todo!("Rng val")
-            }
-            BooleanGate::And4 => {
-                todo!("Rng val")
             }
             BooleanGate::Xor => {
                 let mut a = inputs.next().expect("Empty input");
                 let b = inputs.next().expect("Empty input");
-                // TODO change this
+                // it's only necessary to XOR the private part
                 a.private ^= b.private;
                 a
             }
             BooleanGate::Inv => {
-                todo!("I think just return input")
+                // TODO correctness?
+                inputs.next().expect("Empty input")
             }
         }
     }
@@ -273,30 +271,42 @@ impl BooleanGate {
         input_shares: impl Iterator<Item = &'a Secret<BooleanGmw, Idx>>,
         setup_sub_circ_cache: &mut AHashMap<Vec<Secret<BooleanGmw, Idx>>, Secret<BooleanGmw, Idx>>,
     ) -> Vec<Secret<BooleanGmw, Idx>> {
-        // TODO return SmallVec here?
-        match self {
-            BooleanGate::And2 => {
-                // skip the empty and single elem sets
-                let ab: Vec<_> = input_shares.take(2).cloned().collect();
+        let &BooleanGate::And {n} = self else {
+            assert!(self.is_non_interactive(), "Unhandled interactive gate");
+            panic!("Called setup_data_circ on non_interactive gate")
+        };
+        let inputs = n as usize;
 
-                match setup_sub_circ_cache.get(&ab) {
-                    None => match &ab[..] {
-                        [a, b] => {
-                            let sh = a.clone() & b;
-                            setup_sub_circ_cache.insert(ab, sh.clone());
-                            vec![sh]
-                        }
-                        _ => unreachable!("Insufficient input_shares"),
-                    },
-                    Some(processed_set) => vec![processed_set.clone()],
-                }
-            }
-            BooleanGate::And3 | BooleanGate::And4 => todo!("not impled"),
-            non_interactive => {
-                assert!(non_interactive.is_non_interactive());
-                panic!("Called setup_data_circ on non_interactive gate")
-            }
-        }
+        // skip the empty and single elem sets
+        let inputs_pset = input_shares
+            .take(inputs)
+            .cloned()
+            .powerset()
+            .skip(inputs + 1);
+
+        inputs_pset
+            .map(|set| match setup_sub_circ_cache.get(&set) {
+                None => match &set[..] {
+                    [] => unreachable!("Empty set is filtered"),
+                    [a, b] => {
+                        let sh = a.clone() & b;
+                        setup_sub_circ_cache.insert(set, sh.clone());
+                        sh
+                    }
+                    [processed_subset @ .., last] => {
+                        assert!(processed_subset.len() >= 2, "Smaller sets are filtered");
+                        // We know we generated the mul triple for the smaller subset
+                        let subset_out = setup_sub_circ_cache
+                            .get(processed_subset)
+                            .expect("Subset not present in cache");
+                        let sh = last.clone() & subset_out;
+                        setup_sub_circ_cache.insert(set, sh.clone());
+                        sh
+                    }
+                },
+                Some(processed_set) => processed_set.clone(),
+            })
+            .collect()
     }
 }
 
@@ -307,7 +317,7 @@ impl Gate for BooleanGate {
     fn is_interactive(&self) -> bool {
         matches!(
             self,
-            BooleanGate::And2 | BooleanGate::And3 | BooleanGate::And4
+            BooleanGate::And {..}
         )
     }
 
@@ -315,9 +325,8 @@ impl Gate for BooleanGate {
         match self {
             BooleanGate::Base(base_gate) => base_gate.input_size(),
             BooleanGate::Inv => 1,
-            BooleanGate::And2 | BooleanGate::Xor => 2,
-            BooleanGate::And3 => 3,
-            BooleanGate::And4 => 4,
+            BooleanGate::Xor => 2,
+            BooleanGate::And {n} => *n as usize,
         }
     }
 
@@ -338,23 +347,25 @@ impl Gate for BooleanGate {
         mut inputs: impl Iterator<Item = Self::Share>,
     ) -> Self::Share {
         match self {
+            BooleanGate::Base(BaseGate::Constant(c)) => {
+                // overwrite base gate constant evaluation, because
+                // for aby2 the default implementation is wrong, and
+                // we can simply return the constant
+                c.clone()
+            }
             BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, inputs.by_ref()),
-            BooleanGate::And2 | BooleanGate::And3 | BooleanGate::And4 => {
+            BooleanGate::And {..}  => {
                 panic!("Called evaluate_non_interactive on Gate::And<N>")
             }
             BooleanGate::Xor => {
                 let a = inputs.next().expect("Empty input");
                 let b = inputs.next().expect("Empty input");
-                // TODO change this
                 a.xor(b)
             }
             BooleanGate::Inv => {
                 let inp = inputs.next().expect("Empty input");
-                if party_id == 0 {
-                    !inp
-                } else {
-                    inp
-                }
+                // inverts public mask for both parties
+                !inp
             }
         }
     }
@@ -379,7 +390,7 @@ impl From<BaseGate<Share>> for BooleanGate {
 impl From<&bristol::Gate> for BooleanGate {
     fn from(gate: &bristol::Gate) -> Self {
         match gate {
-            bristol::Gate::And(_) => Self::And2,
+            bristol::Gate::And(_) => Self::And { n: 2},
             bristol::Gate::Xor(_) => Self::Xor,
             bristol::Gate::Inv(_) => Self::Inv,
         }
@@ -523,9 +534,10 @@ impl Not for Share {
     type Output = Share;
 
     fn not(self) -> Self::Output {
+        // TODO correctness? Should be correct, since `not(a xor b) <=> (not a) xor b`
         Self {
-            public: self.public,
-            private: !self.private,
+            public: !self.public,
+            private: self.private,
         }
     }
 }
@@ -545,7 +557,7 @@ impl DeltaSharing {
         }
     }
 
-    /// # Warning - Insercure
+    /// # Warning - Insecure
     /// Insecurely initialize DeltaSharing RNGs with default value. No input_position_share_type_map
     /// is needed when all the RNGs are the same.
     pub fn insecure_default() -> Self {
@@ -652,6 +664,7 @@ where
                         gate_input_shares.push(occupied.get().clone());
                     }
                 });
+
                 gate_input_shares.sort();
 
                 let t = gate.setup_data_circ(gate_input_shares.iter(), &mut setup_sub_circ_cache);
@@ -686,15 +699,12 @@ where
             .interactive_iter()
             .zip(setup_outputs)
             .map(|((gate, _gate_id), setup_out)| match gate {
-                BooleanGate::And2 => {
+                BooleanGate::And {..} => {
                     let shares = setup_out
                         .into_iter()
                         .map(|out_id| executor_gate_outputs.get(out_id.as_usize()))
                         .collect();
                     EvalShares { shares }
-                }
-                BooleanGate::And3 | BooleanGate::And4 => {
-                    todo!("not impled")
                 }
                 _ => unreachable!(),
             })
@@ -710,4 +720,29 @@ where
             .expect("setup must be called before request_setup_output")
             .split_off_last(count))
     }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::circuit::BaseCircuit;
+    use crate::mul_triple::boolean::InsecureMTProvider;
+    use super::*;
+    use super::BooleanGate as BG;
+
+    // #[tokio::test]
+    // async fn multi_and() {
+    //     let mut c = BaseCircuit::<BG>::new();
+    //     let i0 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));
+    //     let i1 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));
+    //     let i2 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));
+    //     let i3 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));
+    //     let a = c.add_wired_gate(BG::And {n: 4}, &[i0, i1, i2, i3]);
+    //     let out = c.add_wired_gate(BG::Base(BaseGate::Output(ScalarDim)), &[a]);
+    //     let c = ExecutableCircuit::DynLayers(c.into());
+    //
+    //     let (ch0, ch1) = seec_channel::in_memory::new_pair(16);
+    //     let setup0 = AbySetupProvider::new(0, InsecureMTProvider::default(), ch0.0, ch0.1);
+    //     let setup1 = AbySetupProvider::new(1, InsecureMTProvider::default(), ch1.0, ch1.1);
+    // }
 }
