@@ -23,6 +23,8 @@ One way of installing `rustup`:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+As a starting point to learn Rust, have a look at the superb official [material](https://www.rust-lang.org/learn). To quickly look up syntax and idioms, we recommend https://cheats.rs/.
+
 ### Checking for compilation errors
 
 To simply check the code for error and warnings, execute:
@@ -36,10 +38,11 @@ cargo check
 The tests can be run with the following command:
 
 ```shell
-cargo test [--release]
+cargo test [--release] [--all-features]
 ```
 
 The `--release` flag is optional, but can decrease the runtime of the tests, at the cost of increased compilation time.
+The `--all-features` flag enables all optional features.
 
 ### Formatting
 
@@ -79,9 +82,14 @@ This project is organized as a Cargo workspace with multiple crates in the `crat
 
 Also of interest is the `crates/zappot` library, which implements several oblivious transfer (OT) protocols. These are used by SEEC to compute setup data such as Beaver multiplication triples, but they can also be used independently.
 
-Crates:
-- seec: The main library which implements several MPC protocols
-- seec-macros: Offers the `#[sub_circuit]` proc-macro that turns functions into reusable sub-circuits
-- seec-channel: A convenient wrapper over a fork of [remoc](https://github.com/ENQT-GmbH/remoc)
-- seec-bitmatrix: A bitmatrix implementation including portable SIMD matrix transpose (needs Rust nightly)
-- zappot: Our OT library, including support for Silent-OT
+Main Crates:
+- seec: The main library which implements several MPC protocols.
+- seec-macros: Offers the `#[sub_circuit]` proc-macro that turns functions into reusable sub-circuits.
+- seec-channel: A convenient wrapper over a fork of [remoc](https://github.com/ENQT-GmbH/remoc).
+- seec-bitmatrix: A bitmatrix implementation including portable SIMD matrix transpose (needs Rust nightly).
+- zappot: Our OT library, including support for Silent-OT.
+
+We also provide an additional library at `libs/libote-rs` which builds and provides bindings to the codes used in libOTe for its implementation of Silent-OT. These can be optionally used by ZappOT.
+
+## Benchmarking
+Alongside SEEC, we're developing an MPC [benchmarking tool](https://github.com/encryptogroup/mpc-bench).
