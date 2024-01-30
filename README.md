@@ -73,3 +73,15 @@ Using the quasi-cyclic code (https://eprint.iacr.org/2019/1159.pdf) requires an 
 - ExpandConvolute (https://eprint.iacr.org/2023/882).
 
 SEEC currently supports generating Boolean MTs with Silent-OT when enabling the `silent-ot` feature.
+
+## Organization
+This project is organized as a Cargo workspace with multiple crates in the `crates/` directory. The main crate is located at `crates/seec` and it depends on most of the other crates.
+
+Also of interest is the `crates/zappot` library, which implements several oblivious transfer (OT) protocols. These are used by SEEC to compute setup data such as Beaver multiplication triples, but they can also be used independently.
+
+Crates:
+- seec: The main library which implements several MPC protocols
+- seec-macros: Offers the `#[sub_circuit]` proc-macro that turns functions into reusable sub-circuits
+- seec-channel: A convenient wrapper over a fork of [remoc](https://github.com/ENQT-GmbH/remoc)
+- seec-bitmatrix: A bitmatrix implementation including portable SIMD matrix transpose (needs Rust nightly)
+- zappot: Our OT library, including support for Silent-OT
