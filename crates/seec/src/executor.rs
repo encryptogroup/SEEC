@@ -138,7 +138,12 @@ where
         receiver: &mut Receiver<Message<P>>,
     ) -> Result<Output<P::ShareStorage>, ExecutorError> {
         info!("Executing circuit");
-        debug!(?inputs);
+        if inputs.should_debug() {
+            debug!(?inputs);
+        } else {
+            debug!("Inputs too large for debug printing. Use trace if necessary.");
+            trace!(?inputs);
+        }
         let now = Instant::now();
         let inp_len = match &inputs {
             Input::Scalar(shares) => shares.len(),
@@ -524,6 +529,15 @@ impl<Shares> Input<Shares> {
         match self {
             Input::Scalar(_) => None,
             Input::Simd(shares) => Some(shares),
+        }
+    }
+
+    fn should_debug<Sh>(&self) -> bool
+        where Shares: ShareStorage<Sh> {
+        match self {
+            Input::Scalar(shares) if shares.len() <= 1024 => true,
+            Input::Simd(simd_shares) if simd_shares.len() <= 256 => true,
+            _ => false
         }
     }
 }
