@@ -55,6 +55,8 @@ pub enum BaseGate<T, D = ScalarDim> {
     /// Connects a sub circuit to the main circuit and selects the i'th individual value from
     /// the SIMD output
     ConnectToMainFromSimd((D, u32)),
+    /// Identity gate, simply outputs its input
+    Identity,
     Constant(T),
     Debug,
 }
@@ -117,7 +119,7 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
                 BaseGate::SubCircuitInput(_)
                 | BaseGate::ConnectToMain(_)
                 | BaseGate::ConnectToMainFromSimd(_) => self.sub_circuit_input_gates.push(gate_id),
-                BaseGate::Debug => (/* nothing special to do */),
+                BaseGate::Debug | BaseGate::Identity => (/* nothing special to do */),
             }
         }
         if gate.is_interactive() {
@@ -223,6 +225,14 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
         );
         let mut gate_id_map = vec![GateId::default(); circuit.gate_count()];
         for (gate, id) in circuit.iter() {
+            // Map ScInput/Output gates to identity gates. Otherwise, we can't add_sub_circuit a circuit
+            // which itself was built using add_sub_circuit
+            let gate = match gate.as_base_gate() {
+                Some(BaseGate::SubCircuitInput(_) | BaseGate::SubCircuitOutput(_)) => {
+                    G::wrap_base_gate(BaseGate::Identity)
+                }
+                _ => gate,
+            };
             let new_id = self.add_gate(gate);
             gate_id_map[id.as_usize()] = new_id;
             for parent in circuit.parent_gates(id) {
@@ -309,7 +319,7 @@ where
     Share: Clone,
     G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
 {
-    #[tracing::instrument(skip(bristol))]
+    #[tracing::instrument(skip(bristol), ret)]
     pub fn from_bristol(bristol: bristol::Circuit, load: Load) -> Result<Self, CircuitError> {
         info!(
             "Converting bristol circuit with header: {:?}",
@@ -464,7 +474,8 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
             | Self::Input(_)
             | Self::SubCircuitInput(_)
             | Self::SubCircuitOutput(_)
-            | Self::ConnectToMain(_) => inputs
+            | Self::ConnectToMain(_)
+            | Self::Identity => inputs
                 .next()
                 .unwrap_or_else(|| panic!("Empty input for {self:?}")),
             Self::ConnectToMainFromSimd(_) => {
@@ -488,12 +499,9 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
             | BaseGate::Input(_)
             | BaseGate::ConnectToMain(_)
             | BaseGate::SubCircuitInput(_)
-            | BaseGate::ConnectToMainFromSimd(_) => {
-                inputs.next().expect("Missing input to {self:?}").clone()
-            }
-            BaseGate::SubCircuitOutput(_) => {
-                inputs.next().expect("Missing input to {self:?}").clone()
-            }
+            | BaseGate::SubCircuitOutput(_)
+            | BaseGate::ConnectToMainFromSimd(_)
+            | BaseGate::Identity => inputs.next().expect("Missing input to {self:?}").clone(),
             BaseGate::Constant(_constant) => {
                 todo!("SimdShare from constant")
             }

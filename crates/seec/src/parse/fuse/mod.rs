@@ -13,6 +13,7 @@ use rand::distributions::{Distribution, Standard};
 use std::path::Path;
 use std::{fs, io};
 use thiserror::Error;
+use tracing::{debug, instrument};
 
 #[allow(unused_imports, dead_code, clippy::all)]
 #[rustfmt::skip]
@@ -124,6 +125,7 @@ where
         Ok(self.builder.into_circuit())
     }
 
+    #[instrument(level = "debug", skip(self, circ), fields(name = circ.name()))]
     fn add_fuse_sub_circ(
         &mut self,
         circ: CircuitTable<'_>,
@@ -200,7 +202,11 @@ where
         match prim_op {
             PO::Split => {
                 assert_eq!(1, inputs.len(), "Expecting 1 input for Split gate");
-                let b_shares = mixed_gmw::a2b(bc, inputs[0]);
+                let mut b_shares = mixed_gmw::a2b(bc, inputs[0]);
+                // Insert identity gates so that output of a2b has contiguous gate ids
+                for sh in &mut b_shares {
+                    *sh = bc.add_wired_gate(Base(BaseGate::Identity), &[*sh]);
+                }
                 // we return the first one, if we encounter a node with an input offset, we
                 // can retrieve this gate_id from the map and add the offset
                 b_shares[0]
@@ -239,6 +245,7 @@ where
                 main_inputs[0]
             }
             PO::CallSubcircuit if self.call_mode == CallMode::InlineCircuits => {
+                debug!(name = node.subcircuit_name(), "CallSubcircuit");
                 let circ = self
                     .sc_map
                     .get(
@@ -333,7 +340,7 @@ mod tests {
             .convert_module(mod_table)
             .expect("Fuse conversion");
         let ec = ExecutableCircuit::DynLayers(circ);
-        let inputs: Vec<u32> = ChaChaRng::seed_from_u64(4242)
+        let inputs: Vec<u32> = ChaChaRng::seed_from_u64(46456315)
             .sample_iter(Standard)
             .take(ec.input_count())
             .collect();
@@ -345,7 +352,7 @@ mod tests {
         .await
         .unwrap();
         // TODO, this is very likely not the correct output
-        let exp = vec![i32::MAX as u32; 10];
+        let exp = vec![u32::MAX; 10];
         let exp = MixedShareStorage::Arith(exp);
         assert_eq!(out, exp)
     }

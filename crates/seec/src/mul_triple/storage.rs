@@ -19,6 +19,7 @@ pub struct MTStorage<F, MulTriples> {
     file: F,
     write_batch_size: usize,
     stored_mts: MulTriples,
+    #[cfg(feature = "bench-api")]
     /// can only be set when feature bench-api is enabled
     insecure_loop_file: bool,
 }
@@ -36,6 +37,7 @@ where
             file: BufWriter::new(file),
             write_batch_size: DEFAULT_BATCH_SIZE,
             stored_mts: Default::default(),
+            #[cfg(feature = "bench-api")]
             insecure_loop_file: false,
         })
     }
@@ -50,6 +52,7 @@ where
             file,
             write_batch_size: DEFAULT_BATCH_SIZE,
             stored_mts: Default::default(),
+            #[cfg(feature = "bench-api")]
             insecure_loop_file: false,
         }
     }

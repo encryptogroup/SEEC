@@ -345,7 +345,8 @@ impl BooleanGate {
                 | BaseGate::SubCircuitInput(_)
                 | BaseGate::SubCircuitOutput(_)
                 | BaseGate::ConnectToMain(_)
-                | BaseGate::Debug => inputs.next().expect("Empty input"),
+                | BaseGate::Debug
+                | BaseGate::Identity => inputs.next().expect("Empty input"),
                 BaseGate::Constant(_) => todo!(),
                 BaseGate::ConnectToMainFromSimd(_) => {
                     panic!("No SIMD support for BoolTensorAby2")

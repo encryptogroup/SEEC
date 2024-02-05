@@ -3,6 +3,7 @@
 //! This module is activated by the "_integration_tests" feature and should not be used by
 //! downstream code. It can change in any version.
 use std::convert::Infallible;
+use std::env;
 use std::fmt::Debug;
 use std::path::Path;
 
@@ -13,14 +14,17 @@ use bitvec::prelude::BitSlice;
 use bitvec::vec;
 use bitvec::view::BitViewSized;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::rngs::ThreadRng;
-use rand::thread_rng;
+use rand::{thread_rng, Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use seec_channel::sub_channel;
 use tokio::task::spawn_blocking;
 use tokio::time::Instant;
-use tracing::info;
+use tracing::{debug, info};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
@@ -142,7 +146,17 @@ macro_rules! impl_into_shares {
                 for $typ
             {
                 fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
-                    let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
+                    static RNG: Lazy<Mutex<ChaCha8Rng>> = Lazy::new(|| {
+                        let seed = match env::var("RNG_SEED") {
+                            Ok(seed) => seed.parse().expect("failed to parse RNG_SEED env var as u64"),
+                            Err(_) => thread_rng().gen()
+                        };
+                        debug!(seed, "Input sharing rng seed");
+                        Mutex::new(ChaCha8Rng::seed_from_u64(seed))
+                    });
+                    let mut rng = RNG.lock();
+                    // let [a, b] = AdditiveSharing::new(ChaCha8Rng::seed_from_u64(65432)).share(vec![self]);
+                    let [a, b] = AdditiveSharing::new(&mut *rng).share(vec![self]);
                     (MixedShareStorage::Arith(a), MixedShareStorage::Arith(b))
                 }
             }
