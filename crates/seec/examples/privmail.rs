@@ -3,7 +3,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::{fs, ops};
 
+use base64::prelude::{Engine, BASE64_STANDARD};
 use clap::Parser;
+
 use serde::Deserialize;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
@@ -169,7 +171,7 @@ fn base64_string_to_input(
     input: &str,
     duplication_factor: usize,
 ) -> (BitVec<usize>, Vec<[Secret; 8]>) {
-    let decoded = base64::decode(input).expect("Decode base64 input");
+    let decoded = BASE64_STANDARD.decode(input).expect("Decode base64 input");
     let duplicated = decoded.repeat(duplication_factor);
     let shares = (0..duplicated.len())
         .map(|_| inputs(8).try_into().unwrap())
