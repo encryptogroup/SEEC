@@ -28,12 +28,13 @@ jobs:
         with:
           submodules: recursive
       - name: Install nightly
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          components: "clippy, rustfmt"
+          toolchain: nightly-2024-01-12
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: cargo --version
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Run tests
@@ -51,15 +52,17 @@ jobs:
         with:
           submodules: recursive
       - name: Install nightly
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
+          toolchain: nightly-2024-01-12
           components: "clippy, rustfmt"
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: cargo --version
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Check Clippy
-        run: cargo +nightly clippy --workspace --all-features --examples --tests -- -D warnings
+        run: cargo clippy --workspace --all-features --examples --tests -- -D warnings

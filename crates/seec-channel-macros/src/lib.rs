@@ -59,7 +59,7 @@ impl Parse for Args {
         input.parse::<Token![,]>()?;
         let local_buffer = input.parse()?;
         input.parse::<Token![,]>()?;
-        let sub_types = input.parse_terminated::<_, Token![,]>(Type::parse)?;
+        let sub_types = input.parse_terminated(Type::parse, Token![,])?;
         let sub_types = sub_types.into_iter().collect();
         Ok(Self {
             sender,

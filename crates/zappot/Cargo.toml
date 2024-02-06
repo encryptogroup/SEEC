@@ -16,49 +16,49 @@ silent-ot-ex-conv-code = ["libote", "silent-ot"]
 silent-ot-libote-codes = ["silent-ot-silver-code", "silent-ot-ea-code", "silent-ot-ex-conv-code"]
 
 [dependencies]
-aes = "0.8.1"
-async-trait = "0.1.53"
+aes = "0.8.3"
+async-trait = "0.1.77"
 aligned-vec = {path = "../aligned-vec", optional = true}
 bitpolymul = {path = "../bitpolymul", optional = true}
-bitvec = "1.0.0"
-bytemuck = { version = "1.9.1", features = ["derive", "extern_crate_alloc"]}
-crossbeam-channel = "0.5.4"
-curve25519-dalek = { version = "4.0.0-pre.2", features = ["serde","rand_core","precomputed-tables"]}
-futures = { version = "0.3.21", features = ["executor"]}
+bitvec = "1.0.1"
+bytemuck = { version = "1.14.1", features = ["derive", "extern_crate_alloc"]}
+crossbeam-channel = "0.5.11"
+curve25519-dalek = { version = "4.1.1", features = ["serde","rand_core","precomputed-tables"]}
+futures = { version = "0.3.30", features = ["executor"]}
 rand = "0.8.5"
-rand_core = "0.6.3"
-rayon = "1.5.3"
-serde = { version = "1.0.137", features = ["derive"]}
-blake2 = "0.10.4"
-generic-array = { version = "0.14.5", features = ["serde"]}
-pin-project = "1.0.10"
+rand_core = "0.6.4"
+rayon = "1.8.1"
+serde = { version = "1.0.196", features = ["derive"]}
+blake2 = "0.10.6"
+generic-array = { version = "0.14.7", features = ["serde"]}
+pin-project = "1.1.4"
 seec-channel = {path = "../seec-channel"}
 num-integer = "0.1.45"
-num-traits = "0.2.15"
-num-prime = "0.4.1"
-once_cell = "1.12.0"
-tokio = { version = "1.18.2", features = ["sync", "macros", "net"]}
-tokio-serde = { version = "0.8.0", features = ["bincode"]}
-tokio-util = { version = "0.7.3", features = ["codec"]}
-ndarray = { version = "0.15.4", features = ["rayon"]}
-thiserror = "1.0.31"
-tracing = "0.1.35"
+num-traits = "0.2.17"
+num-prime = {git = "https://github.com/robinhundt/num-prime.git"}
+once_cell = "1.19.0"
+tokio = { version = "1.36.0", features = ["sync", "macros", "net"]}
+tokio-serde = { version = "0.9.0", features = ["bincode"]}
+tokio-util = { version = "0.7.10", features = ["codec"]}
+ndarray = { version = "0.15.6", features = ["rayon"]}
+thiserror = "1.0.56"
+tracing = "0.1.40"
 remoc = { workspace = true }
 libote = { path = "../../libs/libote-rs", optional = true }
 seec-bitmatrix = {path = "../seec-bitmatrix", features = ["rayon"]}
 
 [dev-dependencies]
-criterion = { version = "0.3.5", features = ["async_tokio"]}
-clap = { version = "3.2.8", features = ["derive"]}
-tokio = { version = "1.18.2", features = ["full"]}
+criterion = { version = "0.5.1", features = ["async_tokio"]}
+clap = { version = "4.4.18", features = ["derive"]}
+tokio = { version = "1.36.0", features = ["full"]}
 ocelot = { git = "https://github.com/GaloisInc/swanky.git" }
 scuttlebutt = { git = "https://github.com/GaloisInc/swanky.git" }
 rand_core_5_1 = { version = "0.5.1", package = "rand_core"}
-tracing-subscriber = { version = "0.3.9", features = ["env-filter"]}
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"]}
 
 
 [build-dependencies]
-cc = "1.0.73"
+cc = "1.0.83"
 
 [[bench]]
 name = "bench_main"
