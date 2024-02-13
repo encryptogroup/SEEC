@@ -1,4 +1,8 @@
-use crate::{tcp, BaseReceiver, BaseSender, Receiver, Sender};
+use crate::{
+    multi, sub_channel, tcp, BaseReceiver, BaseSender, CommunicationError, Receiver, ReceiverT,
+    Sender, SenderT,
+};
+use async_trait::async_trait;
 use futures::future::join;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
@@ -83,10 +87,18 @@ impl<T: RemoteSend + Clone> MultiSender<T> {
     pub async fn send_all(&self, msg: T) -> Result<(), Error> {
         self.send_to(self.senders.keys(), msg).await
     }
+
+    pub fn sender(&self, to: u32) -> Option<&Sender<T>> {
+        self.senders.get(&to)
+    }
+
+    pub fn senders(&self) -> impl Iterator<Item = (&u32, &Sender<T>)> {
+        self.senders.iter()
+    }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct From<T> {
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub struct MsgFrom<T> {
     from: u32,
     msg: T,
 }
@@ -95,7 +107,7 @@ impl<T: RemoteSend> MultiReceiver<T> {
     pub fn recv_from<'a>(
         &mut self,
         from: &HashSet<u32>,
-    ) -> impl Stream<Item = Result<From<T>, Error>> + '_ {
+    ) -> impl Stream<Item = Result<MsgFrom<T>, Error>> + '_ {
         // this is unfortunately O(|receivers|) instead of O(|from|), but I doubt,
         // that this has a noticeable perf impact
         self.receivers
@@ -105,26 +117,107 @@ impl<T: RemoteSend> MultiReceiver<T> {
             .collect::<FuturesUnordered<_>>()
     }
 
-    pub fn recv_all(&mut self) -> impl Stream<Item = Result<From<T>, Error>> + '_ {
+    pub fn recv_all(&mut self) -> impl Stream<Item = Result<MsgFrom<T>, Error>> + '_ {
         self.receivers
             .iter_mut()
             .map(map_recv_fut)
             .collect::<FuturesUnordered<_>>()
+    }
+
+    pub fn receiver(&mut self, from: u32) -> Option<&mut Receiver<T>> {
+        self.receivers.get_mut(&from)
+    }
+
+    pub fn receivers(&mut self) -> impl Iterator<Item = (&u32, &mut Receiver<T>)> {
+        self.receivers.iter_mut()
     }
 }
 
 #[inline]
 async fn map_recv_fut<T: RemoteSend>(
     (from, receiver): (&u32, &mut Receiver<T>),
-) -> Result<From<T>, Error> {
+) -> Result<MsgFrom<T>, Error> {
     debug!(from);
     match receiver.recv().await {
         Ok(Some(msg)) => {
             debug!(from, "Received msg");
-            Ok(From { from: *from, msg })
+            Ok(MsgFrom { from: *from, msg })
         }
         Ok(None) => Err(Error::MultiRecv(None)),
         Err(err) => Err(Error::MultiRecv(Some(err))),
+    }
+}
+
+#[tracing::instrument(skip_all)]
+pub async fn multi_sub_channel<Msg, SubMsg>(
+    sender: &MultiSender<Msg>,
+    receiver: &mut MultiReceiver<Msg>,
+    local_buffer: usize,
+) -> Result<(MultiSender<SubMsg>, MultiReceiver<SubMsg>), CommunicationError>
+where
+    Sender<SubMsg>: Into<Msg>,
+    Msg: Into<Option<Sender<SubMsg>>> + RemoteSend + Clone,
+    SubMsg: RemoteSend,
+    CommunicationError: std::convert::From<multi::Error> + std::convert::From<multi::Error>,
+{
+    struct SenderMutWrapper<'a, T>(&'a Sender<T>);
+    #[async_trait]
+    impl<'a, T: RemoteSend> SenderT<T> for SenderMutWrapper<'a, T> {
+        type Error = <Sender<T> as SenderT<T>>::Error;
+
+        async fn send(&mut self, item: T) -> Result<(), Self::Error> {
+            self.0.send(item).await
+        }
+    }
+    let mut fu: FuturesUnordered<_> = receiver
+        .receivers()
+        .map(|(from, receiver)| {
+            let sender = sender
+                .sender(*from)
+                .expect("has receiver for {from} but no sender");
+            let mut sender = SenderMutWrapper(sender);
+            async move {
+                let ch = sub_channel(&mut sender, receiver, local_buffer).await;
+                (*from, ch)
+            }
+        })
+        .collect();
+    let mut senders = HashMap::new();
+    let mut receivers = HashMap::new();
+    while let Some((remote_id, res)) = fu.next().await {
+        match res {
+            Ok((sender, receiver)) => {
+                senders.insert(remote_id, sender);
+                receivers.insert(remote_id, receiver);
+            }
+            Err(err) => {
+                return Err(CommunicationError::MultiSubChannel(
+                    remote_id,
+                    Box::new(err),
+                ))
+            }
+        }
+    }
+    let multi_sender = MultiSender { senders };
+    let multi_receiver = MultiReceiver { receivers };
+    Ok((multi_sender, multi_receiver))
+}
+
+#[async_trait]
+impl<T: RemoteSend + Clone> SenderT<T> for MultiSender<T> {
+    type Error = Error;
+
+    async fn send(&mut self, item: T) -> Result<(), Self::Error> {
+        self.send_all(item).await
+    }
+}
+
+#[async_trait]
+impl<T: RemoteSend> ReceiverT<T> for MultiReceiver<T> {
+    type Error = Error;
+
+    async fn recv(&mut self) -> Result<Option<T>, Self::Error> {
+        todo!()
     }
 }
 
@@ -254,6 +347,8 @@ where
 mod tests {
     use super::*;
     use crate::util::init_tracing;
+    use futures::stream::FuturesOrdered;
+    use futures::TryStreamExt;
     use std::net::{IpAddr, Ipv4Addr};
     use tokio::task::JoinError;
     use tracing::{debug_span, Instrument};
@@ -347,12 +442,85 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(
-                From {
+                MsgFrom {
                     from: 0,
                     msg: String::from("hello there")
                 },
                 res
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multi_sub_channel() {
+        type SubMsg = u8;
+        #[derive(Clone, Serialize, Deserialize)]
+        struct Msg {
+            sender: Sender<SubMsg>,
+        }
+        impl Into<Option<Sender<SubMsg>>> for Msg {
+            fn into(self) -> Option<Sender<SubMsg>> {
+                Some(self.sender)
+            }
+        }
+        impl From<Sender<SubMsg>> for Msg {
+            fn from(sender: Sender<SubMsg>) -> Msg {
+                Msg { sender }
+            }
+        }
+
+        let _g = init_tracing();
+
+        let base_port: u16 = 7512;
+        let parties = 10;
+        let parties_addrs: Vec<_> = (0..parties)
+            .map(|p| SocketAddr::from((Ipv4Addr::LOCALHOST, base_port + p)))
+            .collect();
+
+        let mut fu: FuturesOrdered<_> = (0..parties)
+            .map(|party| {
+                let parties_addrs = &parties_addrs[..];
+                async move {
+                    connect::<Msg>(
+                        parties_addrs[party as usize],
+                        parties_addrs,
+                        Duration::from_millis(100),
+                    )
+                    .await
+                    .unwrap()
+                }
+            })
+            .collect();
+
+        let mut channels: Vec<_> = fu.collect().await;
+
+        let mut sub_chs: Vec<_> = channels
+            .iter_mut()
+            .map(|(sender, receiver)| async move {
+                multi_sub_channel::<Msg, SubMsg>(sender, receiver, 128)
+                    .await
+                    .unwrap()
+            })
+            .collect::<FuturesOrdered<_>>()
+            .collect()
+            .await;
+
+        for (id, (sender, _)) in sub_chs.iter().enumerate() {
+            sender.send_all(id as u8).await.unwrap();
+        }
+
+        for (id, (_, receiver)) in sub_chs.iter_mut().enumerate() {
+            let v: HashSet<_> = receiver.recv_all().try_collect().await.unwrap();
+
+            let expected: HashSet<_> = (0..parties)
+                .filter(|p| *p as usize != id)
+                .map(|id| MsgFrom {
+                    from: id as u32,
+                    msg: id as u8,
+                })
+                .collect();
+
+            assert_eq!(expected, v);
         }
     }
 }

@@ -13,7 +13,7 @@ use thiserror::Error;
 use zappot::traits::{ExtROTReceiver, ExtROTSender};
 use zappot::util::aes_rng::AesRng;
 
-pub type Msg<Msg> = seec_channel::Receiver<Msg>;
+pub type Msg<Msg> = seec_channel::Sender<Msg>;
 /// Message for default ot ext
 pub type DefaultMsg = Msg<<zappot::ot_ext::Sender as ExtROTSender>::Msg>;
 
