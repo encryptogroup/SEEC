@@ -1,17 +1,17 @@
 //! Channel abstraction for communication
 use crate::util::{Counter, TrackingReader, TrackingWriter};
 use async_trait::async_trait;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+
+
 use remoc::rch::{base, mpsc};
 use remoc::{codec, ConnectError, RemoteSend};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::debug;
 
-use crate::multi::{MultiReceiver, MultiSender};
+
 pub use seec_channel_macros::sub_channels_for;
 
 pub mod in_memory;

@@ -1,13 +1,9 @@
-use crate::{
-    multi, sub_channel, tcp, BaseReceiver, BaseSender, CommunicationError, Receiver, ReceiverT,
-    Sender, SenderT,
-};
+use crate::{multi, sub_channel, tcp, CommunicationError, Receiver, ReceiverT, Sender, SenderT};
 use async_trait::async_trait;
 use futures::future::join;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
-use futures::{Stream, TryFutureExt};
-use remoc::rch::mpsc::SendError;
+use futures::Stream;
+use futures::StreamExt;
 use remoc::rch::{base, mpsc};
 use remoc::RemoteSend;
 use serde::{Deserialize, Serialize};
@@ -16,9 +12,9 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, instrument, Instrument};
+use tracing::{debug, error, instrument, Instrument};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -104,7 +100,7 @@ pub struct MsgFrom<T> {
 }
 
 impl<T: RemoteSend> MultiReceiver<T> {
-    pub fn recv_from<'a>(
+    pub fn recv_from(
         &mut self,
         from: &HashSet<u32>,
     ) -> impl Stream<Item = Result<MsgFrom<T>, Error>> + '_ {
@@ -277,7 +273,7 @@ async fn listen_for_remotes<T: RemoteSend>(
                 debug!(%addr, "Established connection to remote");
                 match base_receiver.recv().await {
                     Ok(Some(InitialMsg { party_id, sender })) => {
-                        if let Some(_) = senders.insert(party_id, sender) {
+                        if senders.insert(party_id, sender).is_some() {
                             return Err(Error::DuplicateInitialMsg);
                         }
                     }
@@ -349,9 +345,7 @@ mod tests {
     use crate::util::init_tracing;
     use futures::stream::FuturesOrdered;
     use futures::TryStreamExt;
-    use std::net::{IpAddr, Ipv4Addr};
-    use tokio::task::JoinError;
-    use tracing::{debug_span, Instrument};
+    use std::net::Ipv4Addr;
 
     #[tokio::test]
     async fn create_multi_channel() {
@@ -477,7 +471,7 @@ mod tests {
             .map(|p| SocketAddr::from((Ipv4Addr::LOCALHOST, base_port + p)))
             .collect();
 
-        let mut fu: FuturesOrdered<_> = (0..parties)
+        let fu: FuturesOrdered<_> = (0..parties)
             .map(|party| {
                 let parties_addrs = &parties_addrs[..];
                 async move {
