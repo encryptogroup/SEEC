@@ -6,10 +6,12 @@ use remoc::{codec, ConnectError, RemoteSend};
 use serde::{Deserialize, Serialize};
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::debug;
 
 pub use seec_channel_macros::sub_channels_for;
 
 pub mod in_memory;
+pub mod multi;
 pub mod tcp;
 pub mod tls;
 pub mod util;
@@ -216,7 +218,10 @@ where
         8096,
     )
     .await?;
+
     tokio::spawn(conn);
+
+    debug!("Established remoc connection");
 
     Ok((tx, bytes_written, rx, bytes_read))
 }

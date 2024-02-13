@@ -120,7 +120,7 @@ pub async fn new_local_pair<T: RemoteSend>(
     Ok((ch1, ch2))
 }
 
-async fn establish_remoc_connection_tcp<T: RemoteSend>(
+pub(crate) async fn establish_remoc_connection_tcp<T: RemoteSend>(
     socket: TcpStream,
 ) -> Result<TrackingChannel<T>, Error> {
     // send data ASAP

@@ -618,3 +618,14 @@ impl DivAssign<usize> for CountPair {
         self.rcvd /= rhs;
     }
 }
+
+#[cfg(test)]
+pub(crate) fn init_tracing() -> tracing::dispatcher::DefaultGuard {
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .set_default()
+}

@@ -1930,6 +1930,7 @@ dependencies = [
  "erased-serde",
  "futures",
  "indexmap",
+ "log",
  "once_cell",
  "pin-project",
  "remoc",
@@ -1945,6 +1946,7 @@ dependencies = [
  "tokio-serde",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
