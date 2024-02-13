@@ -36,7 +36,7 @@ async fn trusted_mt_provider() -> anyhow::Result<()> {
     let mut ex2 = Executor::<BooleanGmw, _>::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);
     let input_b = BitVec::repeat(false, 256);
-    let (mut t1, mut t2) = tcp::new_local_pair::<seec_channel::Receiver<_>>(None).await?;
+    let (mut t1, mut t2) = tcp::new_local_pair::<seec_channel::Sender<_>>(None).await?;
     let (mut t1, mut t2) = tokio::try_join!(
         sub_channel(&mut t1.0, &mut t1.2, 8),
         sub_channel(&mut t2.0, &mut t2.2, 8)
@@ -92,7 +92,7 @@ async fn trusted_seed_mt_provider() -> anyhow::Result<()> {
     let mut ex2 = Executor::<BooleanGmw, _>::new(&circuit, 1, mt_provider_2).await?;
     let input_a = BitVec::repeat(false, 256);
     let input_b = BitVec::repeat(false, 256);
-    let (mut t1, mut t2) = tcp::new_local_pair::<seec_channel::Receiver<_>>(None).await?;
+    let (mut t1, mut t2) = tcp::new_local_pair::<seec_channel::Sender<_>>(None).await?;
     let (mut t1, mut t2) = tokio::try_join!(
         sub_channel(&mut t1.0, &mut t1.2, 8),
         sub_channel(&mut t2.0, &mut t2.2, 8)

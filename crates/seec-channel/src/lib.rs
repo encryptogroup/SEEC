@@ -1,15 +1,19 @@
 //! Channel abstraction for communication
 use crate::util::{Counter, TrackingReader, TrackingWriter};
 use async_trait::async_trait;
+
 use remoc::rch::{base, mpsc};
 use remoc::{codec, ConnectError, RemoteSend};
 use serde::{Deserialize, Serialize};
+
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::debug;
 
 pub use seec_channel_macros::sub_channels_for;
 
 pub mod in_memory;
+pub mod multi;
 pub mod tcp;
 pub mod tls;
 pub mod util;
@@ -27,29 +31,35 @@ pub type Channel<T> = (Sender<T>, Receiver<T>);
 pub struct SyncMsg;
 
 #[async_trait]
-pub trait SenderT<T, E> {
-    async fn send(&mut self, item: T) -> Result<(), E>;
+pub trait SenderT<T> {
+    type Error;
+    async fn send(&mut self, item: T) -> Result<(), Self::Error>;
 }
 
 #[async_trait]
-pub trait ReceiverT<T, E> {
-    async fn recv(&mut self) -> Result<Option<T>, E>;
+pub trait ReceiverT<T> {
+    type Error;
+    async fn recv(&mut self) -> Result<Option<T>, Self::Error>;
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum CommunicationError {
     #[error("Error sending initial value")]
-    BaseSend(base::SendErrorKind),
+    BaseSend(#[source] base::SendError<()>),
     #[error("Error receiving value on base channel")]
     BaseRecv(#[from] base::RecvError),
     #[error("Error sending value on mpsc channel")]
-    Send(mpsc::SendError<()>),
+    Send(#[source] mpsc::SendError<()>),
     #[error("Error receiving value on mpsc channel")]
     Recv(#[from] mpsc::RecvError),
+    #[error("Error in Multi-Sender/Receiver")]
+    Multi(#[from] multi::Error),
     #[error("Unexpected termination. Remote is closed.")]
     RemoteClosed,
     #[error("Received out of order message")]
     UnexpectedMessage,
+    #[error("Unabel to establish multi-sub-channel with party {0}")]
+    MultiSubChannel(u32, #[source] Box<CommunicationError>),
 }
 
 pub fn channel<T: RemoteSend, const BUFFER: usize>(
@@ -65,62 +75,65 @@ pub fn channel<T: RemoteSend, const BUFFER: usize>(
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn sub_channel<Msg, SubMsg, SendErr, RecvErr>(
-    sender: &mut impl SenderT<Msg, SendErr>,
-    receiver: &mut impl ReceiverT<Msg, RecvErr>,
+pub async fn sub_channel<S, R, Msg, SubMsg>(
+    sender: &mut S,
+    receiver: &mut R,
     local_buffer: usize,
 ) -> Result<(Sender<SubMsg>, Receiver<SubMsg>), CommunicationError>
 where
-    Receiver<SubMsg>: Into<Msg>,
-    Msg: Into<Option<Receiver<SubMsg>>> + RemoteSend,
+    S: SenderT<Msg>,
+    R: ReceiverT<Msg>,
+    Sender<SubMsg>: Into<Msg>,
+    Msg: Into<Option<Sender<SubMsg>>> + RemoteSend,
     SubMsg: RemoteSend,
-    CommunicationError: From<SendErr> + From<RecvErr>,
+    CommunicationError: From<S::Error> + From<R::Error>,
 {
-    tracing::debug!("Establishing new sub_channel");
-    let (sub_sender, remote_sub_receiver) = channel(local_buffer);
-    sender.send(remote_sub_receiver.into()).await?;
-    tracing::debug!("Sent remote_sub_receiver");
+    debug!("Establishing new sub_channel");
+    let (remote_sub_sender, sub_receiver) = channel(local_buffer);
+    sender.send(remote_sub_sender.into()).await?;
+    debug!("Sent remote_sub_receiver");
     let msg = receiver
         .recv()
         .await?
         .ok_or(CommunicationError::RemoteClosed)?;
-    let sub_receiver = msg.into().ok_or(CommunicationError::UnexpectedMessage)?;
-    tracing::debug!("Received sub_receiver");
+    let sub_sender = msg.into().ok_or(CommunicationError::UnexpectedMessage)?;
+    debug!("Received sub_receiver");
     Ok((sub_sender, sub_receiver))
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn sub_channel_with<Msg, SubMsg, SendErr, RecvErr>(
-    sender: &mut impl SenderT<Msg, SendErr>,
-    receiver: &mut impl ReceiverT<Msg, RecvErr>,
+pub async fn sub_channel_with<S, R, Msg, SubMsg>(
+    sender: &mut S,
+    receiver: &mut R,
     local_buffer: usize,
-    wrap_fn: impl FnOnce(Receiver<SubMsg>) -> Msg,
-    extract_fn: impl FnOnce(Msg) -> Option<Receiver<SubMsg>>,
+    wrap_fn: impl FnOnce(Sender<SubMsg>) -> Msg,
+    extract_fn: impl FnOnce(Msg) -> Option<Sender<SubMsg>>,
 ) -> Result<(Sender<SubMsg>, Receiver<SubMsg>), CommunicationError>
 where
+    S: SenderT<Msg>,
+    R: ReceiverT<Msg>,
     Msg: RemoteSend,
     SubMsg: RemoteSend,
-    CommunicationError: From<SendErr> + From<RecvErr>,
+    CommunicationError: From<S::Error> + From<R::Error>,
 {
-    tracing::debug!("Establishing new sub_channel");
-    let (sub_sender, remote_sub_receiver) = channel(local_buffer);
-    sender.send(wrap_fn(remote_sub_receiver)).await?;
-    tracing::debug!("Sent remote_sub_receiver");
+    debug!("Establishing new sub_channel");
+    let (remote_sub_sender, sub_receiver) = channel(local_buffer);
+    sender.send(wrap_fn(remote_sub_sender)).await?;
+    debug!("Sent remote_sub_receiver");
     let msg = receiver
         .recv()
         .await?
         .ok_or(CommunicationError::RemoteClosed)?;
-    let sub_receiver = extract_fn(msg).ok_or(CommunicationError::UnexpectedMessage)?;
-    tracing::debug!("Received sub_receiver");
+    let sub_sender = extract_fn(msg).ok_or(CommunicationError::UnexpectedMessage)?;
+    debug!("Received sub_receiver");
     Ok((sub_sender, sub_receiver))
 }
 
-pub async fn sync<SendErr, RecvErr>(
-    sender: &mut impl SenderT<SyncMsg, SendErr>,
-    receiver: &mut impl ReceiverT<SyncMsg, RecvErr>,
-) -> Result<(), CommunicationError>
+pub async fn sync<S, R>(sender: &mut S, receiver: &mut R) -> Result<(), CommunicationError>
 where
-    CommunicationError: From<SendErr> + From<RecvErr>,
+    S: SenderT<SyncMsg>,
+    R: ReceiverT<SyncMsg>,
+    CommunicationError: From<S::Error> + From<R::Error>,
 {
     sender.send(SyncMsg).await?;
     // ignore receiving a None
@@ -132,54 +145,56 @@ where
 }
 
 #[async_trait]
-impl<T, Codec> SenderT<T, base::SendError<T>> for base::Sender<T, Codec>
+impl<T, Codec> SenderT<T> for base::Sender<T, Codec>
 where
     T: RemoteSend,
     Codec: codec::Codec,
 {
-    async fn send(&mut self, item: T) -> Result<(), base::SendError<T>> {
+    type Error = base::SendError<T>;
+    async fn send(&mut self, item: T) -> Result<(), Self::Error> {
         base::Sender::send(self, item).await
     }
 }
 
 #[async_trait]
-impl<T, Codec> ReceiverT<T, base::RecvError> for base::Receiver<T, Codec>
+impl<T, Codec> ReceiverT<T> for base::Receiver<T, Codec>
 where
     T: RemoteSend,
     Codec: codec::Codec,
 {
-    async fn recv(&mut self) -> Result<Option<T>, base::RecvError> {
+    type Error = base::RecvError;
+    async fn recv(&mut self) -> Result<Option<T>, Self::Error> {
         base::Receiver::recv(self).await
     }
 }
 
 #[async_trait]
-impl<T, Codec, const BUFFER: usize> SenderT<T, mpsc::SendError<T>>
-    for mpsc::Sender<T, Codec, BUFFER>
+impl<T, Codec, const BUFFER: usize> SenderT<T> for mpsc::Sender<T, Codec, BUFFER>
 where
     T: RemoteSend,
     Codec: codec::Codec,
 {
-    async fn send(&mut self, item: T) -> Result<(), mpsc::SendError<T>> {
+    type Error = mpsc::SendError<T>;
+    async fn send(&mut self, item: T) -> Result<(), Self::Error> {
         mpsc::Sender::send(self, item).await
     }
 }
 
 #[async_trait]
-impl<T, Codec, const BUFFER: usize> ReceiverT<T, mpsc::RecvError>
-    for mpsc::Receiver<T, Codec, BUFFER>
+impl<T, Codec, const BUFFER: usize> ReceiverT<T> for mpsc::Receiver<T, Codec, BUFFER>
 where
     T: RemoteSend,
     Codec: codec::Codec,
 {
-    async fn recv(&mut self) -> Result<Option<T>, mpsc::RecvError> {
+    type Error = mpsc::RecvError;
+    async fn recv(&mut self) -> Result<Option<T>, Self::Error> {
         mpsc::Receiver::recv(self).await
     }
 }
 
 impl<T> From<base::SendError<T>> for CommunicationError {
     fn from(err: base::SendError<T>) -> Self {
-        CommunicationError::BaseSend(err.kind)
+        CommunicationError::BaseSend(err.without_item())
     }
 }
 
@@ -216,7 +231,10 @@ where
         8096,
     )
     .await?;
+
     tokio::spawn(conn);
+
+    debug!("Established remoc connection");
 
     Ok((tx, bytes_written, rx, bytes_read))
 }

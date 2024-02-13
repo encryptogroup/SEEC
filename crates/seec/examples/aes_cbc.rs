@@ -105,7 +105,7 @@ enum Msg {
         iv: [usize; 2],
         key: [usize; 2],
     },
-    OtChannel(seec_channel::Receiver<mul_triple::boolean::ot_ext::DefaultMsg>),
+    OtChannel(seec_channel::Sender<mul_triple::boolean::ot_ext::DefaultMsg>),
     Ack,
 }
 
@@ -159,7 +159,7 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
             128,
             Msg::OtChannel,
             |msg| match msg {
-                Msg::OtChannel(receiver) => Some(receiver),
+                Msg::OtChannel(sender) => Some(sender),
                 _ => None,
             },
         )

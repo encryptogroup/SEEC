@@ -335,7 +335,7 @@ where
         }
         TestChannel::Tcp => {
             let (mut t1, mut t2) =
-                seec_channel::tcp::new_local_pair::<seec_channel::Receiver<_>>(None).await?;
+                seec_channel::tcp::new_local_pair::<seec_channel::Sender<_>>(None).await?;
             let (mut sub_t1, mut sub_t2) = tokio::try_join!(
                 sub_channel(&mut t1.0, &mut t1.2, 2),
                 sub_channel(&mut t2.0, &mut t2.2, 2)

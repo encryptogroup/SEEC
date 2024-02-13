@@ -19,8 +19,8 @@ pub struct OtMTProvider<R, RNG, OtS: ExtROTSender, OtR: ExtROTReceiver> {
     rng: RNG,
     ot_sender: OtS,
     ot_receiver: OtR,
-    ch_sender: seec_channel::Sender<seec_channel::Receiver<OtS::Msg>>,
-    ch_receiver: seec_channel::Receiver<seec_channel::Receiver<OtS::Msg>>,
+    ch_sender: seec_channel::Sender<seec_channel::Sender<OtS::Msg>>,
+    ch_receiver: seec_channel::Receiver<seec_channel::Sender<OtS::Msg>>,
     precomputed_mts: Option<MulTriples<R>>,
 }
 
@@ -31,8 +31,8 @@ impl<R: Ring, RNG: RngCore + CryptoRng + Send, OtS: ExtROTSender, OtR: ExtROTRec
         rng: RNG,
         ot_sender: OtS,
         ot_receiver: OtR,
-        ch_sender: seec_channel::Sender<seec_channel::Receiver<OtS::Msg>>,
-        ch_receiver: seec_channel::Receiver<seec_channel::Receiver<OtS::Msg>>,
+        ch_sender: seec_channel::Sender<seec_channel::Sender<OtS::Msg>>,
+        ch_receiver: seec_channel::Receiver<seec_channel::Sender<OtS::Msg>>,
     ) -> Self {
         Self {
             rng,

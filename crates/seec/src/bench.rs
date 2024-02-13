@@ -20,7 +20,7 @@ use rand::rngs::OsRng;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use seec_channel::util::{Phase, RunResult, Statistics};
-use seec_channel::{sub_channels_for, Channel, Receiver};
+use seec_channel::{sub_channels_for, Channel, Sender};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fs::File;
@@ -36,7 +36,7 @@ type DynMTP<P> =
 
 pub trait BenchProtocol: Protocol + Default + Debug {
     fn insecure_setup() -> DynMTP<Self>;
-    fn ot_setup(ch: Channel<Receiver<ExtOTMsg>>) -> DynMTP<Self>;
+    fn ot_setup(ch: Channel<Sender<ExtOTMsg>>) -> DynMTP<Self>;
     fn stored(path: &Path) -> DynMTP<Self>;
 }
 
@@ -45,7 +45,7 @@ impl BenchProtocol for BooleanGmw {
         Box::new(ErasedError(boolean::InsecureMTProvider::default()))
     }
 
-    fn ot_setup(ch: Channel<Receiver<ExtOTMsg>>) -> DynMTP<Self> {
+    fn ot_setup(ch: Channel<Sender<ExtOTMsg>>) -> DynMTP<Self> {
         let ot_sender = zappot::ot_ext::Sender::default();
         let ot_recv = zappot::ot_ext::Receiver::default();
         let mtp = boolean::OtMTProvider::new(OsRng, ot_sender, ot_recv, ch.0, ch.1);
@@ -68,7 +68,7 @@ where
         mixed_gmw::InsecureMixedSetup::default().into_dyn()
     }
 
-    fn ot_setup(_ch: Channel<Receiver<ExtOTMsg>>) -> DynMTP<Self> {
+    fn ot_setup(_ch: Channel<Sender<ExtOTMsg>>) -> DynMTP<Self> {
         todo!()
     }
 
@@ -238,7 +238,7 @@ where
                     &mut sender,
                     &mut receiver,
                     128,
-                    Receiver<ExtOTMsg>,
+                    Sender<ExtOTMsg>,
                     Message<P>
                 )
                 .await
