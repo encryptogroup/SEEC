@@ -30,7 +30,7 @@ async fn sender(args: Args) -> Vec<[Block; 2]> {
     // Create a channel by listening on a socket address. Once another party connect, this
     // returns the channel
     let (mut base_sender, _, mut base_receiver, _) =
-        seec_channel::tcp::listen::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::listen::<seec_channel::Sender<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
@@ -51,7 +51,7 @@ async fn receiver(args: Args) -> (Vec<Block>, BitVec) {
     let mut receiver = Receiver::new();
     // Connect to the sender on the listened on port
     let (mut base_sender, _, mut base_receiver, _) =
-        seec_channel::tcp::connect::<seec_channel::Receiver<_>>(("127.0.0.1", args.port))
+        seec_channel::tcp::connect::<seec_channel::Sender<_>>(("127.0.0.1", args.port))
             .await
             .expect("Error listening for channel connection");
     let (ch_sender, mut ch_receiver) = sub_channel(&mut base_sender, &mut base_receiver, 8)
