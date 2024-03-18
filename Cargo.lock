@@ -1958,6 +1958,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "seec-experimental"
+version = "0.1.0"
+
+[[package]]
 name = "seec-macros"
 version = "0.1.0"
 dependencies = [
