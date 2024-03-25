@@ -173,7 +173,6 @@ impl<Rng: RngCore + CryptoRng + Send> MTProvider for SilentMtProvider<Rng> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::OsRng;
 
     #[tokio::test]
     async fn silent_mts() {
