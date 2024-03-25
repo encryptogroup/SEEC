@@ -918,8 +918,6 @@ async fn pprf_channel<BaseMsg: RemoteSend>(
 mod test {
     use super::*;
     use crate::silent_ot::pprf::tests::fake_base;
-
-    use bitvec::slice::BitSlice;
     use rand::rngs::StdRng;
     use rand_core::SeedableRng;
 

@@ -131,7 +131,7 @@ mod private {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rayon::{ThreadPool, ThreadPoolBuilder};
+    use rayon::ThreadPoolBuilder;
 
     fn build_thread_pool() -> ThreadPool {
         ThreadPoolBuilder::new().num_threads(1).build().unwrap()

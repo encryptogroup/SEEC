@@ -4,7 +4,6 @@ use crate::{GateId, SubCircuitGate};
 use petgraph::adj::IndexType;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::cmp::{Eq, Ord};
 use std::collections::{BTreeMap, Bound, HashMap};
 use std::fmt::Debug;
 use std::hash::Hash;

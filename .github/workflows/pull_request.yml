@@ -21,7 +21,7 @@ jobs:
           - os: "macos-14"
             exclude: "--exclude 'bitpolymul*'"
             features: "aby2,bench-api,silent-ot,silent-ot-libote-codes"
-        os: ["ubuntu-latest", "windows-latest", "macos-14"]
+        os: [ "ubuntu-latest", "windows-latest", "macos-14" ]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: nightly-2024-01-12
+          toolchain: nightly-2024-03-19
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo --version
@@ -55,7 +55,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: nightly-2024-01-12
+          toolchain: nightly-2024-03-19
           components: "clippy, rustfmt"
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}

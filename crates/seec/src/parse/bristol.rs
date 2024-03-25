@@ -113,11 +113,12 @@ pub fn circuit(input: &str) -> Result<Circuit, nom::Err<nom::error::Error<&str>>
     Ok(Circuit { header, gates })
 }
 
-pub fn array<'a, F: 'a, O: Default + Copy, const N: usize>(
+pub fn array<'a, F, O, const N: usize>(
     element: F,
 ) -> impl FnMut(&'a str) -> IResult<&'a str, [O; N]>
 where
-    F: Fn(&'a str) -> IResult<&'a str, O>,
+    O: Default + Copy,
+    F: Fn(&'a str) -> IResult<&'a str, O> + 'a,
 {
     move |i: &str| {
         let mut buf = [O::default(); N];
