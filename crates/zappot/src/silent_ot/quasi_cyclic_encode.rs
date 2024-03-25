@@ -110,7 +110,7 @@ fn copy_out(dest: &mut [Block], c_mod_p1: &Array2<Block>) {
 
 #[derive(Copy, Clone, Debug)]
 /// Configuration options  for the quasi cyclic silent OT implementation. Is created by
-/// calling the [configure()](`configure`) function.
+/// calling the [`QuasiCyclicConf::configure`] function.
 pub struct QuasiCyclicConf {
     /// The prime for QuasiCyclic encoding
     pub(crate) P: usize,

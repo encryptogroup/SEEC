@@ -1,3 +1,4 @@
+//! Base-Circuits are a graph representation of a circuit.
 #![allow(clippy::extra_unused_type_parameters)] // false positive in current nightly
 
 use ahash::HashMap;
@@ -59,19 +60,19 @@ pub enum BaseGate<T, D = ScalarDim> {
 }
 
 #[derive(
-Debug,
-Default,
-Copy,
-Clone,
-Ord,
-PartialOrd,
-PartialEq,
-Eq,
-Hash,
-Serialize,
-Deserialize,
-Pod,
-Zeroable,
+    Debug,
+    Default,
+    Copy,
+    Clone,
+    Ord,
+    PartialOrd,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Pod,
+    Zeroable,
 )]
 #[repr(transparent)]
 pub struct GateId<Idx = DefaultIdx>(pub(crate) Idx);
@@ -145,7 +146,7 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
     pub fn parent_gates(
         &self,
         id: impl Into<GateId<Idx>>,
-    ) -> impl Iterator<Item=GateId<Idx>> + '_ {
+    ) -> impl Iterator<Item = GateId<Idx>> + '_ {
         self.graph
             .neighbors_directed(id.into().into(), Direction::Incoming)
             .map(GateId::from)
@@ -176,13 +177,13 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
         &self.graph
     }
 
-    pub fn interactive_iter(&self) -> impl Iterator<Item=(G, GateId<Idx>)> + '_ {
+    pub fn interactive_iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + '_ {
         self.layer_iter()
             .visit_sc_inputs()
             .flat_map(|layer| layer.into_interactive_iter())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=(G, GateId<Idx>)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + '_ {
         self.layer_iter()
             .visit_sc_inputs()
             .flat_map(|layer| layer.into_iter())
@@ -213,7 +214,7 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
     pub fn add_sub_circuit(
         &mut self,
         circuit: &Self,
-        inputs: impl IntoIterator<Item=GateId<Idx>>,
+        inputs: impl IntoIterator<Item = GateId<Idx>>,
     ) -> Vec<GateId<Idx>> {
         assert!(!circuit.is_main, "Can't add main circuit as sub circuit");
         assert!(
@@ -304,9 +305,9 @@ pub enum Load {
 }
 
 impl<Share, G, Idx: GateIdx> BaseCircuit<G, Idx>
-    where
-        Share: Clone,
-        G: Gate<Share=Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
+where
+    Share: Clone,
+    G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
 {
     #[tracing::instrument(skip(bristol))]
     pub fn from_bristol(bristol: bristol::Circuit, load: Load) -> Result<Self, CircuitError> {
@@ -407,7 +408,7 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
 impl<T: Share, D: Dimension> BaseGate<T, D> {
     pub(crate) fn evaluate_sc_input_simd(
         &self,
-        inputs: impl Iterator<Item=<Self as Gate>::Share>,
+        inputs: impl Iterator<Item = <Self as Gate>::Share>,
     ) -> <<Self as Gate>::Share as Share>::SimdShare {
         let Self::SubCircuitInput(_) = self else {
             panic!("Called evaluate_sc_input_simd on wrong gate {self:?}");
@@ -449,7 +450,7 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
     fn evaluate_non_interactive(
         &self,
         party_id: usize,
-        mut inputs: impl Iterator<Item=Self::Share>,
+        mut inputs: impl Iterator<Item = Self::Share>,
     ) -> Self::Share {
         match self {
             Self::Constant(constant) => {
@@ -480,7 +481,7 @@ impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
     fn evaluate_non_interactive_simd<'e>(
         &self,
         _party_id: usize,
-        mut inputs: impl Iterator<Item=&'e <Self::Share as Share>::SimdShare>,
+        mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
     ) -> <Self::Share as Share>::SimdShare {
         match self {
             BaseGate::Output(_)
@@ -599,7 +600,7 @@ pub struct CircuitLayer<G, Idx> {
     pub(crate) interactive_ids: Vec<GateId<Idx>>,
     /// SIMD Gates that can be freed after this layer
     pub(crate) freeable_gates: Vec<GateId<Idx>>, // TODO add output gates here so that the CircuitLayerIter::next doesn't need to iterate
-    //  over all potential outs
+                                                 //  over all potential outs
 }
 
 impl<G, Idx> CircuitLayer<G, Idx> {
@@ -637,27 +638,27 @@ impl<G, Idx> CircuitLayer<G, Idx> {
 }
 
 impl<G: Clone, Idx: Clone> CircuitLayer<G, Idx> {
-    pub(crate) fn iter_ids(&self) -> impl Iterator<Item=GateId<Idx>> + '_ {
+    pub(crate) fn iter_ids(&self) -> impl Iterator<Item = GateId<Idx>> + '_ {
         self.non_interactive_ids
             .iter()
             .chain(&self.interactive_ids)
             .cloned()
     }
 
-    pub(crate) fn into_interactive_iter(self) -> impl Iterator<Item=(G, GateId<Idx>)> + Clone {
+    pub(crate) fn into_interactive_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
         self.interactive_gates.into_iter().zip(self.interactive_ids)
     }
 
     #[allow(unused)]
     pub(crate) fn into_non_interactive_iter(
         self,
-    ) -> impl Iterator<Item=(G, GateId<Idx>)> + Clone {
+    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
         self.non_interactive_gates
             .into_iter()
             .zip(self.non_interactive_ids)
     }
 
-    pub(crate) fn interactive_iter(&self) -> impl Iterator<Item=(G, GateId<Idx>)> + Clone + '_ {
+    pub(crate) fn interactive_iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
         self.interactive_gates
             .clone()
             .into_iter()
@@ -666,7 +667,7 @@ impl<G: Clone, Idx: Clone> CircuitLayer<G, Idx> {
 
     pub(crate) fn non_interactive_iter(
         &self,
-    ) -> impl Iterator<Item=(G, GateId<Idx>)> + Clone + '_ {
+    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
         self.non_interactive_gates
             .clone()
             .into_iter()
@@ -675,7 +676,7 @@ impl<G: Clone, Idx: Clone> CircuitLayer<G, Idx> {
 }
 
 impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
-    pub(crate) fn into_iter(self) -> impl Iterator<Item=(G, GateId<Idx>)> + Clone {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
         let ni = self
             .non_interactive_gates
             .into_iter()
@@ -687,7 +688,7 @@ impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
     pub(crate) fn into_sc_iter(
         self,
         sc_id: CircuitId,
-    ) -> impl Iterator<Item=(G, SubCircuitGate<Idx>)> + Clone {
+    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone {
         self.into_iter()
             .map(move |(g, gate_id)| (g, SubCircuitGate::new(sc_id, gate_id)))
     }
@@ -802,8 +803,8 @@ impl<Idx: GateIdx> GateId<Idx> {
 }
 
 impl<Idx> From<NodeIndex<Idx>> for GateId<Idx>
-    where
-        Idx: GateIdx,
+where
+    Idx: GateIdx,
 {
     fn from(idx: NodeIndex<Idx>) -> Self {
         Self(
@@ -822,8 +823,8 @@ impl<Idx: GateIdx> From<GateId<Idx>> for NodeIndex<Idx> {
 }
 
 impl<Idx> From<u16> for GateId<Idx>
-    where
-        Idx: TryFrom<u16>,
+where
+    Idx: TryFrom<u16>,
 {
     fn from(val: u16) -> Self {
         GateId(
@@ -835,8 +836,8 @@ impl<Idx> From<u16> for GateId<Idx>
 }
 
 impl<Idx> From<u32> for GateId<Idx>
-    where
-        Idx: TryFrom<u32>,
+where
+    Idx: TryFrom<u32>,
 {
     fn from(val: u32) -> Self {
         GateId(
@@ -848,8 +849,8 @@ impl<Idx> From<u32> for GateId<Idx>
 }
 
 impl<Idx> From<usize> for GateId<Idx>
-    where
-        Idx: TryFrom<usize>,
+where
+    Idx: TryFrom<usize>,
 {
     fn from(val: usize) -> Self {
         GateId(

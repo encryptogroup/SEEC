@@ -1,3 +1,7 @@
+//! Private test utilities - Do Not Use!
+//!
+//! This module is activated by the "_integration_tests" feature and should not be used by
+//! downstream code. It can change in any version.
 use std::convert::Infallible;
 use std::fmt::Debug;
 use std::path::Path;

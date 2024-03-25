@@ -1,3 +1,5 @@
+//! Arithmetic MTs and providers.
+
 use crate::protocols::{Ring, SetupStorage};
 use serde::{Deserialize, Serialize};
 

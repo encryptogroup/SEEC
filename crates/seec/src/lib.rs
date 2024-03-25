@@ -24,18 +24,22 @@
 //! is via the official toolchain installer [rustup](https://rustup.rs/).
 //!
 //! Create a new Rust project using cargo `cargo new --bin seec-test`, and add SEEC as a dependency to your
-//! `Cargo.toml`
-//! ```shell
-//! // seec-test/Cargo.toml
+//! `Cargo.toml`.
+//! ```toml
+//! # in seec-test/Cargo.toml
 //! [dependencies]
-//! seec = { git = "ssh://git@git.rwth-aachen.de/encrypto/code/rnieminen/rust-framework.git" }
+//! seec = { git = "https://github.com/encryptogroup/SEEC.git", features = ["..."]}
 //! ```
-//! (Note: currently SEEC is only available as a private git repository. Make sure that your
-//! [ssh-agent](https://linux.die.net/man/1/ssh-agent)) is started. More information [here](https://doc.rust-lang.org/cargo/appendix/git-authentication.html)
+//!
+//! ### Cargo features
+//! - "bench-api": Enables the benchmarking API
+//! - "aby2": Enables the ABY2 implementation
+//! - "silent-ot-quasi-cyclic": Enables the Silent-OT QuasiCyclic code. depends on AVX2, therefore not platform independent.
+//! - "silent-ot": Enables the Silent-OT codes from libOTe. These work on ARM.
 //!
 //! The following annotated example of using SEEC is also located at `crates/seec/examples/simple.rs`.
 //! You can run it using `cargo run --example simple`.
-//!```ignore,toml
+//!```ignore,rust
 #![doc = include_str!("../examples/simple.rs")]
 //!```
 //!
@@ -56,7 +60,7 @@ pub mod bench;
 pub mod circuit;
 pub mod common;
 pub mod errors;
-pub mod evaluate;
+pub(crate) mod evaluate;
 pub mod executor;
 pub mod mul_triple;
 pub mod parse;
