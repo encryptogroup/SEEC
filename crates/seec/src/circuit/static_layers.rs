@@ -5,8 +5,6 @@ use crate::protocols::Gate;
 use crate::{GateId, SubCircuitGate};
 use either::Either;
 use serde::{Deserialize, Serialize};
-use std::cmp::Eq;
-use std::cmp::Ord;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
