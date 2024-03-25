@@ -1,6 +1,6 @@
 name: Push
 
-on: ["push"]
+on: [ "push" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,7 +17,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: nightly-2024-01-12
+          toolchain: nightly-2024-03-19
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo --version
