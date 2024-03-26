@@ -588,119 +588,15 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
     pub fn is_exhausted(&self) -> bool {
         self.gates_produced == self.circuit.gate_count()
     }
-}
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct CircuitLayer<G, Idx> {
-    pub(crate) non_interactive_gates: Vec<G>,
-    pub(crate) non_interactive_ids: Vec<GateId<Idx>>,
-    pub(crate) interactive_gates: Vec<G>,
-    pub(crate) interactive_ids: Vec<GateId<Idx>>,
-    /// SIMD Gates that can be freed after this layer
-    pub(crate) freeable_gates: Vec<GateId<Idx>>, // TODO add output gates here so that the CircuitLayerIter::next doesn't need to iterate
-                                                 //  over all potential outs
-}
-
-impl<G, Idx> CircuitLayer<G, Idx> {
-    fn with_capacity((non_interactive, interactive): (usize, usize)) -> Self {
-        Self {
-            non_interactive_gates: Vec::with_capacity(non_interactive),
-            non_interactive_ids: Vec::with_capacity(non_interactive),
-            interactive_gates: Vec::with_capacity(interactive),
-            interactive_ids: Vec::with_capacity(interactive),
-            freeable_gates: vec![],
-        }
+    pub fn swap_next_layer(&mut self) {
+        std::mem::swap(&mut self.to_visit, &mut self.next_layer);
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.non_interactive_gates.is_empty() && self.interactive_gates.is_empty()
-    }
-
-    fn push_interactive(&mut self, (gate, id): (G, GateId<Idx>)) {
-        self.interactive_gates.push(gate);
-        self.interactive_ids.push(id);
-    }
-
-    fn push_non_interactive(&mut self, (gate, id): (G, GateId<Idx>)) {
-        self.non_interactive_gates.push(gate);
-        self.non_interactive_ids.push(id);
-    }
-
-    pub fn interactive_len(&self) -> usize {
-        self.interactive_gates.len()
-    }
-
-    pub fn non_interactive_len(&self) -> usize {
-        self.non_interactive_gates.len()
-    }
-}
-
-impl<G: Clone, Idx: Clone> CircuitLayer<G, Idx> {
-    pub(crate) fn iter_ids(&self) -> impl Iterator<Item = GateId<Idx>> + '_ {
-        self.non_interactive_ids
-            .iter()
-            .chain(&self.interactive_ids)
-            .cloned()
-    }
-
-    pub(crate) fn into_interactive_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
-        self.interactive_gates.into_iter().zip(self.interactive_ids)
-    }
-
-    #[allow(unused)]
-    pub(crate) fn into_non_interactive_iter(
-        self,
-    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
-        self.non_interactive_gates
-            .into_iter()
-            .zip(self.non_interactive_ids)
-    }
-
-    pub(crate) fn interactive_iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
-        self.interactive_gates
-            .clone()
-            .into_iter()
-            .zip(self.interactive_ids.clone())
-    }
-
-    pub(crate) fn non_interactive_iter(
-        &self,
-    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
-        self.non_interactive_gates
-            .clone()
-            .into_iter()
-            .zip(self.non_interactive_ids.clone())
-    }
-}
-
-impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
-    pub(crate) fn into_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
-        let ni = self
-            .non_interactive_gates
-            .into_iter()
-            .zip(self.non_interactive_ids);
-        let i = self.interactive_gates.into_iter().zip(self.interactive_ids);
-        ni.chain(i)
-    }
-
-    pub(crate) fn into_sc_iter(
-        self,
-        sc_id: CircuitId,
-    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone {
-        self.into_iter()
-            .map(move |(g, gate_id)| (g, SubCircuitGate::new(sc_id, gate_id)))
-    }
-}
-
-impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, W> {
-    type Item = CircuitLayer<G, Idx>;
-
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    fn next(&mut self) -> Option<Self::Item> {
+    pub fn process_to_visit(&mut self) -> Option<CircuitLayer<G, Idx>> {
         // TODO this current implementation is confusing -> Refactor
         let graph = self.circuit.as_graph();
         let mut layer = CircuitLayer::with_capacity(self.last_layer_size);
-        std::mem::swap(&mut self.to_visit, &mut self.next_layer);
 
         while let Some(node_idx) = self.to_visit.pop_front() {
             // This case handles the interactive gates at the front of to_visit that
@@ -770,6 +666,130 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
             self.gates_produced += layer.interactive_len() + layer.non_interactive_len();
             Some(layer)
         }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct CircuitLayer<G, Idx> {
+    pub(crate) non_interactive_gates: Vec<G>,
+    pub(crate) non_interactive_ids: Vec<GateId<Idx>>,
+    pub(crate) interactive_gates: Vec<G>,
+    pub(crate) interactive_ids: Vec<GateId<Idx>>,
+    /// SIMD Gates that can be freed after this layer
+    pub(crate) freeable_gates: Vec<GateId<Idx>>, // TODO add output gates here so that the CircuitLayerIter::next doesn't need to iterate
+                                                 //  over all potential outs
+}
+
+impl<G, Idx> CircuitLayer<G, Idx> {
+    fn with_capacity((non_interactive, interactive): (usize, usize)) -> Self {
+        Self {
+            non_interactive_gates: Vec::with_capacity(non_interactive),
+            non_interactive_ids: Vec::with_capacity(non_interactive),
+            interactive_gates: Vec::with_capacity(interactive),
+            interactive_ids: Vec::with_capacity(interactive),
+            freeable_gates: vec![],
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.non_interactive_gates.is_empty() && self.interactive_gates.is_empty()
+    }
+
+    fn push_interactive(&mut self, (gate, id): (G, GateId<Idx>)) {
+        self.interactive_gates.push(gate);
+        self.interactive_ids.push(id);
+    }
+
+    fn push_non_interactive(&mut self, (gate, id): (G, GateId<Idx>)) {
+        self.non_interactive_gates.push(gate);
+        self.non_interactive_ids.push(id);
+    }
+
+    pub fn interactive_len(&self) -> usize {
+        self.interactive_gates.len()
+    }
+
+    pub fn non_interactive_len(&self) -> usize {
+        self.non_interactive_gates.len()
+    }
+}
+
+impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
+    /// If idx is < self.non_interactive_gates.len(), returns an non-interactive gate,
+    /// otherwise an interactive one. Panics if out of bound. Intended for usage with an
+    /// enumerated self.iter_ids call
+    pub(crate) fn get_gate(&self, idx: usize) -> &G {
+        let ni_len = self.non_interactive_len();
+        if idx < ni_len {
+            &self.non_interactive_gates[idx]
+        } else {
+            &self.interactive_gates[idx - ni_len]
+        }
+    }
+
+    pub(crate) fn iter_ids(&self) -> impl Iterator<Item = GateId<Idx>> + '_ {
+        self.non_interactive_ids
+            .iter()
+            .chain(&self.interactive_ids)
+            .copied()
+    }
+
+    pub(crate) fn into_interactive_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
+        self.interactive_gates.into_iter().zip(self.interactive_ids)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn into_non_interactive_iter(
+        self,
+    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
+        self.non_interactive_gates
+            .into_iter()
+            .zip(self.non_interactive_ids)
+    }
+
+    pub(crate) fn interactive_iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
+        self.interactive_gates
+            .clone()
+            .into_iter()
+            .zip(self.interactive_ids.clone())
+    }
+
+    pub(crate) fn non_interactive_iter(
+        &self,
+    ) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
+        self.non_interactive_gates
+            .clone()
+            .into_iter()
+            .zip(self.non_interactive_ids.clone())
+    }
+}
+
+impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
+        let ni = self
+            .non_interactive_gates
+            .into_iter()
+            .zip(self.non_interactive_ids);
+        let i = self.interactive_gates.into_iter().zip(self.interactive_ids);
+        ni.chain(i)
+    }
+
+    pub(crate) fn into_sc_iter(
+        self,
+        sc_id: CircuitId,
+    ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone {
+        self.into_iter()
+            .map(move |(g, gate_id)| (g, SubCircuitGate::new(sc_id, gate_id)))
+    }
+}
+
+impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, W> {
+    type Item = CircuitLayer<G, Idx>;
+
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.swap_next_layer();
+        self.process_to_visit()
     }
 }
 

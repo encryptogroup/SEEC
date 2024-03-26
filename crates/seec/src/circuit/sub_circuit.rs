@@ -90,9 +90,25 @@ impl<'base, G: Gate, Idx: GateIdx> ChildOrParent<SubCircIter<'base, G, Idx>> {
                 .expect("returned gates receiver dropped prematurely"),
         }
     }
+
+    // Adds gate to current layer of child of sends it into returned queue of parent
+    fn add_to_current_layer(
+        &mut self,
+        gate_id: GateId<Idx>,
+        parent_returned_gates_tx: Option<&mpsc::Sender<GateId<Idx>>>,
+    ) {
+        match self {
+            ChildOrParent::Child(iter) => iter.base_iter.add_to_visit(gate_id.into()),
+            ChildOrParent::IsParent => parent_returned_gates_tx
+                .expect("Iter is child but has no parent")
+                .send(gate_id)
+                .expect("returned gates receiver dropped prematurely"),
+        }
+    }
 }
 
 struct SubCircLayer<'sc_iter, 'base, G, Idx: GateIdx> {
+    /// CallId for the sub-circuit of this layer from the callers perspective
     call_id: CallId,
     base_layer: base_circuit::CircuitLayer<G, Idx>,
     sub_circ_iter: &'sc_iter mut SubCircIter<'base, G, Idx>,
@@ -100,14 +116,20 @@ struct SubCircLayer<'sc_iter, 'base, G, Idx: GateIdx> {
 
 impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
     fn next(&mut self) -> Option<SubCircLayer<'_, 'base, G, Idx>> {
+        // If self.base_iter is exhausted all sub circ iterators must have finished as their
+        // outputs feed back into this sub circuit
+        if self.base_iter.is_exhausted() {
+            return None;
+        }
         // Update own base layer iter with returned gate ids
         while let Ok(ret_gate_id) = self.own_returned_gates_rx.try_recv() {
-            self.base_iter.add_to_next_layer(ret_gate_id.into());
+            self.base_iter.add_to_visit(ret_gate_id.into());
         }
-        // TODO what to do when empty?
-        let base_layer = self.base_iter.next().unwrap_or_default();
+        let base_layer = self.base_iter.process_to_visit().unwrap_or_default();
+        // We swap after processing to visit
+        self.base_iter.swap_next_layer();
         let sc = self.sub_circuit.lock();
-        for gate_id in base_layer.iter_ids() {
+        for (idx, gate_id) in base_layer.iter_ids().enumerate() {
             // TODO, what to do about outgoing gates that return to the calling circuit?
             for &(call_id, out_gate) in sc.call_map.outgoing_gates(gate_id) {
                 let sc_iter = self.sub_circ_iters.entry(call_id).or_insert_with(|| {
@@ -120,7 +142,6 @@ impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
                     let called_base_circ = &self.circ.base_circuits[called_circ_id.0 as usize];
                     let mut base_iter = base_circuit::BaseLayerIter::new_uninit(called_base_circ);
                     let (tx, rx) = mpsc::channel();
-                    println!("Inserting sub circ iter for {:?}", called_circ_id);
                     ChildOrParent::Child(SubCircIter {
                         circ: self.circ,
                         base_iter,
@@ -131,18 +152,14 @@ impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
                         parent_returned_gates_tx: Some(self.own_returned_gates_tx.clone()),
                     })
                 });
-                // TODO either add to next or current layer depending on from gate
-                //  is_non_interactive(from_gate) -> current_layer
-                //  is_interactive(from_gate) -> next_layer
-                //  does this make sense?
-                sc_iter.add_to_next_layer(out_gate, self.parent_returned_gates_tx.as_ref());
+                if base_layer.get_gate(idx).is_interactive() {
+                    sc_iter.add_to_next_layer(out_gate, self.parent_returned_gates_tx.as_ref());
+                } else {
+                    sc_iter.add_to_current_layer(out_gate, self.parent_returned_gates_tx.as_ref())
+                }
             }
         }
         drop(sc);
-        // drive own base iter to get gates for this base circuit
-        // check own gates in self.sub_circ call_map to see if they are outgoing
-        // if yes, add new SubCircIter to self.sub_circ_iters or update iter state
-        // returns None when?? If own base_iter and all sub_circ_iters are exhausted?
         Some(SubCircLayer {
             call_id: CallId::Call(0),
             base_layer,
@@ -171,14 +188,16 @@ where
     type Item = SubCircLayer<'a, 'base, G, Idx>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((call_id, sub_iter)) = self.iter.next() {
-            let sub_iter = match sub_iter {
+        while let Some((call_id, wrapped_sub_iter)) = self.iter.next() {
+            let sub_iter = match wrapped_sub_iter {
                 ChildOrParent::Child(child) => child,
                 // skip connections to parents
-                ChildOrParent::IsParent => continue,
+                ChildOrParent::IsParent  => continue,
             };
             let mut sub_circ_layer = match sub_iter.next() {
-                None => continue,
+                None => {
+                    continue;
+                }
                 Some(layer) => layer,
             };
             sub_circ_layer.call_id = *call_id;
@@ -262,6 +281,7 @@ mod tests {
         let inp2_0 = main.add_gate(Base(Input(ScalarDim)));
         let and_0 = main.add_wired_gate(And, &[inp1_0, inp2_0]);
         let sub_in0 = main.add_gate(Base(SubCircuitInput(ScalarDim)));
+        let out_0 = main.add_wired_gate(Base(Output(ScalarDim)), &[sub_in0]);
 
         let mut bc1 = BaseCircuit::new();
         let scin1_1 = bc1.add_gate(Base(SubCircuitInput(ScalarDim)));
@@ -304,7 +324,7 @@ mod tests {
                 .call_map
                 .map
                 .insert(inp1_0, vec![(call_id, scin1_1)]);
-            main_sc.call_map.map.insert(and_0, vec![(call_id, and_0)]);
+            main_sc.call_map.map.insert(and_0, vec![(call_id, scin2_1)]);
         }
         {
             let mut sc1 = sc1.lock();
@@ -323,7 +343,8 @@ mod tests {
             base_circuits: vec![main, bc1, bc2],
             main: main_sc,
         };
-        let main_base_iter = circ.base_circuits[0].layer_iter();
+        let mut main_base_iter = circ.base_circuits[0].layer_iter();
+        main_base_iter.swap_next_layer();
         let (tx, rx) = mpsc::channel();
         let mut sc_iter = SubCircIter {
             circ: &circ,
@@ -335,8 +356,6 @@ mod tests {
             parent_returned_gates_tx: None,
         };
 
-        dbg!(sc_iter.next());
-        let layer = sc_iter.next().unwrap();
         fn handle_layer<'sc_iter, 'base, G: Gate, Idx: GateIdx>(
             mut layer: SubCircLayer<'sc_iter, 'base, G, Idx>,
         ) {
@@ -345,7 +364,11 @@ mod tests {
                 handle_layer(sub_layer)
             }
         };
-        handle_layer(layer);
+        while let Some(layer) = sc_iter.next() {
+            println!("======= Handling next top-level layer ==========");
+            handle_layer(layer);
+        }
+
         todo!()
     }
 }
