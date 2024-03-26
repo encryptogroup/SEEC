@@ -1,4 +1,3 @@
-use crate::circuit::circuit_connections::CrossCircuitConnections;
 use crate::circuit::{base_circuit, BaseCircuit, GateIdx};
 use crate::protocols::Gate;
 use crate::GateId;
@@ -6,7 +5,6 @@ use ahash::HashMap;
 use parking_lot::{Mutex, MutexGuard};
 use std::collections::hash_map;
 use std::fmt::{Debug, Formatter};
-use std::slice;
 use std::sync::{mpsc, Arc};
 
 #[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
@@ -29,8 +27,6 @@ pub struct SubCircuit<Idx>(Arc<Mutex<SubCircuitInner<Idx>>>);
 #[derive(Debug)]
 struct SubCircuitInner<Idx> {
     base_circ_id: CircId, // this corresponds to the position in Circuits.base_circuits Vec
-    // TODO how to handle parent sub-circuit? If this is stored in sub-circuits, this likely
-    //  leads to a cycle... Do we even need a ref to the parent?
     sub_circuits: Vec<SubCircuit<Idx>>, // position in this Vec is CallId::Call(id)
     call_map: CallMap<Idx>,
 }
@@ -112,6 +108,7 @@ struct SubCircLayer<'sc_iter, 'base, G, Idx: GateIdx> {
     call_id: CallId,
     base_layer: base_circuit::CircuitLayer<G, Idx>,
     sub_circ_iter: &'sc_iter mut SubCircIter<'base, G, Idx>,
+    dealloc: Vec<CallId>,
 }
 
 impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
@@ -130,9 +127,10 @@ impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
         self.base_iter.swap_next_layer();
         let sc = self.sub_circuit.lock();
         for (idx, gate_id) in base_layer.iter_ids().enumerate() {
-            // TODO, what to do about outgoing gates that return to the calling circuit?
             for &(call_id, out_gate) in sc.call_map.outgoing_gates(gate_id) {
                 let sc_iter = self.sub_circ_iters.entry(call_id).or_insert_with(|| {
+                    // Return calls don't have a sub-circ iterator. Instead we use the stored
+                    // queues to notify the parent iterator of the
                     let call_id = match call_id {
                         CallId::Ret => return ChildOrParent::IsParent,
                         CallId::Call(id) => id,
@@ -164,6 +162,7 @@ impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
             call_id: CallId::Call(0),
             base_layer,
             sub_circ_iter: self,
+            dealloc: vec![],
         })
     }
 }
@@ -171,12 +170,20 @@ impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
 impl<'sc_iter, 'base, G, Idx: GateIdx> SubCircLayer<'sc_iter, 'base, G, Idx> {
     fn sub_layer_iter(&mut self) -> SubLayerIter<'_, 'base, G, Idx> {
         SubLayerIter {
+            to_dealloc: &mut self.dealloc,
             iter: self.sub_circ_iter.sub_circ_iters.iter_mut(),
+        }
+    }
+
+    fn dealloc_exhausted_iters(&mut self) {
+        for call_id in self.dealloc.drain(..) {
+            self.sub_circ_iter.sub_circ_iters.remove(&call_id);
         }
     }
 }
 
 struct SubLayerIter<'a, 'base, G, Idx: GateIdx> {
+    to_dealloc: &'a mut Vec<CallId>,
     iter: hash_map::IterMut<'a, CallId, ChildOrParent<SubCircIter<'base, G, Idx>>>,
 }
 
@@ -192,10 +199,11 @@ where
             let sub_iter = match wrapped_sub_iter {
                 ChildOrParent::Child(child) => child,
                 // skip connections to parents
-                ChildOrParent::IsParent  => continue,
+                ChildOrParent::IsParent => continue,
             };
             let mut sub_circ_layer = match sub_iter.next() {
                 None => {
+                    self.to_dealloc.push(*call_id);
                     continue;
                 }
                 Some(layer) => layer,
@@ -247,28 +255,17 @@ impl<'sc_iter, 'base, G: Debug, Idx: GateIdx> Debug for SubCircLayer<'sc_iter, '
 //          handle_layer(layer)
 //
 
-mod exp {
-    struct ScCallGraph {
-        g: petgraph::Graph<SubCircuit, ()>,
-    }
-
-    struct SubCircuit {
-        call_map: CallMap,
-    }
-
-    struct CallMap;
-}
 
 #[cfg(test)]
 mod tests {
     use crate::circuit::sub_circuit::{
         CallId, CallMap, CircId, SubCircIter, SubCircLayer, SubCircuit, SubCircuitInner,
     };
-    use crate::circuit::{GateIdx, LayerIterable};
+    use crate::circuit::{base_circuit, GateIdx, LayerIterable};
     use crate::protocols::{Gate, ScalarDim};
     use crate::BaseGate::*;
-    use crate::BooleanGate;
     use crate::BooleanGate::*;
+    use crate::{BooleanGate, GateId};
     use parking_lot::Mutex;
     use std::sync::{mpsc, Arc};
 
@@ -363,12 +360,21 @@ mod tests {
             for sub_layer in layer.sub_layer_iter() {
                 handle_layer(sub_layer)
             }
+            layer.dealloc_exhausted_iters()
         };
+        let mut last_layer = None;
         while let Some(layer) = sc_iter.next() {
             println!("======= Handling next top-level layer ==========");
+            last_layer = Some(layer.base_layer.clone());
             handle_layer(layer);
         }
-
-        todo!()
+        let exp = base_circuit::CircuitLayer {
+            non_interactive_gates: vec![Base(SubCircuitInput(ScalarDim)), Base(Output(ScalarDim))],
+            non_interactive_ids: vec![GateId(3), GateId(4)],
+            interactive_gates: vec![],
+            interactive_ids: vec![],
+            freeable_gates: vec![],
+        };
+        assert_eq!(exp, last_layer.expect("no layers"));
     }
 }
