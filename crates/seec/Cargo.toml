@@ -21,6 +21,7 @@ silent-ot = ["zappot/silent-ot-libote-codes"]
 [[example]]
 name = "bristol"
 required-features = ["bench-api"]
+doc-scrape-examples = true
 
 [[example]]
 name = "aes_cbc"

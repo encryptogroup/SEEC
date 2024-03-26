@@ -63,8 +63,8 @@ cc = "1.0.90"
 [[bench]]
 name = "bench_main"
 harness = false
-required-features = ["silent-ot", "silent-ot-quasi-cyclic-code"]
+required-features = ["silent-ot-libote-codes", "silent-ot-quasi-cyclic-code"]
 
 [[example]]
 name = "silent_ot"
-required-features = ["silent-ot", "silent-ot-quasi-cyclic-code"]
+required-features = ["silent-ot-libote-codes", "silent-ot-quasi-cyclic-code"]
