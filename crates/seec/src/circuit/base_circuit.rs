@@ -1,3 +1,4 @@
+//! Base-Circuits are a graph representation of a circuit.
 #![allow(clippy::extra_unused_type_parameters)] // false positive in current nightly
 
 use ahash::HashMap;
@@ -190,7 +191,7 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
 }
 
 impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
-    #[tracing::instrument(level="trace", skip(self), fields(%from, %to))]
+    #[tracing::instrument(level = "trace", skip(self), fields(% from, % to))]
     pub fn add_wire(&mut self, from: GateId<Idx>, to: GateId<Idx>) {
         self.graph.add_edge(from.into(), to.into(), ());
         trace!("Added wire");
@@ -512,6 +513,7 @@ pub struct BaseLayerIter<'a, G, Idx: GateIdx, W> {
     visited: <CircuitGraph<G, Idx, W> as Visitable>::Map,
     added_to_next: <CircuitGraph<G, Idx, W> as Visitable>::Map,
     // only used for SIMD circuits
+    // TODO remove entries from hashmap when count recheas 0
     inputs_left_to_provide: HashMap<NodeIndex<Idx>, u32>,
     // (non_interactive, interactive)
     last_layer_size: (usize, usize),

@@ -8,12 +8,12 @@ use crate::util::tokio_rayon::AsyncThreadPool;
 
 use crate::util::Block;
 use crate::{base_ot, BASE_OT_COUNT};
-use aligned_vec::typenum::U16;
-use aligned_vec::AlignedVec;
-
-use bitvec::order::Lsb0;
-use bitvec::slice::BitSlice;
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
+use aligned_vec::{typenum::U16, AlignedVec};
 use bitvec::vec::BitVec;
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
+use bitvec::{order::Lsb0, slice::BitSlice};
+#[cfg(feature = "silent-ot-quasi-cyclic-code")]
 use bytemuck::cast_slice;
 use ndarray::Array2;
 use num_integer::Integer;
@@ -90,10 +90,10 @@ pub enum Encoder {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 ///
-/// - QuasiCyclic (https://eprint.iacr.org/2019/1159.pdf)
-/// - Silver (INSECURE! https://eprint.iacr.org/2021/1150, see https://eprint.iacr.org/2023/882 for attack)
-/// - ExpandAccumulate (https://eprint.iacr.org/2022/1014)
-/// - ExpandConvolute (https://eprint.iacr.org/2023/882)
+/// - QuasiCyclic (<https://eprint.iacr.org/2019/1159.pdf>)
+/// - Silver (INSECURE! <https://eprint.iacr.org/2021/1150>, see <https://eprint.iacr.org/2023/882> for attack)
+/// - ExpandAccumulate (<https://eprint.iacr.org/2022/1014>)
+/// - ExpandConvolute (<https://eprint.iacr.org/2023/882>)
 pub enum MultType {
     #[cfg(feature = "silent-ot-quasi-cyclic-code")]
     QuasiCyclic { scaler: usize },
@@ -638,6 +638,7 @@ impl Encoder {
         S: &[usize],
         choice_bit_packing: ChoiceBitPacking,
     ) -> (Vec<Block>, Option<Vec<u8>>) {
+        #[cfg(feature = "silent-ot-quasi-cyclic-code")]
         fn calc_sb_blocks<'a>(
             sb: &'a mut AlignedVec<u8, U16>,
             N2: usize,

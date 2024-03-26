@@ -1,3 +1,4 @@
+//! Parses for different circuit formats (Bristol/FUSE).
 use nom::character::complete::{digit1, multispace0};
 use nom::combinator::map_res;
 use nom::error::{ErrorKind, FromExternalError, ParseError};

@@ -1,3 +1,4 @@
+//! Compressed storage of cross-circuit connections.
 use crate::circuit::{CircuitId, GateIdx};
 use crate::utils::RangeInclusiveStartWrapper;
 use crate::{GateId, SubCircuitGate};

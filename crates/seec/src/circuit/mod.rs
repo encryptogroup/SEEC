@@ -1,3 +1,4 @@
+//! Circuit builder and executable circuit types.
 use crate::SubCircuitGate;
 pub use builder::SubCircCache;
 use bytemuck::Pod;

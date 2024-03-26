@@ -1,3 +1,4 @@
+//! Multiplication triple storage of pre-computed MTs.
 use crate::mul_triple::MTProvider;
 use crate::protocols::SetupStorage;
 use async_trait::async_trait;

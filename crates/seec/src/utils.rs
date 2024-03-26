@@ -1,3 +1,5 @@
+//! Some utilities used in SEEC.
+
 use crate::common::BitVec;
 use bitvec::prelude::BitStore;
 use num_integer::div_ceil;
@@ -25,10 +27,6 @@ impl<'a, T: ?Sized> PartialEq for ByAddress<'a, T> {
 }
 
 impl<'a, T: ?Sized> Eq for ByAddress<'a, T> {}
-
-//
-// RangeInclusive start wrapper
-//
 
 #[derive(Eq, Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RangeInclusiveStartWrapper<T> {
@@ -96,6 +94,7 @@ where
     bv
 }
 
+/// Provides methods for fast bitwise AND and XOR on BitVecs.
 pub(crate) trait BitVecExt: Sized {
     fn fast_bit_xor_mut(&mut self, other: &Self) -> &mut Self;
     fn fast_bit_and_mut(&mut self, other: &Self) -> &mut Self;
