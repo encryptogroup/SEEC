@@ -1,3 +1,4 @@
+pub use circuit::base_circuit::BaseGate;
 pub use circuit::builder::{
     CircuitBuilder, SharedCircuit, SubCircuitGate, SubCircuitInput, SubCircuitOutput,
 };
