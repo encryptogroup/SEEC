@@ -24,4 +24,5 @@ pub mod parse;
 pub mod private_test_utils;
 pub mod protocols;
 pub mod secret;
+pub mod sub_circ_executor;
 pub(crate) mod utils;

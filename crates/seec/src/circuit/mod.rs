@@ -15,7 +15,7 @@ pub mod builder;
 pub(crate) mod circuit_connections;
 pub mod dyn_layers;
 pub mod static_layers;
-mod sub_circuit;
+pub(crate) mod sub_circuit;
 
 pub use crate::protocols::boolean_gmw::BooleanGate;
 use crate::protocols::Gate;

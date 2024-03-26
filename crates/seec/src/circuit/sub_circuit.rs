@@ -1,4 +1,4 @@
-use crate::circuit::{base_circuit, BaseCircuit, GateIdx};
+use crate::circuit::{base_circuit, BaseCircuit, GateIdx, LayerIterable};
 use crate::protocols::Gate;
 use crate::GateId;
 use ahash::HashMap;
@@ -52,7 +52,7 @@ impl<Idx: GateIdx> CallMap<Idx> {
 }
 
 #[derive(Debug)]
-struct SubCircIter<'base, G, Idx: GateIdx> {
+pub(crate) struct SubCircIter<'base, G, Idx: GateIdx> {
     circ: &'base Circuit<G, Idx>,
     base_iter: base_circuit::BaseLayerIter<'base, G, Idx, ()>,
     sub_circ_iters: HashMap<CallId, ChildOrParent<Self>>,
@@ -103,16 +103,38 @@ impl<'base, G: Gate, Idx: GateIdx> ChildOrParent<SubCircIter<'base, G, Idx>> {
     }
 }
 
-struct SubCircLayer<'sc_iter, 'base, G, Idx: GateIdx> {
+pub(crate) struct SubCircLayer<'sc_iter, 'base, G, Idx: GateIdx> {
     /// CallId for the sub-circuit of this layer from the callers perspective
-    call_id: CallId,
-    base_layer: base_circuit::CircuitLayer<G, Idx>,
+    pub(crate) call_id: CallId,
+    pub(crate) base_layer: base_circuit::CircuitLayer<G, Idx>,
     sub_circ_iter: &'sc_iter mut SubCircIter<'base, G, Idx>,
     dealloc: Vec<CallId>,
 }
 
 impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
-    fn next(&mut self) -> Option<SubCircLayer<'_, 'base, G, Idx>> {
+    pub fn new_main(circ: &'base Circuit<G, Idx>) -> Self {
+        let mut main_base_iter = circ
+            .base_circuits
+            .get(0)
+            .expect("circ has no main circuit")
+            .layer_iter();
+        // because in our next implementation we have reversed the order of processing
+        // to_visit and swap, we call swap at the beginning so that the initial gates are
+        // present in to_visit
+        main_base_iter.swap_next_layer();
+        let (tx, rx) = mpsc::channel();
+        SubCircIter {
+            circ: &circ,
+            base_iter: main_base_iter,
+            sub_circ_iters: Default::default(),
+            sub_circuit: circ.main.clone(),
+            own_returned_gates_tx: tx,
+            own_returned_gates_rx: rx,
+            parent_returned_gates_tx: None,
+        }
+    }
+
+    pub(crate) fn next(&mut self) -> Option<SubCircLayer<'_, 'base, G, Idx>> {
         // If self.base_iter is exhausted all sub circ iterators must have finished as their
         // outputs feed back into this sub circuit
         if self.base_iter.is_exhausted() {
@@ -168,21 +190,21 @@ impl<'base, G: Gate, Idx: GateIdx> SubCircIter<'base, G, Idx> {
 }
 
 impl<'sc_iter, 'base, G, Idx: GateIdx> SubCircLayer<'sc_iter, 'base, G, Idx> {
-    fn sub_layer_iter(&mut self) -> SubLayerIter<'_, 'base, G, Idx> {
+    pub(crate) fn sub_layer_iter(&mut self) -> SubLayerIter<'_, 'base, G, Idx> {
         SubLayerIter {
             to_dealloc: &mut self.dealloc,
             iter: self.sub_circ_iter.sub_circ_iters.iter_mut(),
         }
     }
 
-    fn dealloc_exhausted_iters(&mut self) {
+    pub(crate) fn dealloc_exhausted_iters(&mut self) {
         for call_id in self.dealloc.drain(..) {
             self.sub_circ_iter.sub_circ_iters.remove(&call_id);
         }
     }
 }
 
-struct SubLayerIter<'a, 'base, G, Idx: GateIdx> {
+pub(crate) struct SubLayerIter<'a, 'base, G, Idx: GateIdx> {
     to_dealloc: &'a mut Vec<CallId>,
     iter: hash_map::IterMut<'a, CallId, ChildOrParent<SubCircIter<'base, G, Idx>>>,
 }
@@ -254,7 +276,6 @@ impl<'sc_iter, 'base, G: Debug, Idx: GateIdx> Debug for SubCircLayer<'sc_iter, '
 //      for sub_layer in layer:
 //          handle_layer(layer)
 //
-
 
 #[cfg(test)]
 mod tests {
@@ -340,18 +361,7 @@ mod tests {
             base_circuits: vec![main, bc1, bc2],
             main: main_sc,
         };
-        let mut main_base_iter = circ.base_circuits[0].layer_iter();
-        main_base_iter.swap_next_layer();
-        let (tx, rx) = mpsc::channel();
-        let mut sc_iter = SubCircIter {
-            circ: &circ,
-            base_iter: main_base_iter,
-            sub_circ_iters: Default::default(),
-            sub_circuit: circ.main.clone(),
-            own_returned_gates_tx: tx,
-            own_returned_gates_rx: rx,
-            parent_returned_gates_tx: None,
-        };
+        let mut sc_iter = SubCircIter::new_main(&circ);
 
         fn handle_layer<'sc_iter, 'base, G: Gate, Idx: GateIdx>(
             mut layer: SubCircLayer<'sc_iter, 'base, G, Idx>,
