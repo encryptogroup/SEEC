@@ -4,10 +4,10 @@ use ahash::HashMap;
 use parking_lot::lock_api::Mutex;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
-use std::fs;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::path::Path;
+use std::{fs, mem};
 
 use bytemuck::{Pod, Zeroable};
 use petgraph::dot::{Config, Dot};
@@ -762,9 +762,7 @@ impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
             .into_iter()
             .zip(self.non_interactive_ids.clone())
     }
-}
 
-impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
     pub(crate) fn into_iter(self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone {
         let ni = self
             .non_interactive_gates
@@ -780,6 +778,11 @@ impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
     ) -> impl Iterator<Item = (G, SubCircuitGate<Idx>)> + Clone {
         self.into_iter()
             .map(move |(g, gate_id)| (g, SubCircuitGate::new(sc_id, gate_id)))
+    }
+
+    pub(crate) fn drop_non_interactive(&mut self) {
+        mem::take(&mut self.non_interactive_ids);
+        mem::take(&mut self.non_interactive_gates);
     }
 }
 

@@ -33,6 +33,9 @@ impl<P: Protocol, Idx: GateIdx> LayerExecutor<P, Idx> {
                 sub_executors,
             } => {
                 // handle the non-interactive part of base_layer
+                Self::handle_non_interactive_base_layer(base_layer, storage);
+                base_layer.drop_non_interactive();
+
                 // drop non-interactive part
                 let setup_data = setup.request_setup_output(42).await.unwrap();
                 // handle interactive part, write msg to msg_buf -> record msg offset
@@ -51,10 +54,16 @@ impl<P: Protocol, Idx: GateIdx> LayerExecutor<P, Idx> {
                 }
             }
             LayerExecutor::ProcessMsg { .. } => {
-                unreachable!()
+                panic!("Call construct_msg before process_msg")
             }
         }
+        todo!()
+    }
 
+    fn handle_non_interactive_base_layer(
+        base_layer: &base_circuit::CircuitLayer<P::Gate, Idx>,
+        storage: &mut Storage<P::ShareStorage>,
+    ) {
         todo!()
     }
 
