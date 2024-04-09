@@ -194,26 +194,6 @@ where
     }
 }
 
-impl Share for u8 {
-    type SimdShare = Vec<u8>;
-}
-
-impl Share for u16 {
-    type SimdShare = Vec<u16>;
-}
-
-impl Share for u32 {
-    type SimdShare = Vec<u32>;
-}
-
-impl Share for u64 {
-    type SimdShare = Vec<u64>;
-}
-
-impl Share for u128 {
-    type SimdShare = Vec<u128>;
-}
-
 #[cfg(test)]
 mod tests {
     use crate::circuit::base_circuit::BaseGate;

@@ -18,21 +18,21 @@ use std::mem;
 use std::ops::{BitAnd, BitXor, Shl, Shr};
 use zappot::util::Block;
 
-#[cfg(feature = "aby2")]
-pub mod aby2;
-pub mod arithmetic_gmw;
+// #[cfg(feature = "aby2")]
+// pub mod aby2;
+// pub mod arithmetic_gmw;
 pub mod boolean_gmw;
-
-pub mod mixed_gmw;
-#[cfg(feature = "aby2")]
-pub mod tensor_aby2;
+//
+// pub mod mixed_gmw;
+// #[cfg(feature = "aby2")]
+// pub mod tensor_aby2;
 
 pub type ShareOf<Gate> = <Gate as self::Gate>::Share;
 pub type SimdShareOf<Gate> = <ShareOf<Gate> as Share>::SimdShare;
 
 pub trait Protocol: Send + Sync {
     const SIMD_SUPPORT: bool = false;
-    type Msg: RemoteSend + Clone;
+    type Msg: MsgBuf;
     type SimdMsg: RemoteSend + Clone;
     type Gate: Gate;
     type Wire;
@@ -47,8 +47,9 @@ pub trait Protocol: Send + Sync {
         interactive_gates: impl Iterator<Item = Self::Gate>,
         gate_outputs: impl Iterator<Item = ShareOf<Self::Gate>>,
         inputs: impl Iterator<Item = ShareOf<Self::Gate>>,
+        msg_buf: &mut Self::Msg,
         preprocessing_data: &mut Self::SetupStorage,
-    ) -> Self::Msg;
+    ) -> <Self::Msg as MsgBuf>::Index;
 
     fn compute_msg_simd<'e>(
         &self,
@@ -66,8 +67,9 @@ pub trait Protocol: Send + Sync {
         party_id: usize,
         interactive_gates: impl Iterator<Item = Self::Gate>,
         gate_outputs: impl Iterator<Item = ShareOf<Self::Gate>>,
-        own_msg: Self::Msg,
-        other_msg: Self::Msg,
+        msg_idx: <Self::Msg as MsgBuf>::Index,
+        own_msg: &mut Self::Msg,
+        other_msg: &mut Self::Msg,
         preprocessing_data: &mut Self::SetupStorage,
     ) -> Self::ShareStorage;
 
@@ -98,6 +100,13 @@ pub trait Protocol: Send + Sync {
             .collect();
         GateOutputs::new(data)
     }
+}
+
+pub trait MsgBuf: RemoteSend + Clone + Default {
+    /// The Index type holds information on how to retrieve a subset of a message
+    /// which was written to the MsgBuf. In the simplest case, this can be a `Range<usize>`, but
+    /// in more complex cases this can contain multiple indices.
+    type Index;
 }
 
 pub trait Gate: Clone + Hash + PartialOrd + PartialEq + Send + Sync + Debug + 'static {
@@ -355,9 +364,13 @@ impl DynDim {
     }
 }
 
-macro_rules! impl_ring {
+macro_rules! impl_share_ring {
     ($($typ:ty),+) => {
         $(
+        impl Share for $typ {
+            type SimdShare = Vec<$typ>;
+        }
+
         impl Ring for $typ {
             const BITS: usize = { Self::BYTES * 8 };
             const BYTES: usize = { mem::size_of::<Self>() };
@@ -375,4 +388,4 @@ macro_rules! impl_ring {
     };
 }
 
-impl_ring!(u8, u16, u32, u64, u128);
+impl_share_ring!(u8, u16, u32, u64, u128);

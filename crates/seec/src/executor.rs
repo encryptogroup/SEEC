@@ -316,7 +316,8 @@ where
             let scalar_gate_iter = scalar.interactive_gates().flatten().cloned();
             // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
             // over .await
-            let scalar_msg = {
+            let mut scalar_msg = P::Msg::default();
+            let scalar_idx = {
                 let scalar_output_iter = scalar.interactive_indices().flat_map(|(sc, gate_ids)| {
                     let this = &*self;
                     gate_ids.iter().map(move |gate_id| {
@@ -332,6 +333,7 @@ where
                     scalar_gate_iter.clone(),
                     scalar_output_iter,
                     input_iter,
+                    &mut scalar_msg,
                     &mut setup_storage,
                 )
             };
@@ -377,7 +379,7 @@ where
             }
             debug!("Sending interactive gates layer");
             let ExecutorMsg {
-                scalar: resp_scalar,
+                scalar: mut resp_scalar,
                 simd: resp_simd,
             } = receiver.recv().await.ok().unwrap().unwrap();
 
@@ -403,8 +405,9 @@ where
                 self.party_id,
                 scalar_gate_iter,
                 scalar_output_iter,
-                scalar_msg,
-                resp_scalar,
+                scalar_idx,
+                &mut scalar_msg,
+                &mut resp_scalar,
                 &mut setup_storage,
             );
             let simd_interactive_outputs = match (simd_msg, resp_simd) {

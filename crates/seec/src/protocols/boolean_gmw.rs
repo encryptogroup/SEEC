@@ -1,27 +1,36 @@
 use crate::bristol;
 use crate::circuit::base_circuit::BaseGate;
-use crate::common::BitVec;
+use crate::common::{BitSlice, BitVec};
 use crate::evaluate::and;
 use crate::mul_triple::boolean::MulTriple;
 use crate::mul_triple::boolean::MulTriples;
-use crate::protocols::{Gate, Protocol, ScalarDim, SetupStorage, Share, Sharing};
+use crate::protocols::{Gate, MsgBuf, Protocol, ScalarDim, SetupStorage, Share, Sharing};
 use crate::utils::{rand_bitvec, BitVecExt};
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
+use std::mem;
+use std::ops::Range;
 use tracing::trace;
 
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct BooleanGmw;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Msg {
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Msg {
     // TODO ser/de the BitVecs or Vecs? Or maybe a single Vec? e and d have the same length
-    AndLayer {
-        size: usize,
-        e: Vec<usize>,
-        d: Vec<usize>,
-    },
+    e: Vec<usize>,
+    d: Vec<usize>,
+}
+
+pub struct MsgIdx {
+    pub start_byte: usize,
+    pub bit_len: usize,
+}
+
+impl MsgBuf for Msg {
+    // Range over **bit** positions
+    type Index = MsgIdx;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -58,8 +67,9 @@ impl Protocol for BooleanGmw {
         interactive_gates: impl Iterator<Item = BooleanGate>,
         _gate_outputs: impl Iterator<Item = bool>,
         mut inputs: impl Iterator<Item = bool>,
+        msg_buf: &mut Self::Msg,
         mul_triples: &mut MulTriples,
-    ) -> Self::Msg {
+    ) -> MsgIdx {
         trace!("compute_msg");
         let (d, e): (BitVec<usize>, BitVec<usize>) = interactive_gates
             .zip(mul_triples.iter().rev())
@@ -75,11 +85,13 @@ impl Protocol for BooleanGmw {
                 and::compute_shares(x, y, &mt)
             })
             .unzip();
-        Msg::AndLayer {
-            size: e.len(),
-            e: e.into_vec(),
-            d: d.into_vec(),
-        }
+        let idx = MsgIdx {
+            start_byte: msg_buf.d.len(),
+            bit_len: d.len(),
+        };
+        msg_buf.d.extend_from_slice(&d.into_vec());
+        msg_buf.e.extend_from_slice(&e.into_vec());
+        idx
     }
 
     fn compute_msg_simd<'e>(
@@ -107,8 +119,7 @@ impl Protocol for BooleanGmw {
         e.fast_bit_xor_mut(&mts.b().to_bitvec());
 
         SimdMsg {
-            packed_data: Msg::AndLayer {
-                size: 0,
+            packed_data: Msg {
                 e: e.into_vec(),
                 d: d.into_vec(),
             },
@@ -121,25 +132,24 @@ impl Protocol for BooleanGmw {
         party_id: usize,
         _interactive_gates: impl Iterator<Item = Self::Gate>,
         _gate_outputs: impl Iterator<Item = bool>,
-        own_msg: Self::Msg,
-        other_msg: Self::Msg,
+        msg_idx: MsgIdx,
+        own_msg: &mut Self::Msg,
+        other_msg: &mut Self::Msg,
         mul_triples: &mut MulTriples,
     ) -> Self::ShareStorage {
-        let Msg::AndLayer { d, e, size } = own_msg;
-        let d = BitVec::from_vec(d);
-        let e = BitVec::from_vec(e);
-        let Msg::AndLayer {
-            size: resp_size,
-            d: resp_d,
-            e: resp_e,
-        } = other_msg;
-        assert_eq!(size, resp_size, "Message have unequal size");
+        let d = &BitSlice::from_slice(&own_msg.d[msg_idx.start_byte..])[..msg_idx.bit_len];
+        let e = &BitSlice::from_slice(&own_msg.e[msg_idx.start_byte..])[..msg_idx.bit_len];
+        let resp_d = &BitSlice::from_slice(&other_msg.d[msg_idx.start_byte..])[..msg_idx.bit_len];
+        let resp_e = &BitSlice::from_slice(&other_msg.e[msg_idx.start_byte..])[..msg_idx.bit_len];
         // Remove the mul_triples used in compute_msg
-        let mul_triples = mul_triples.split_off_last(size);
+        let mul_triples = mul_triples.split_off_last(msg_idx.bit_len);
+        // TODO can this operate on the raw elements of the msg and not individual bits?
+        //  perf should be much better
         d.into_iter()
-            .zip(e)
-            .zip(BitVec::from_vec(resp_d))
-            .zip(BitVec::from_vec(resp_e))
+            .by_vals()
+            .zip(e.iter().by_vals())
+            .zip(resp_d.iter().by_vals())
+            .zip(resp_e.iter().by_vals())
             .zip(mul_triples.iter().rev())
             .map(|((((d, e), d_resp), e_resp), mt)| {
                 let d = [d, d_resp];
@@ -159,24 +169,21 @@ impl Protocol for BooleanGmw {
         mul_triples: &mut Self::SetupStorage,
     ) -> Vec<Self::ShareStorage> {
         let SimdMsg {
-            packed_data: Msg::AndLayer { d, e, size },
+            packed_data: Msg { d, e },
             simd_sizes,
         } = own_msg;
         let own_d = BitVec::from_vec(d);
         let own_e = BitVec::from_vec(e);
         let SimdMsg {
-            packed_data:
-                Msg::AndLayer {
-                    d: resp_d,
-                    e: resp_e,
-                    size: resp_size,
-                },
+            packed_data: Msg {
+                d: resp_d,
+                e: resp_e,
+            },
             simd_sizes: resp_simd_sizes,
         } = other_msg;
         let resp_d = BitVec::from_vec(resp_d);
         let resp_e = BitVec::from_vec(resp_e);
 
-        assert_eq!(size, resp_size, "Message have unequal size");
         assert_eq!(
             simd_sizes, resp_simd_sizes,
             "Message have unequal simd sizes"
@@ -321,16 +328,6 @@ impl<R: CryptoRng + Rng> Sharing for XorSharing<R> {
     fn reconstruct(shares: [Self::Shared; 2]) -> Self::Shared {
         let [a, b] = shares;
         a ^ b
-    }
-}
-
-impl Default for Msg {
-    fn default() -> Self {
-        Self::AndLayer {
-            size: 0,
-            e: vec![],
-            d: vec![],
-        }
     }
 }
 

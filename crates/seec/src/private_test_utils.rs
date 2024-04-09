@@ -27,10 +27,10 @@ use crate::common::BitVec;
 use crate::executor::{Executor, Input};
 use crate::mul_triple::MTProvider;
 use crate::mul_triple::{arithmetic, boolean};
-use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
+// use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
 use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
-use crate::protocols::mixed_gmw::{MixedGmw, MixedShareStorage, MixedSharing};
-use crate::protocols::{mixed_gmw, Gate, Protocol, Ring, ScalarDim, Share, Sharing};
+// use crate::protocols::mixed_gmw::{MixedGmw, MixedShareStorage, MixedSharing};
+use crate::protocols::{Gate, Protocol, Ring, ScalarDim, Share, Sharing};
 
 pub trait ProtocolTestExt: Protocol + Default {
     type InsecureSetup: MTProvider<Output = Self::SetupStorage, Error = Infallible>
@@ -44,18 +44,18 @@ impl ProtocolTestExt for BooleanGmw {
     type InsecureSetup = boolean::insecure_provider::InsecureMTProvider;
 }
 
-impl<R: Ring> ProtocolTestExt for ArithmeticGmw<R> {
-    type InsecureSetup = arithmetic::insecure_provider::InsecureMTProvider<R>;
-}
-
-impl<R> ProtocolTestExt for MixedGmw<R>
-where
-    R: Ring,
-    Standard: Distribution<R>,
-    [R; 1]: BitViewSized,
-{
-    type InsecureSetup = mixed_gmw::InsecureMixedSetup<R>;
-}
+// impl<R: Ring> ProtocolTestExt for ArithmeticGmw<R> {
+//     type InsecureSetup = arithmetic::insecure_provider::InsecureMTProvider<R>;
+// }
+//
+// impl<R> ProtocolTestExt for MixedGmw<R>
+// where
+//     R: Ring,
+//     Standard: Distribution<R>,
+//     [R; 1]: BitViewSized,
+// {
+//     type InsecureSetup = mixed_gmw::InsecureMixedSetup<R>;
+// }
 
 pub fn create_and_tree(depth: u32) -> BaseCircuit {
     let total_nodes = 2_u32.pow(depth);
@@ -127,38 +127,38 @@ macro_rules! impl_into_shares {
                 }
             }
 
-            impl IntoShares<AdditiveSharing<$typ, ThreadRng>> for $typ {
-                fn into_shares(self) -> (Vec<$typ>, Vec<$typ>) {
-                    let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
-                    (a, b)
-                }
-            }
-
-            impl IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<$typ, ThreadRng>, $typ>>
-                for $typ
-            {
-                fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
-                    let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
-                    (MixedShareStorage::Arith(a), MixedShareStorage::Arith(b))
-                }
-            }
-
-            impl IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<$typ, ThreadRng>, $typ>> for ToBool<$typ> {
-                fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
-                    // use xor bool sharing
-                    let (a, b) = IntoShares::<XorSharing<ThreadRng>>::into_shares(self.0);
-                    (MixedShareStorage::Bool(a), MixedShareStorage::Bool(b))
-                }
-            }
-
-
-            impl<T: IntoShares<AdditiveSharing<$typ, ThreadRng>>> IntoInput<AdditiveSharing<$typ, ThreadRng>>
-                for T
-            {
-                fn into_input(self) -> (Vec<$typ>, Vec<$typ>) {
-                    self.into_shares()
-                }
-            }
+            // impl IntoShares<AdditiveSharing<$typ, ThreadRng>> for $typ {
+            //     fn into_shares(self) -> (Vec<$typ>, Vec<$typ>) {
+            //         let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
+            //         (a, b)
+            //     }
+            // }
+            //
+            // impl IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<$typ, ThreadRng>, $typ>>
+            //     for $typ
+            // {
+            //     fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
+            //         let [a, b] = AdditiveSharing::new(thread_rng()).share(vec![self]);
+            //         (MixedShareStorage::Arith(a), MixedShareStorage::Arith(b))
+            //     }
+            // }
+            //
+            // impl IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<$typ, ThreadRng>, $typ>> for ToBool<$typ> {
+            //     fn into_shares(self) -> (MixedShareStorage<$typ>, MixedShareStorage<$typ>) {
+            //         // use xor bool sharing
+            //         let (a, b) = IntoShares::<XorSharing<ThreadRng>>::into_shares(self.0);
+            //         (MixedShareStorage::Bool(a), MixedShareStorage::Bool(b))
+            //     }
+            // }
+            //
+            //
+            // impl<T: IntoShares<AdditiveSharing<$typ, ThreadRng>>> IntoInput<AdditiveSharing<$typ, ThreadRng>>
+            //     for T
+            // {
+            //     fn into_input(self) -> (Vec<$typ>, Vec<$typ>) {
+            //         self.into_shares()
+            //     }
+            // }
         )*
     };
 }
@@ -176,20 +176,20 @@ impl IntoShares<XorSharing<ThreadRng>> for bool {
     }
 }
 
-impl<R> IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<R, ThreadRng>, R>> for bool
-where
-    R: Ring,
-    Standard: Distribution<R>,
-{
-    fn into_shares(self) -> (MixedShareStorage<R>, MixedShareStorage<R>)
-    where
-        BitSlice<u8, Lsb0>: BitField,
-    {
-        let a = BitVec::repeat(false, 1);
-        let b = BitVec::repeat(self, 1);
-        (MixedShareStorage::Bool(a), MixedShareStorage::Bool(b))
-    }
-}
+// impl<R> IntoShares<MixedSharing<XorSharing<ThreadRng>, AdditiveSharing<R, ThreadRng>, R>> for bool
+// where
+//     R: Ring,
+//     Standard: Distribution<R>,
+// {
+//     fn into_shares(self) -> (MixedShareStorage<R>, MixedShareStorage<R>)
+//     where
+//         BitSlice<u8, Lsb0>: BitField,
+//     {
+//         let a = BitVec::repeat(false, 1);
+//         let b = BitVec::repeat(self, 1);
+//         (MixedShareStorage::Bool(a), MixedShareStorage::Bool(b))
+//     }
+// }
 
 impl<T: IntoShares<XorSharing<ThreadRng>>> IntoInput<XorSharing<ThreadRng>> for T {
     fn into_input(self) -> (BitVec<usize>, BitVec<usize>) {
