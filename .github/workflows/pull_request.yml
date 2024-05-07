@@ -31,7 +31,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: nightly-2024-03-19
+          toolchain: nightly-2024-05-03
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo --version
@@ -55,7 +55,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         id: toolchain
         with:
-          toolchain: nightly-2024-03-19
+          toolchain: nightly-2024-05-03
           components: "clippy, rustfmt"
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}

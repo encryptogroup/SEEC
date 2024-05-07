@@ -14,7 +14,12 @@ use blake2::{
 
 pub mod base_ot;
 pub mod ot_ext;
-#[cfg(feature = "silent-ot")]
+#[cfg(any(
+    feature = "silent-ot-quasi-cyclic-code",
+    feature = "silent-ot-silver-code",
+    feature = "silent-ot-ea-code",
+    feature = "silent-ot-ex-conv-code"
+))]
 pub mod silent_ot;
 pub mod traits;
 pub mod util;

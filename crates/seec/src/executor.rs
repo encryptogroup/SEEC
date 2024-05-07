@@ -1,3 +1,4 @@
+//! Executor for a generic protocol.
 use serde::{Deserialize, Serialize};
 #[cfg(debug_assertions)]
 use std::collections::HashSet;

@@ -2,7 +2,7 @@
 //! optionally generating the multiplication triples via a third trusted party
 //! (see the `trusted_party_mts.rs` example).
 //!
-//! It also demonstrates how to use the [`Statistics`] API to track the communication of
+//! It also demonstrates how to use the [`BenchParty`] API to track the communication of
 //! different phases and write it to a file.
 
 use anyhow::{Context, Result};

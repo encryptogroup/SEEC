@@ -1,4 +1,4 @@
-//! Multiplication triples.
+//! Multiplication triples and providers.
 
 use crate::circuit::ExecutableCircuit;
 use crate::executor::GateOutputs;

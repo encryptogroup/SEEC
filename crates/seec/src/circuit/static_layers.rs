@@ -1,3 +1,4 @@
+//! Static layer aggregate circuit.
 use crate::circuit::circuit_connections::CrossCircuitConnections;
 use crate::circuit::{base_circuit, dyn_layers::CircuitLayerIter, CircuitId, GateIdx};
 use crate::common::BitVec;

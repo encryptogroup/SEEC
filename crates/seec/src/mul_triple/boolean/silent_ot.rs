@@ -1,3 +1,4 @@
+//! Needs either "silent-ot" or "silent-ot-quasi-cyclic" feature.
 use crate::common::BitVec;
 use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
@@ -26,9 +27,9 @@ pub struct SilentMtProvider<Rng> {
 impl<Rng: RngCore + CryptoRng + Send> SilentMtProvider<Rng> {
     /// Executes base OTs for silent OT but not num_ots silentOT itself. `Rng` is used to seed
     /// ChaChaRng's.
-    /// When the `silent-ot` feature is enabled, the [`MultType::ExConv7x25`] code from libOTe is used by default.
+    /// When the `silent-ot` feature is enabled, the [`MultType::ExConv7x24`] code from libOTe is used by default.
     /// If only `silent-ot-quasi-cyclic` is enabled, ZappOT wil not depend on libOTe and the [`MultType::QuasiCyclic`]
-    /// code is used. Note that this code depends on AVX2 support, and therefore can't be use on ARM.
+    /// code is used. Note that this code depends on AVX2 support, and therefore can't be used on ARM.
     pub async fn new(
         num_ots: usize,
         rng: Rng,
