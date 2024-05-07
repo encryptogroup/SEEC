@@ -28,7 +28,8 @@ SEEC currently only implements semi-honestly secure protocols (GMW, ABY2.0).
 SEEC can be used as a library by adding it to the `Cargo.toml` file of an existing project.
 
 ```toml
-seec = { }
+[dependencies]
+seec = { git = "https://github.com/encryptogroup/SEEC.git", features = ["..."] }
 ```
 
 ## Documentation
