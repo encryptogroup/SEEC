@@ -1,7 +1,7 @@
 use crate::Storage;
 use std::mem;
 use std::simd::num::SimdUint;
-use std::simd::{i8x16, u16x8, u64x2, u8x16, Mask, Simd};
+use std::simd::{i8x16, u16x8, u64x2, u8x16, Mask, Simd, ToBytes};
 
 #[inline]
 #[allow(unused)]
@@ -100,10 +100,10 @@ pub(crate) fn transpose<T: Storage>(input: &[T], nrows: usize, ncols: usize) -> 
                     *(input.get_unchecked(inp(rr, cc)) as *const _ as *const u16),
                 ]);
                 for i in (0..8).rev() {
-                    h = _mm_movemask_epi8(mem::transmute(v)).to_le_bytes();
+                    h = _mm_movemask_epi8(v.to_le_bytes()).to_le_bytes();
                     *byte_output.get_unchecked_mut(out(rr, cc + i)) = h[0];
                     *byte_output.get_unchecked_mut(out(rr, cc + i + 8)) = h[1];
-                    v = mem::transmute(_mm_slli_epi64::<1>(mem::transmute(v)));
+                    v = Simd::from_ne_bytes(_mm_slli_epi64::<1>(v.to_le_bytes()));
                 }
                 cc += 16;
             }
@@ -131,9 +131,9 @@ fn _mm_movemask_epi8(a: Simd<u8, 16>) -> u16 {
 }
 
 fn _mm_slli_epi64<const IMM8: i32>(a: Simd<u8, 16>) -> Simd<u8, 16> {
-    let mut a: u64x2 = unsafe { mem::transmute(a) };
+    let mut a: u64x2 = Simd::from_le_bytes(a);
     a <<= u64x2::splat(IMM8 as u64);
-    unsafe { mem::transmute(a) }
+    a.to_le_bytes()
 }
 
 #[cfg(test)]

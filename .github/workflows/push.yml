@@ -18,6 +18,8 @@ jobs:
         id: toolchain
         with:
           toolchain: nightly-2024-05-03
+          # for some reason aws-lc-sys's build script needs rustfmt...
+          components: "rustfmt"
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo --version
