@@ -32,9 +32,13 @@ jobs:
         id: toolchain
         with:
           toolchain: nightly-2024-05-03
+          components: "rustfmt"
       - name: Override default toolchain
         run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo --version
+      - name: Install NASM
+        if: ${{ matrix.os == 'windows-latest' }}
+        uses: ilammy/setup-nasm@v1
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Run tests
@@ -42,7 +46,7 @@ jobs:
         run: cargo test --workspace --verbose --all-features --no-fail-fast
       - name: Run tests
         if: ${{ matrix.os != 'ubuntu-latest' }}
-        run: cargo test --workspace --verbose ${{ matrix.exclude }} --features ${{ matrix.features }}
+        run: cargo test --workspace --verbose ${{ matrix.exclude }} --no-default-features --features ${{ matrix.features }}
   lint:
     name: Lint
     runs-on: "ubuntu-latest"
