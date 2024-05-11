@@ -2045,6 +2045,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "typemap",
+ "typemap_rev",
  "zappot",
 ]
 
@@ -2527,6 +2528,12 @@ checksum = "653be63c80a3296da5551e1bfd2cca35227e13cdd08c6668903ae2f4f77aa1f6"
 dependencies = [
  "unsafe-any",
 ]
+
+[[package]]
+name = "typemap_rev"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74b08b0c1257381af16a5c3605254d529d3e7e109f3c62befc5d168968192998"
 
 [[package]]
 name = "typenum"

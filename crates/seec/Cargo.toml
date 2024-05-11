@@ -68,6 +68,7 @@ seec-channel = { path = "../seec-channel" }
 remoc = { workspace = true }
 zappot = { path = "../zappot" }
 typemap = "0.3.3"
+typemap_rev = "0.3.0"
 seec-bitmatrix = { path = "../seec-bitmatrix" }
 either = "1.10.0"
 flatbuffers = "23.5.26"

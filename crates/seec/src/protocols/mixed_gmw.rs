@@ -1,4 +1,4 @@
-use crate::circuit::base_circuit::BaseGate;
+use crate::circuit::base_circuit::{BaseGate, Load};
 use crate::circuit::{BaseCircuit, ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{GateOutputs, Input};
@@ -9,11 +9,13 @@ use crate::protocols::{
     arithmetic_gmw, boolean_gmw, Gate, Protocol, Ring, ScalarDim, SetupStorage, Share,
     ShareStorage, Sharing,
 };
-use crate::GateId;
+use crate::{bristol, circuit, GateId};
 use async_trait::async_trait;
 use bitvec::array::BitArray;
 use bitvec::order::Lsb0;
 use bitvec::view::BitViewSized;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::{random, Rng, SeedableRng};
@@ -22,7 +24,8 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::{iter, mem};
-use tracing::trace;
+use tracing::{instrument, trace};
+use typemap_rev::{TypeMap, TypeMapKey};
 
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct MixedGmw<R>(PhantomData<R>);
@@ -679,6 +682,22 @@ impl<R: Ring> Gate for MixedGate<R> {
     }
 }
 
+impl<R> From<&bristol::Gate> for MixedGate<R> {
+    fn from(gate: &bristol::Gate) -> Self {
+        match gate {
+            bristol::Gate::And(_) => MixedGate::Bool(boolean_gmw::BooleanGate::And),
+            bristol::Gate::Xor(_) => MixedGate::Bool(boolean_gmw::BooleanGate::Xor),
+            bristol::Gate::Inv(_) => MixedGate::Bool(boolean_gmw::BooleanGate::Inv),
+        }
+    }
+}
+
+impl<R> From<BaseGate<MixedShare<R>>> for MixedGate<R> {
+    fn from(value: BaseGate<MixedShare<R>>) -> Self {
+        Self::Base(value)
+    }
+}
+
 #[derive(Debug)]
 pub struct MixedSharing<B, A, R> {
     bool: B,
@@ -733,10 +752,40 @@ pub fn a2b<R: Ring>(bc: &mut BaseCircuit<MixedGate<R>>, a: GateId) -> Vec<GateId
     };
     let split_a2b0 = split(a2b0_sw);
     let split_a2b1 = split(a2b1_sw);
-    // TODO log depth addition circuit
-    basic_add(bc, &split_a2b0, &split_a2b1)
+    depth_optimized_add(bc, &split_a2b0, &split_a2b1)
 }
 
+fn depth_optimized_add<R: Ring>(
+    bc: &mut BaseCircuit<MixedGate<R>>,
+    a: &[GateId],
+    b: &[GateId],
+) -> Vec<GateId> {
+    // We can't have a generic static, so we resort to a lazy typemap to cache
+    // the addition circuits
+    static ADDERS: Lazy<Mutex<TypeMap>> = Lazy::new(Mutex::default);
+    struct Key<R>(PhantomData<R>);
+    impl<R: Ring> TypeMapKey for Key<R> {
+        type Value = BaseCircuit<MixedGate<R>>;
+    }
+    assert_eq!(R::BITS, a.len(), "Wrong number of inputs");
+    assert_eq!(R::BITS, b.len(), "Wrong number of inputs");
+    let mut guard = ADDERS.lock();
+    let adder = guard.entry::<Key<R>>().or_insert_with(|| {
+        let bristol = match R::BITS {
+            8 => circuit::BRISTOL_ADD_8,
+            16 => circuit::BRISTOL_ADD_16,
+            32 => circuit::BRISTOL_ADD_32,
+            64 => circuit::BRISTOL_ADD_64,
+            other => panic!("Unsupported bit size {other}"),
+        };
+        let bristol = bristol::circuit(bristol).expect("Unable to parse stored bristol circuit");
+        BaseCircuit::from_bristol(bristol, Load::SubCircuit)
+            .expect("Unable to convert to BaseCircuit")
+    });
+    bc.add_sub_circuit(adder, a.iter().chain(b).copied())
+}
+
+#[instrument(level = "debug", ret, skip_all)]
 fn basic_add<R: Ring>(
     bc: &mut BaseCircuit<MixedGate<R>>,
     a: &[GateId],
@@ -775,7 +824,7 @@ fn basic_add<R: Ring>(
 
 #[cfg(test)]
 mod tests {
-    use super::basic_add;
+    use super::depth_optimized_add;
     use crate::circuit::base_circuit::BaseGate;
     use crate::circuit::{BaseCircuit, DefaultIdx, ExecutableCircuit};
     use crate::private_test_utils::{execute_circuit, init_tracing, TestChannel, ToBool};
@@ -834,7 +883,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn basic_add_test() -> anyhow::Result<()> {
+    async fn low_depth_add_test() -> anyhow::Result<()> {
         let _g = init_tracing();
         let mut bc = BaseCircuit::<MixedGate<u8>, _>::new();
 
@@ -844,7 +893,7 @@ mod tests {
         let inp2: Vec<_> = (0..8)
             .map(|_| bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim))))
             .collect();
-        let added = basic_add(&mut bc, &inp1, &inp2);
+        let added = depth_optimized_add(&mut bc, &inp1, &inp2);
         for g in added {
             bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[g]);
         }
@@ -929,7 +978,7 @@ mod tests {
         let mul = bc.add_wired_gate(MixedGate::Arith(ArithmeticGate::Mul), &[ainp1, ainp2]);
         let mul_b = a2b(&mut bc, mul);
 
-        let added = basic_add(&mut bc, &binps, &mul_b);
+        let added = depth_optimized_add(&mut bc, &binps, &mul_b);
         let res_a = bc.add_wired_gate(MixedGate::Conv(ConvGate::B2A), &added);
         bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[res_a]);
 

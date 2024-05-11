@@ -134,11 +134,14 @@ mod tests {
     use crate::tcp::new_local_pair;
     use remoc::codec;
     use remoc::rch::mpsc::channel;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn establish_connection() {
         let (ch1, ch2) = new_local_pair::<()>(None).await.unwrap();
 
+        // Sleep to ensure values have been actually sent and counters are correct
+        tokio::time::sleep(Duration::from_millis(10)).await;
         let (_tx1, bytes_written1, _rx1, bytes_read1) = ch1;
         let (_tx2, bytes_written2, _rx2, bytes_read2) = ch2;
         assert_eq!(bytes_written1.get(), bytes_read2.get());

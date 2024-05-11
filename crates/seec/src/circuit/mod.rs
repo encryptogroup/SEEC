@@ -1,6 +1,6 @@
 //! Circuit builder and executable circuit types.
+use crate::protocols::Gate;
 use crate::SubCircuitGate;
-pub use builder::SubCircCache;
 use bytemuck::Pod;
 use either::Either;
 use num_integer::Integer;
@@ -18,9 +18,20 @@ pub mod dyn_layers;
 pub mod static_layers;
 
 pub use crate::protocols::boolean_gmw::BooleanGate;
-use crate::protocols::Gate;
 pub use base_circuit::{BaseCircuit, GateId};
-pub use builder::{CircuitBuilder, SharedCircuit};
+pub use builder::{CircuitBuilder, SharedCircuit, SubCircCache};
+
+macro_rules! circ_path {
+    ($file:expr) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/circuits/", $file))
+    };
+}
+// TODO the plain text of these bristol circuits is currently always embedded into the binary
+//  maybe we can find a better solution for this, or toggle this via a feature
+pub const BRISTOL_ADD_8: &str = circ_path!("int_add8_depth.bristol");
+pub const BRISTOL_ADD_16: &str = circ_path!("int_add16_depth.bristol");
+pub const BRISTOL_ADD_32: &str = circ_path!("int_add32_depth.bristol");
+pub const BRISTOL_ADD_64: &str = circ_path!("int_add64_depth.bristol");
 
 pub type CircuitId = u32;
 
