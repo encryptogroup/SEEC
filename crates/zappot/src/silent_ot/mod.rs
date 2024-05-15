@@ -121,8 +121,8 @@ pub enum MultType {
 /// Message sent during SilentOT evaluation.
 pub enum Msg<BaseOTMsg: RemoteSend = base_ot::BaseOTMsg> {
     #[serde(bound = "")]
-    BaseOTChannel(seec_channel::Receiver<BaseOTMsg>),
-    Pprf(seec_channel::Receiver<pprf::Msg>),
+    BaseOTChannel(seec_channel::Sender<BaseOTMsg>),
+    Pprf(seec_channel::Sender<pprf::Msg>),
     GapValues(Vec<Block>),
 }
 

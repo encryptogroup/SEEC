@@ -1,5 +1,5 @@
-use crate::util::TrackingReadWrite;
-use crate::TrackingChannel;
+use crate::util::{Counter, TrackingReadWrite};
+use crate::{BaseReceiver, BaseSender, TrackingChannel};
 use remoc::{ConnectError, RemoteSend};
 use rustls::pki_types::{CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName};
 use rustls::version::TLS13;
@@ -11,7 +11,7 @@ use std::io;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::io::split;
+use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::info;
@@ -45,25 +45,12 @@ pub async fn listen<T: RemoteSend>(
     certificate_chain_file: impl AsRef<Path> + Debug,
 ) -> Result<TrackingChannel<T>, Error> {
     info!("Listening for connections");
-    let certs = load_certs(certificate_chain_file.as_ref())?;
-    let key = load_key(private_key_file.as_ref())?;
-    let config = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
-        .with_no_client_auth()
-        .with_single_cert(certs, key)?;
-    let acceptor = TlsAcceptor::from(Arc::new(config));
     let listener = TcpListener::bind(addr).await?;
-    let (socket, remote_addr) = listener.accept().await?;
+    let (stream, remote_addr) = listener.accept().await?;
     info!(?remote_addr, "Accepted TCP connection to remote");
-    socket.set_nodelay(true)?;
-    let (socket_read, socket_write) = socket.into_split();
-    let tracking_channel = TrackingReadWrite::new(socket_read, socket_write);
-    let write_counter = tracking_channel.bytes_written();
-    let read_counter = tracking_channel.bytes_read();
-    let tls_stream = acceptor.accept(tracking_channel).await?;
-    info!(?remote_addr, "Established TLS connection to remote");
-    let (tls_reader, tls_writer) = split(tls_stream);
-    let (sender, _, receiver, _) =
-        super::establish_remoc_connection(tls_reader, tls_writer).await?;
+    let (tracking_stream, write_counter, read_counter) = tracking_stream(stream)?;
+    let (sender, receiver) =
+        tls_accept(tracking_stream, private_key_file, certificate_chain_file).await?;
     // return the counters that include tls overhead
     // TODO it might be nice to have both counters
     Ok((sender, write_counter, receiver, read_counter))
@@ -74,6 +61,63 @@ pub async fn connect<T: RemoteSend>(
     domain: &str,
     remote_addr: impl ToSocketAddrs + Debug,
 ) -> Result<TrackingChannel<T>, Error> {
+    info!("Connecting to remote");
+    let stream = TcpStream::connect(remote_addr).await?;
+    info!("Established TCP connection to server");
+    let (tracking_stream, write_counter, read_counter) = tracking_stream(stream)?;
+    let (sender, receiver) = tls_connect(domain, tracking_stream).await?;
+    Ok((sender, write_counter, receiver, read_counter))
+}
+
+fn tracking_stream(
+    tcp_stream: TcpStream,
+) -> Result<
+    (
+        impl AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+        Counter,
+        Counter,
+    ),
+    Error,
+> {
+    tcp_stream.set_nodelay(true)?;
+    let (socket_read, socket_write) = tcp_stream.into_split();
+    let tracking_channel = TrackingReadWrite::new(socket_read, socket_write);
+    let write_counter = tracking_channel.bytes_written();
+    let read_counter = tracking_channel.bytes_read();
+    Ok((tracking_channel, write_counter, read_counter))
+}
+
+async fn tls_accept<T, IO>(
+    tcp_stream: IO,
+    private_key_file: impl AsRef<Path> + Debug,
+    certificate_chain_file: impl AsRef<Path> + Debug,
+) -> Result<(BaseSender<T>, BaseReceiver<T>), Error>
+where
+    T: RemoteSend,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+{
+    let certs = load_certs(certificate_chain_file.as_ref())?;
+    let key = load_key(private_key_file.as_ref())?;
+    let config = rustls::ServerConfig::builder_with_protocol_versions(&[&TLS13])
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let tls_stream = acceptor.accept(tcp_stream).await?;
+    info!("Established TLS connection to remote");
+    let (tls_reader, tls_writer) = split(tls_stream);
+    let (sender, _, receiver, _) =
+        super::establish_remoc_connection(tls_reader, tls_writer).await?;
+    Ok((sender, receiver))
+}
+
+async fn tls_connect<T, IO>(
+    domain: &str,
+    tcp_stream: IO,
+) -> Result<(BaseSender<T>, BaseReceiver<T>), Error>
+where
+    T: RemoteSend,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+{
     let domain = ServerName::try_from(domain.to_string())?;
     let mut root_cert_store = rustls::RootCertStore::empty();
     let (added, ignored) = root_cert_store.add_parsable_certificates(load_native_certs()?);
@@ -83,35 +127,10 @@ pub async fn connect<T: RemoteSend>(
         .with_root_certificates(root_cert_store)
         .with_no_client_auth();
     let connector = TlsConnector::from(Arc::new(config));
-
-    info!("Connecting to remote");
-    let stream = TcpStream::connect(remote_addr).await?;
-    stream.set_nodelay(true)?;
-    let (socket_read, socket_write) = stream.into_split();
-    let tracking_channel = TrackingReadWrite::new(socket_read, socket_write);
-    let write_counter = tracking_channel.bytes_written();
-    let read_counter = tracking_channel.bytes_read();
-    info!("Established TCP connection to server");
-    let tls_stream = connector.connect(domain, tracking_channel).await?;
+    let tls_stream = connector.connect(domain, tcp_stream).await?;
     info!("Established TLS connection to server");
     let (tls_reader, tls_writer) = split(tls_stream);
     let (sender, _, receiver, _) =
         super::establish_remoc_connection(tls_reader, tls_writer).await?;
-    Ok((sender, write_counter, receiver, read_counter))
+    Ok((sender, receiver))
 }
-
-// #[tracing::instrument(err)]
-// pub async fn server<T: RemoteSend>(
-//     addr: impl ToSocketAddrs + Debug,
-// ) -> Result<impl Stream<Item = Result<TrackingChannel<T>, crate::tcp::Error>>, io::Error> {
-//     info!("Starting Tcp Server");
-//     let listener = TcpListener::bind(addr).await?;
-//     let s = stream! {
-//         loop {
-//             let (socket, _) = listener.accept().await?;
-//             yield establish_remoc_connection_tls(socket).await;
-//
-//         }
-//     };
-//     Ok(s)
-// }

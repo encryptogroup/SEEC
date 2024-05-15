@@ -12,7 +12,7 @@ async-stream = "0.3.5"
 bytes = "1.6.0"
 futures = "0.3.30"
 pin-project = "1.1.5"
-serde = { version = "1.0.197" }
+serde = { version = "1.0.197" , features = ["derive"]}
 erased-serde = "0.4.4"
 thiserror = "1.0.58"
 tokio = { version = "1.36.0", features = ["macros", "net"] }
@@ -36,6 +36,7 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "time"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"]}
 
 
 [[bench]]

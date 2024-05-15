@@ -225,7 +225,7 @@ async fn main() -> anyhow::Result<()> {
         &mut sender,
         &mut receiver,
         64,
-        seec_channel::Receiver<ot_ext::ExtOTMsg>,
+        seec_channel::Sender<ot_ext::ExtOTMsg>,
         Message<BooleanGmw>
     )
     .await?;
