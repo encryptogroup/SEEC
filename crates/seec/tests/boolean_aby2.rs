@@ -1,8 +1,7 @@
-use rand::{thread_rng, Rng, SeedableRng};
-use rand_chacha::ChaChaRng;
+use rand::{thread_rng, Rng};
 use seec::circuit::ExecutableCircuit;
 use seec::common::BitVec;
-use seec::executor::{Executor, GateOutputs, Input};
+use seec::executor::{Executor, Input};
 use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use seec::private_test_utils::init_tracing;
 use seec::protocols::aby2::{
@@ -96,16 +95,10 @@ async fn astra_setup() -> anyhow::Result<()> {
     let priv_seed_p0: [u8; 32] = thread_rng().gen();
     let priv_seed_p1: [u8; 32] = thread_rng().gen();
     let joint_seed: [u8; 32] = thread_rng().gen();
-    let helper = AstraSetupHelper::new(
-        helper_ch.0,
-        helper_ch.1,
-        priv_seed_p0,
-        priv_seed_p1,
-        joint_seed,
-    );
+    let helper = AstraSetupHelper::new(helper_ch.0, priv_seed_p0, priv_seed_p1, joint_seed);
 
-    let astra_setup0 = AstraSetupProvider::new(0, p0_ch.0, p0_ch.1, priv_seed_p0);
-    let astra_setup1 = AstraSetupProvider::new(1, p1_ch.0, p1_ch.1, priv_seed_p1);
+    let astra_setup0 = AstraSetupProvider::new(0, p0_ch.1, priv_seed_p0);
+    let astra_setup1 = AstraSetupProvider::new(1, p1_ch.1, priv_seed_p1);
 
     let circ = ExecutableCircuit::DynLayers(
         Circuit::load_bristol("test_resources/bristol-circuits/int_add8_depth.bristol").unwrap(),
@@ -138,6 +131,7 @@ async fn astra_setup() -> anyhow::Result<()> {
             Executor::new_with_state(state2, &circ, 1, astra_setup1)
         )
         .unwrap();
+    jh.await.expect("error in helper");
     let (shared_30, plain_delta_30) = sharing_state1.share(BitVec::from_element(30_u8));
     let (shared_12, plain_delta_12) = sharing_state2.share(BitVec::from_element(12_u8));
 

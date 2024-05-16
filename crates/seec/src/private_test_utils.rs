@@ -33,27 +33,33 @@ use crate::circuit::ExecutableCircuit;
 use crate::circuit::{BaseCircuit, BooleanGate, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{Executor, Input};
-use crate::mul_triple::MTProvider;
 use crate::mul_triple::{arithmetic, boolean};
 use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
 use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
 use crate::protocols::mixed_gmw::{MixedGmw, MixedShareStorage, MixedSharing};
-use crate::protocols::{mixed_gmw, Gate, Protocol, Ring, ScalarDim, Share, Sharing};
+use crate::protocols::{
+    mixed_gmw, FunctionDependentSetup, Gate, Protocol, Ring, ScalarDim, Share, Sharing,
+};
 
 pub trait ProtocolTestExt: Protocol + Default {
-    type InsecureSetup: MTProvider<Output = Self::SetupStorage, Error = Infallible>
-        + Default
+    type InsecureSetup<Idx: GateIdx>: FunctionDependentSetup<
+            Self::ShareStorage,
+            Self::Gate,
+            Idx,
+            Output = Self::SetupStorage,
+            Error = Infallible,
+        > + Default
         + Clone
         + Send
         + Sync;
 }
 
 impl ProtocolTestExt for BooleanGmw {
-    type InsecureSetup = boolean::insecure_provider::InsecureMTProvider;
+    type InsecureSetup<Idx: GateIdx> = boolean::insecure_provider::InsecureMTProvider;
 }
 
 impl<R: Ring> ProtocolTestExt for ArithmeticGmw<R> {
-    type InsecureSetup = arithmetic::insecure_provider::InsecureMTProvider<R>;
+    type InsecureSetup<Idx: GateIdx> = arithmetic::insecure_provider::InsecureMTProvider<R>;
 }
 
 impl<R> ProtocolTestExt for MixedGmw<R>
@@ -62,7 +68,7 @@ where
     Standard: Distribution<R>,
     [R; 1]: BitViewSized,
 {
-    type InsecureSetup = mixed_gmw::InsecureMixedSetup<R>;
+    type InsecureSetup<Idx: GateIdx> = mixed_gmw::InsecureMixedSetup<R>;
 }
 
 pub fn create_and_tree(depth: u32) -> BaseCircuit {
@@ -316,7 +322,6 @@ where
     P: ProtocolTestExt<ShareStorage = S::Shared>,
     <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
     Idx: GateIdx,
-    <P::InsecureSetup as MTProvider>::Error: Debug,
     <P as Protocol>::ShareStorage: Send + Sync,
 {
     let mt_provider = P::InsecureSetup::default();

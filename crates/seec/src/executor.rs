@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
 use std::time::Instant;
-use std::{iter, mem};
+use std::{iter, mem, vec};
 
 use seec_channel::{Receiver, Sender};
 use tracing::{debug, error, info, instrument, trace};
@@ -503,10 +503,6 @@ impl<Shares> GateOutputs<Shares> {
     pub fn iter(&self) -> impl Iterator<Item = &Input<Shares>> {
         self.data.iter()
     }
-
-    pub fn into_iter(self) -> impl Iterator<Item = Input<Shares>> {
-        self.data.into_iter()
-    }
 }
 
 impl<Shares> Input<Shares> {
@@ -636,6 +632,15 @@ impl<S> Default for GateOutputs<S> {
             data: vec![],
             output_set: Default::default(),
         }
+    }
+}
+
+impl<Shares> IntoIterator for GateOutputs<Shares> {
+    type Item = Output<Shares>;
+    type IntoIter = vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
     }
 }
 
