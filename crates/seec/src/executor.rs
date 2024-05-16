@@ -42,6 +42,7 @@ pub type DynFDSetup<'c, P, Idx> = Box<
         + 'c,
 >;
 
+#[derive(Debug, Clone)]
 pub struct GateOutputs<Shares> {
     data: Vec<Input<Shares>>,
     // Used as a sanity check in debug builds. Stores for which gates we have set the output,
@@ -502,6 +503,10 @@ impl<Shares> GateOutputs<Shares> {
     pub fn iter(&self) -> impl Iterator<Item = &Input<Shares>> {
         self.data.iter()
     }
+
+    pub fn into_iter(self) -> impl Iterator<Item = Input<Shares>> {
+        self.data.into_iter()
+    }
 }
 
 impl<Shares> Input<Shares> {
@@ -621,6 +626,24 @@ impl<Shares: Clone> GateOutputs<Shares> {
             Input::Simd(data) => {
                 data[id.gate_id.as_usize()] = val;
             }
+        }
+    }
+}
+
+impl<S> Default for GateOutputs<S> {
+    fn default() -> Self {
+        Self {
+            data: vec![],
+            output_set: Default::default(),
+        }
+    }
+}
+
+impl<Shares> FromIterator<Input<Shares>> for GateOutputs<Shares> {
+    fn from_iter<T: IntoIterator<Item = Input<Shares>>>(iter: T) -> Self {
+        Self {
+            data: iter.into_iter().collect(),
+            output_set: Default::default(),
         }
     }
 }

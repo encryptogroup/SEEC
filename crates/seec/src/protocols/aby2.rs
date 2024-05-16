@@ -1,3 +1,4 @@
+use crate::bristol::circuit;
 use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
@@ -9,11 +10,15 @@ use crate::protocols::{
     boolean_gmw, FunctionDependentSetup, Gate, Protocol, ScalarDim, SetupStorage, ShareStorage,
 };
 use crate::secret::Secret;
+use crate::utils::take_arr;
 use crate::{bristol, executor, CircuitBuilder};
 use ahash::AHashMap;
 use async_trait::async_trait;
+use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
+use seec_channel::multi::{MultiReceiver, MultiSender};
+use seec_channel::ReceiverT;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -21,7 +26,6 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
 use std::ops::Not;
-use itertools::Itertools;
 
 pub struct BooleanAby2 {
     delta_sharing_state: DeltaSharing,
@@ -62,9 +66,7 @@ pub enum Msg {
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
 pub enum BooleanGate {
     Base(BaseGate<Share, ScalarDim>),
-    And {
-        n: u8
-    },
+    And { n: u8 },
     Xor,
     Inv,
 }
@@ -99,6 +101,33 @@ pub struct AbySetupProvider<Mtp> {
     setup_data: Option<SetupData>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AstraSetupMsg(BitVec);
+
+#[derive(Debug, Copy, Clone)]
+pub enum InputBy {
+    P0,
+    P1,
+}
+pub struct AstraSetupHelper {
+    sender: MultiSender<AstraSetupMsg>,
+    receiver: MultiReceiver<AstraSetupMsg>,
+    // shared rng with p0
+    priv_seed_p0: [u8; 32],
+    // shared rng with p1
+    priv_seed_p1: [u8; 32],
+    joint_seed_0: [u8; 32],
+    joint_seed_1: [u8; 32],
+}
+pub struct AstraSetupProvider {
+    // The normal parties have party id 0 and 1. For the helper, there is a dedicated struct
+    party_id: usize,
+    sender: MultiSender<AstraSetupMsg>,
+    receiver: MultiReceiver<AstraSetupMsg>,
+    rng: ChaChaRng,
+    setup_data: Option<SetupData>,
+}
+
 impl Protocol for BooleanAby2 {
     const SIMD_SUPPORT: bool = false;
     type Msg = Msg;
@@ -119,7 +148,7 @@ impl Protocol for BooleanAby2 {
         let delta: BitVec = interactive_gates
             .zip(gate_outputs)
             .map(|(gate, output)| {
-                assert!(matches!(gate, BooleanGate::And {n: 2}));
+                assert!(matches!(gate, BooleanGate::And { n: 2 }));
                 let inputs = inputs.by_ref().take(gate.input_size());
                 gate.compute_delta_share(party_id, inputs, preprocessing_data, output)
             })
@@ -180,6 +209,7 @@ impl Protocol for BooleanAby2 {
             let output = gate.setup_output_share(gate_input_iter, rng);
             storage.set(sc_gate_id, output);
         }
+        println!("{_party_id}: {storage:?}");
 
         storage
     }
@@ -196,7 +226,7 @@ impl BooleanGate {
         output_share: Share,
     ) -> bool {
         assert!(matches!(party_id, 0 | 1));
-        assert!(matches!(self, BooleanGate::And {n: 2}));
+        assert!(matches!(self, BooleanGate::And { n: 2 }));
         let a = inputs.next().expect("Empty input");
         let b = inputs.next().expect("Insufficient input");
         let plain_ab = a.public & b.public;
@@ -238,14 +268,18 @@ impl BooleanGate {
                 | BaseGate::Debug
                 | BaseGate::Identity => inputs.next().expect("Empty input"),
                 BaseGate::Constant(c) => {
-                    // TODO is it correct to just output the stored constant here?
+                    assert_eq!(
+                        c.private, false,
+                        "Private part of constant gate share must be 0"
+                    );
+                    // return constant as the public part is simply the constant
                     c.clone()
-                },
+                }
                 BaseGate::ConnectToMainFromSimd(_) => {
                     unimplemented!("SIMD currently not supported for ABY2")
                 }
             },
-            BooleanGate::And {..} => {
+            BooleanGate::And { .. } => {
                 // input is not actually needed at this stage
                 Share {
                     private: rng.gen(),
@@ -260,7 +294,7 @@ impl BooleanGate {
                 a
             }
             BooleanGate::Inv => {
-                // TODO correctness?
+                // private share part does not change for Inv gates
                 inputs.next().expect("Empty input")
             }
         }
@@ -271,7 +305,7 @@ impl BooleanGate {
         input_shares: impl Iterator<Item = &'a Secret<BooleanGmw, Idx>>,
         setup_sub_circ_cache: &mut AHashMap<Vec<Secret<BooleanGmw, Idx>>, Secret<BooleanGmw, Idx>>,
     ) -> Vec<Secret<BooleanGmw, Idx>> {
-        let &BooleanGate::And {n} = self else {
+        let &BooleanGate::And { n } = self else {
             assert!(self.is_non_interactive(), "Unhandled interactive gate");
             panic!("Called setup_data_circ on non_interactive gate")
         };
@@ -315,10 +349,7 @@ impl Gate for BooleanGate {
     type DimTy = ScalarDim;
 
     fn is_interactive(&self) -> bool {
-        matches!(
-            self,
-            BooleanGate::And {..}
-        )
+        matches!(self, BooleanGate::And { .. })
     }
 
     fn input_size(&self) -> usize {
@@ -326,7 +357,7 @@ impl Gate for BooleanGate {
             BooleanGate::Base(base_gate) => base_gate.input_size(),
             BooleanGate::Inv => 1,
             BooleanGate::Xor => 2,
-            BooleanGate::And {n} => *n as usize,
+            BooleanGate::And { n } => *n as usize,
         }
     }
 
@@ -354,7 +385,7 @@ impl Gate for BooleanGate {
                 c.clone()
             }
             BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, inputs.by_ref()),
-            BooleanGate::And {..}  => {
+            BooleanGate::And { .. } => {
                 panic!("Called evaluate_non_interactive on Gate::And<N>")
             }
             BooleanGate::Xor => {
@@ -390,7 +421,7 @@ impl From<BaseGate<Share>> for BooleanGate {
 impl From<&bristol::Gate> for BooleanGate {
     fn from(gate: &bristol::Gate) -> Self {
         match gate {
-            bristol::Gate::And(_) => Self::And { n: 2},
+            bristol::Gate::And(_) => Self::And { n: 2 },
             bristol::Gate::Xor(_) => Self::Xor,
             bristol::Gate::Inv(_) => Self::Inv,
         }
@@ -495,13 +526,13 @@ impl SetupStorage for SetupData {
         self.eval_shares.len()
     }
 
-    fn reserve(&mut self, additional: usize) {
-        self.eval_shares.reserve(additional);
-    }
     fn split_off_last(&mut self, count: usize) -> Self {
         Self {
             eval_shares: self.eval_shares.split_off(self.len() - count),
         }
+    }
+    fn reserve(&mut self, additional: usize) {
+        self.eval_shares.reserve(additional);
     }
 
     fn append(&mut self, mut other: Self) {
@@ -699,7 +730,7 @@ where
             .interactive_iter()
             .zip(setup_outputs)
             .map(|((gate, _gate_id), setup_out)| match gate {
-                BooleanGate::And {..} => {
+                BooleanGate::And { .. } => {
                     let shares = setup_out
                         .into_iter()
                         .map(|out_id| executor_gate_outputs.get(out_id.as_usize()))
@@ -722,13 +753,191 @@ where
     }
 }
 
+impl AstraSetupHelper {
+    pub fn new(
+        sender: MultiSender<AstraSetupMsg>,
+        receiver: MultiReceiver<AstraSetupMsg>,
+        priv_seed_p0: [u8; 32],
+        priv_seed_p1: [u8; 32],
+        joint_seed_0: [u8; 32],
+        joint_seed_1: [u8; 32],
+    ) -> Self {
+        Self {
+            sender,
+            receiver,
+            priv_seed_p0,
+            priv_seed_p1,
+            joint_seed_0,
+            joint_seed_1,
+        }
+    }
+
+    pub async fn setup<Idx: GateIdx>(
+        self,
+        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        input_map: HashMap<usize, InputBy>,
+    ) {
+        let p0_gate_outputs =
+            self.setup_gate_outputs(0, circuit, self.priv_seed_p0, self.joint_seed_1, &input_map);
+        let p1_gate_outputs =
+            self.setup_gate_outputs(1, circuit, self.priv_seed_p1, self.joint_seed_0, &input_map);
+
+        let mut rng_p0 = ChaChaRng::from_seed(self.priv_seed_p0);
+        // synchronized with the AstraSetupProvider but different than the stream used for the gate
+        // outputs before
+        rng_p0.set_stream(1);
+
+        // TODO this could potentially be optimized as it reconstructs all lambda values
+        //  but we only need those that are an input to an interactive gate
+        let rec_gate_outputs: Vec<_> = p0_gate_outputs
+            .into_iter()
+            .zip(p1_gate_outputs.into_iter())
+            .map(|(p0_out, p1_out)| {
+                let p0_storage = p0_out.into_scalar().expect("SIMD unsupported");
+                let p1_storage = p1_out.into_scalar().expect("SIMD unsupported");
+                // we only need to reconstruct the private parts which were initialized
+                p0_storage.private ^ p1_storage.private
+            })
+            .collect();
+
+        let mut msg = BitVec::with_capacity(circuit.interactive_count());
+
+        for (gate, _gate_id, parents) in circuit.interactive_with_parents_iter() {
+            match gate {
+                BooleanGate::And { n } => {
+                    assert_eq!(2, n, "Astra setup currently supports 2 input ANDs");
+                    let inputs: [bool; 2] = take_arr(&mut parents.take(2).map(|scg| {
+                        rec_gate_outputs[scg.circuit_id as usize][scg.gate_id.as_usize()]
+                    }));
+                    let lambda_xy = inputs[0] & inputs[1];
+                    let lambda_xy_0: bool = rng_p0.gen();
+                    let lambda_xy_1 = lambda_xy ^ lambda_xy_0;
+                    msg.push(lambda_xy_1);
+                }
+                ni => unreachable!("non interactive gate {ni:?}"),
+            }
+        }
+        self.sender
+            .send_to([1], AstraSetupMsg(msg))
+            .await
+            .expect("failed to send setup message")
+    }
+
+    fn setup_gate_outputs<Idx: GateIdx>(
+        &self,
+        party_id: usize,
+        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        local_seed: [u8; 32],
+        remote_seed: [u8; 32],
+        input_map: &HashMap<usize, InputBy>,
+    ) -> GateOutputs<DeltaShareStorage> {
+        // The idea is to reuse the `BooleanAby2` setup_gate_outputs method with the correct
+        // rngs to generate the correct values for the helper
+
+        let input_position_share_type_map = input_map
+            .iter()
+            .map(|(&pos, by)| {
+                let st = match (party_id, by) {
+                    (0, InputBy::P0) | (1, InputBy::P1) => ShareType::Local,
+                    (0, InputBy::P1) | (1, InputBy::P0) => ShareType::Remote,
+                    (id, _) => panic!("Unsupported party id {id}"),
+                };
+                (pos, st)
+            })
+            .collect();
+
+        let mut p = BooleanAby2 {
+            delta_sharing_state: DeltaSharing {
+                private_rng: ChaChaRng::from_seed(local_seed),
+                // not used
+                local_joint_rng: ChaChaRng::from_seed(local_seed),
+                remote_joint_rng: ChaChaRng::from_seed(remote_seed),
+                input_position_share_type_map,
+            },
+        };
+        p.setup_gate_outputs(party_id, circuit)
+    }
+}
+
+impl AstraSetupProvider {
+    pub fn new(
+        party_id: usize,
+        sender: MultiSender<AstraSetupMsg>,
+        receiver: MultiReceiver<AstraSetupMsg>,
+        seed: [u8; 32],
+    ) -> Self {
+        let mut rng = ChaChaRng::from_seed(seed);
+        // We use the next stream of this RNG so that it is synchronized with the helper
+        rng.set_stream(1);
+        Self {
+            party_id,
+            sender,
+            receiver,
+            rng,
+            setup_data: None,
+        }
+    }
+}
+
+#[async_trait]
+impl<Idx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx> for AstraSetupProvider
+where
+    Idx: GateIdx,
+{
+    type Output = SetupData;
+    type Error = Infallible;
+
+    async fn setup(
+        &mut self,
+        _shares: &GateOutputs<DeltaShareStorage>,
+        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+    ) -> Result<(), Self::Error> {
+        if self.party_id == 0 {
+            let lambda_values: Vec<_> = (0..circuit.interactive_count())
+                .map(|_| EvalShares {
+                    shares: BitVec::repeat(self.rng.gen(), 1),
+                })
+                .collect();
+            self.setup_data = Some(SetupData::from_raw(lambda_values));
+        } else if self.party_id == 1 {
+            let msg = self
+                .receiver
+                .recv_from_single(2)
+                .await
+                .expect("Recv message from helper");
+            let setup_data = msg
+                .0
+                .into_iter()
+                .map(|eval_share| EvalShares {
+                    shares: BitVec::repeat(eval_share, 1),
+                })
+                .collect();
+            self.setup_data = Some(SetupData::from_raw(setup_data));
+        } else {
+            panic!("Illegal party id {}", self.party_id)
+        }
+        Ok(())
+    }
+
+    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+        Ok(self
+            .setup_data
+            .as_mut()
+            .expect("setup must be called before request_setup_output")
+            .split_off_last(count))
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use super::BooleanGate as BG;
+    use super::*;
     use crate::circuit::BaseCircuit;
     use crate::mul_triple::boolean::InsecureMTProvider;
-    use super::*;
-    use super::BooleanGate as BG;
+    use crate::private_test_utils::init_tracing;
+    use crate::Circuit;
+    use rand::thread_rng;
+    use seec_channel::multi;
 
     // #[tokio::test]
     // async fn multi_and() {
