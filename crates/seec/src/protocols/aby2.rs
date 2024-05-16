@@ -116,8 +116,8 @@ pub struct AstraSetupHelper {
     priv_seed_p0: [u8; 32],
     // shared rng with p1
     priv_seed_p1: [u8; 32],
-    joint_seed_0: [u8; 32],
-    joint_seed_1: [u8; 32],
+    // shared between p0 and p1
+    joint_seed: [u8; 32],
 }
 pub struct AstraSetupProvider {
     // The normal parties have party id 0 and 1. For the helper, there is a dedicated struct
@@ -575,15 +575,21 @@ impl Not for Share {
 
 impl DeltaSharing {
     pub fn new(
+        party_id: usize,
         priv_seed: [u8; 32],
-        local_joint_seed: [u8; 32],
-        remote_joint_seed: [u8; 32],
+        joint_seed: [u8; 32],
         input_position_share_type_map: HashMap<usize, ShareType>,
     ) -> Self {
+        assert!(matches!(party_id, 0 | 1), "party_id must be 0 or 1");
+        let party_id = party_id as u64;
+        let mut local_joint_rng = ChaChaRng::from_seed(joint_seed);
+        local_joint_rng.set_stream(party_id);
+        let mut remote_joint_rng = local_joint_rng.clone();
+        remote_joint_rng.set_stream(party_id ^ 1); // equal to local_joint_rng of the other party
         Self {
             private_rng: ChaChaRng::from_seed(priv_seed),
-            local_joint_rng: ChaChaRng::from_seed(local_joint_seed),
-            remote_joint_rng: ChaChaRng::from_seed(remote_joint_seed),
+            local_joint_rng,
+            remote_joint_rng,
             input_position_share_type_map,
         }
     }
@@ -759,16 +765,14 @@ impl AstraSetupHelper {
         receiver: MultiReceiver<AstraSetupMsg>,
         priv_seed_p0: [u8; 32],
         priv_seed_p1: [u8; 32],
-        joint_seed_0: [u8; 32],
-        joint_seed_1: [u8; 32],
+        joint_seed: [u8; 32],
     ) -> Self {
         Self {
             sender,
             receiver,
             priv_seed_p0,
             priv_seed_p1,
-            joint_seed_0,
-            joint_seed_1,
+            joint_seed,
         }
     }
 
@@ -778,9 +782,9 @@ impl AstraSetupHelper {
         input_map: HashMap<usize, InputBy>,
     ) {
         let p0_gate_outputs =
-            self.setup_gate_outputs(0, circuit, self.priv_seed_p0, self.joint_seed_1, &input_map);
+            self.setup_gate_outputs(0, circuit, self.priv_seed_p0, self.joint_seed, &input_map);
         let p1_gate_outputs =
-            self.setup_gate_outputs(1, circuit, self.priv_seed_p1, self.joint_seed_0, &input_map);
+            self.setup_gate_outputs(1, circuit, self.priv_seed_p1, self.joint_seed, &input_map);
 
         let mut rng_p0 = ChaChaRng::from_seed(self.priv_seed_p0);
         // synchronized with the AstraSetupProvider but different than the stream used for the gate
@@ -828,7 +832,7 @@ impl AstraSetupHelper {
         party_id: usize,
         circuit: &ExecutableCircuit<BooleanGate, Idx>,
         local_seed: [u8; 32],
-        remote_seed: [u8; 32],
+        joint_seed: [u8; 32],
         input_map: &HashMap<usize, InputBy>,
     ) -> GateOutputs<DeltaShareStorage> {
         // The idea is to reuse the `BooleanAby2` setup_gate_outputs method with the correct
@@ -847,13 +851,12 @@ impl AstraSetupHelper {
             .collect();
 
         let mut p = BooleanAby2 {
-            delta_sharing_state: DeltaSharing {
-                private_rng: ChaChaRng::from_seed(local_seed),
-                // not used
-                local_joint_rng: ChaChaRng::from_seed(local_seed),
-                remote_joint_rng: ChaChaRng::from_seed(remote_seed),
+            delta_sharing_state: DeltaSharing::new(
+                party_id,
+                local_seed,
+                joint_seed,
                 input_position_share_type_map,
-            },
+            ),
         };
         p.setup_gate_outputs(party_id, circuit)
     }

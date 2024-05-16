@@ -21,8 +21,7 @@ async fn eval_8_bit_adder() -> anyhow::Result<()> {
 
     let priv_seed1 = thread_rng().gen();
     let priv_seed2 = thread_rng().gen();
-    let joint_seed1 = thread_rng().gen();
-    let joint_seed2 = thread_rng().gen();
+    let joint_seed = thread_rng().gen();
 
     let share_map1 = (0..8)
         .map(|pos| (pos, ShareType::Local))
@@ -32,8 +31,8 @@ async fn eval_8_bit_adder() -> anyhow::Result<()> {
         .map(|pos| (pos, ShareType::Remote))
         .chain((8..16).map(|pos| (pos, ShareType::Local)))
         .collect();
-    let mut sharing_state1 = DeltaSharing::new(priv_seed1, joint_seed1, joint_seed2, share_map1);
-    let mut sharing_state2 = DeltaSharing::new(priv_seed2, joint_seed2, joint_seed1, share_map2);
+    let mut sharing_state1 = DeltaSharing::new(0, priv_seed1, joint_seed, share_map1);
+    let mut sharing_state2 = DeltaSharing::new(1, priv_seed2, joint_seed, share_map2);
     let state1 = BooleanAby2::new(sharing_state1.clone());
     let state2 = BooleanAby2::new(sharing_state2.clone());
 
@@ -96,15 +95,13 @@ async fn astra_setup() -> anyhow::Result<()> {
     let p0_ch = channels.pop().unwrap();
     let priv_seed_p0: [u8; 32] = thread_rng().gen();
     let priv_seed_p1: [u8; 32] = thread_rng().gen();
-    let seed_p0: [u8; 32] = thread_rng().gen();
-    let seed_p1: [u8; 32] = thread_rng().gen();
+    let joint_seed: [u8; 32] = thread_rng().gen();
     let helper = AstraSetupHelper::new(
         helper_ch.0,
         helper_ch.1,
         priv_seed_p0,
         priv_seed_p1,
-        seed_p0,
-        seed_p1,
+        joint_seed,
     );
 
     let astra_setup0 = AstraSetupProvider::new(0, p0_ch.0, p0_ch.1, priv_seed_p0);
@@ -130,8 +127,8 @@ async fn astra_setup() -> anyhow::Result<()> {
         .chain((8..16).map(|pos| (pos, ShareType::Local)))
         .collect();
 
-    let mut sharing_state1 = DeltaSharing::new(priv_seed_p0, seed_p0, seed_p1, share_map1);
-    let mut sharing_state2 = DeltaSharing::new(priv_seed_p1, seed_p1, seed_p0, share_map2);
+    let mut sharing_state1 = DeltaSharing::new(0, priv_seed_p0, joint_seed, share_map1);
+    let mut sharing_state2 = DeltaSharing::new(1, priv_seed_p1, joint_seed, share_map2);
     let state1 = BooleanAby2::new(sharing_state1.clone());
     let state2 = BooleanAby2::new(sharing_state2.clone());
 
