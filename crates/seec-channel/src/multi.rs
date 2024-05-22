@@ -1,4 +1,6 @@
-use crate::{multi, sub_channel, tcp, CommunicationError, Receiver, ReceiverT, Sender, SenderT};
+use crate::{
+    channel, multi, sub_channel, tcp, CommunicationError, Receiver, ReceiverT, Sender, SenderT,
+};
 use async_trait::async_trait;
 use futures::future::join;
 use futures::stream::FuturesUnordered;
@@ -54,14 +56,14 @@ pub struct MultiReceiver<T> {
 }
 
 impl<T: RemoteSend + Clone> MultiSender<T> {
-    pub async fn send_to(&self, to: impl IntoIterator<Item = &u32>, msg: T) -> Result<(), Error> {
+    pub async fn send_to(&self, to: impl IntoIterator<Item = u32>, msg: T) -> Result<(), Error> {
         let mut fu = FuturesUnordered::new();
         for to in to {
             debug!(to, "Sending");
             let sender = self
                 .senders
-                .get(to)
-                .ok_or_else(|| Error::UnknownParty(*to))?;
+                .get(&to)
+                .ok_or_else(|| Error::UnknownParty(to))?;
             fu.push(sender.send(msg.clone()));
         }
         let mut errors = vec![];
@@ -81,7 +83,7 @@ impl<T: RemoteSend + Clone> MultiSender<T> {
 
     #[instrument(level = "debug", skip(self, msg), ret)]
     pub async fn send_all(&self, msg: T) -> Result<(), Error> {
-        self.send_to(self.senders.keys(), msg).await
+        self.send_to(self.senders.keys().copied(), msg).await
     }
 
     pub fn sender(&self, to: u32) -> Option<&Sender<T>> {
@@ -100,6 +102,14 @@ pub struct MsgFrom<T> {
 }
 
 impl<T: RemoteSend> MultiReceiver<T> {
+    pub async fn recv_from_single(&mut self, from: u32) -> Result<T, Error> {
+        let receiver = self
+            .receivers
+            .get_mut(&from)
+            .ok_or(Error::UnknownParty(from))?;
+        Ok(map_recv_fut((&from, receiver)).await?.into_msg())
+    }
+
     pub fn recv_from(
         &mut self,
         from: &HashSet<u32>,
@@ -335,6 +345,44 @@ where
     }
     debug!("Connected to all remotes");
     Ok(MultiReceiver { receivers })
+}
+
+impl<T> MsgFrom<T> {
+    pub fn into_msg(self) -> T {
+        self.msg
+    }
+}
+
+pub fn new_local<T: RemoteSend>(parties: usize) -> Vec<(MultiSender<T>, MultiReceiver<T>)> {
+    let mut res: Vec<(MultiSender<T>, MultiReceiver<T>)> =
+        (0..parties).map(|_| Default::default()).collect();
+    for party in 0..parties {
+        for other in 0..parties {
+            if party == other {
+                continue;
+            }
+            let (sender, receiver) = channel(128);
+            res[party].0.senders.insert(other as u32, sender);
+            res[other].1.receivers.insert(party as u32, receiver);
+        }
+    }
+    res
+}
+
+impl<T> Default for MultiSender<T> {
+    fn default() -> Self {
+        Self {
+            senders: Default::default(),
+        }
+    }
+}
+
+impl<T> Default for MultiReceiver<T> {
+    fn default() -> Self {
+        Self {
+            receivers: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]

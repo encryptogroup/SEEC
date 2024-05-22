@@ -159,3 +159,8 @@ impl From<Box<dyn Error + Send + Sync>> for BoxError {
         Self(value)
     }
 }
+
+#[allow(unused)]
+pub(crate) fn take_arr<const N: usize, I: Iterator>(iter: &mut I) -> [I::Item; N] {
+    array::from_fn(|_| iter.next().expect("Input array has insufficient elements"))
+}

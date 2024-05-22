@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
 use std::time::Instant;
-use std::{iter, mem};
+use std::{iter, mem, vec};
 
 use seec_channel::{Receiver, Sender};
 use tracing::{debug, error, info, instrument, trace};
@@ -42,6 +42,7 @@ pub type DynFDSetup<'c, P, Idx> = Box<
         + 'c,
 >;
 
+#[derive(Debug, Clone)]
 pub struct GateOutputs<Shares> {
     data: Vec<Input<Shares>>,
     // Used as a sanity check in debug builds. Stores for which gates we have set the output,
@@ -621,6 +622,33 @@ impl<Shares: Clone> GateOutputs<Shares> {
             Input::Simd(data) => {
                 data[id.gate_id.as_usize()] = val;
             }
+        }
+    }
+}
+
+impl<S> Default for GateOutputs<S> {
+    fn default() -> Self {
+        Self {
+            data: vec![],
+            output_set: Default::default(),
+        }
+    }
+}
+
+impl<Shares> IntoIterator for GateOutputs<Shares> {
+    type Item = Output<Shares>;
+    type IntoIter = vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+
+impl<Shares> FromIterator<Input<Shares>> for GateOutputs<Shares> {
+    fn from_iter<T: IntoIterator<Item = Input<Shares>>>(iter: T) -> Self {
+        Self {
+            data: iter.into_iter().collect(),
+            output_set: Default::default(),
         }
     }
 }
