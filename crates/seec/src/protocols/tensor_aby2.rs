@@ -1,25 +1,24 @@
-use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{Executor, GateOutputs, Input, Message};
+use crate::gate::base::BaseGate;
 use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
+use crate::protocols::aby2::{DeltaSharing, Share, ShareType, ShareVec};
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
     boolean_gmw, Dimension, DynDim, FunctionDependentSetup, Gate, Protocol, SetupStorage,
     ShareStorage,
 };
 use crate::secret::{inputs, Secret};
-use crate::utils::rand_bitvec;
+use crate::utils::{rand_bitvec, BitVecExt};
 use crate::{bristol, CircuitBuilder};
 use ahash::AHashMap;
 use async_trait::async_trait;
-use rand::{CryptoRng, Rng, SeedableRng};
-use rand_chacha::ChaChaRng;
+use rand::{CryptoRng, Rng};
 use seec_bitmatrix::BitMatrix;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
@@ -32,37 +31,19 @@ pub struct BoolTensorAby2 {
     delta_sharing_state: DeltaSharing,
 }
 
-#[derive(Clone)]
-pub struct DeltaSharing {
-    private_rng: ChaChaRng,
-    local_joint_rng: ChaChaRng,
-    remote_joint_rng: ChaChaRng,
-    // TODO ughh
-    input_position_share_type_map: HashMap<usize, ShareType>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum ShareType {
-    Local,
-    Remote,
-}
-
-#[derive(Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Debug, Default)]
-pub struct Share {
-    public: bool,
-    private: bool,
-}
-
-#[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Debug, Default)]
-pub struct ShareVec {
-    public: BitVec,
-    private: BitVec,
-}
-
 #[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Debug, Default)]
 pub struct ShareMatrix {
     public: BitMatrix<u8>,
     private: BitMatrix<u8>,
+}
+
+/// Either the private or public part of a TensorShare
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+
+pub enum PartialShare {
+    Scalar(bool),
+    Vec(BitVec),
+    Matrix(BitMatrix<u8>),
 }
 
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -86,7 +67,7 @@ pub enum Msg {
 
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
 pub enum BooleanGate {
-    Base(BaseGate<TensorShare, DynDim>),
+    Base(BaseGate<PartialShare, DynDim>),
     And2,
     And3,
     And4,
@@ -124,14 +105,6 @@ pub struct SetupData {
     eval_shares: Vec<PartialShare>,
 }
 
-/// Either the private or public part of a TensorShare
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum PartialShare {
-    Scalar(bool),
-    Vec(BitVec),
-    Matrix(BitMatrix<u8>),
-}
-
 impl BoolTensorAby2 {
     pub fn new(sharing_state: DeltaSharing) -> Self {
         Self {
@@ -151,12 +124,61 @@ pub struct AbySetupProvider<Mtp> {
 }
 
 impl Protocol for BoolTensorAby2 {
+    type Plain = PartialShare;
+    type Share = TensorShare;
     type Msg = Msg;
     type SimdMsg = ();
     type Gate = BooleanGate;
     type Wire = ();
     type ShareStorage = DeltaShareStorage;
     type SetupStorage = SetupData;
+
+    fn share_constant(
+        &self,
+        _party_id: usize,
+        _output_share: Self::Share,
+        val: Self::Plain,
+    ) -> Self::Share {
+        match val {
+            PartialShare::Scalar(b) => TensorShare::Scalar(Share::new(b, false)),
+            PartialShare::Vec(v) => {
+                let private = BitVec::repeat(false, v.len());
+                TensorShare::Vec(ShareVec::new(v, private))
+            }
+            PartialShare::Matrix(m) => {
+                let private = BitMatrix::zeros(m.rows(), m.cols());
+                TensorShare::Matrix(ShareMatrix { public: m, private })
+            }
+        }
+    }
+
+    fn evaluate_non_interactive(
+        &self,
+        party_id: usize,
+        gate: &Self::Gate,
+        mut inputs: impl Iterator<Item = Self::Share>,
+    ) -> Self::Share {
+        match gate {
+            BooleanGate::Base(base) => base.default_evaluate(party_id, inputs),
+            BooleanGate::And2 | BooleanGate::And3 | BooleanGate::And4 => {
+                panic!("Called evaluate_non_interactive on Gate::And<N>")
+            }
+            BooleanGate::Xor => {
+                let a = inputs.next().expect("Empty input");
+                let b = inputs.next().expect("Empty input");
+                a ^ b
+            }
+            BooleanGate::Inv => {
+                let inp = inputs.next().expect("Empty input");
+                if party_id == 0 {
+                    !inp
+                } else {
+                    inp
+                }
+            }
+            BooleanGate::Tensor(_) => todo!(),
+        }
+    }
 
     fn compute_msg(
         &self,
@@ -200,7 +222,7 @@ impl Protocol for BoolTensorAby2 {
     fn setup_gate_outputs<Idx: GateIdx>(
         &mut self,
         _party_id: usize,
-        circuit: &ExecutableCircuit<Self::Gate, Idx>,
+        circuit: &ExecutableCircuit<Self::Plain, Self::Gate, Idx>,
     ) -> GateOutputs<Self::ShareStorage> {
         let storage: Vec<_> = circuit
             .gate_counts()
@@ -459,8 +481,7 @@ impl BooleanGate {
     }
 }
 
-impl Gate for BooleanGate {
-    type Share = TensorShare;
+impl Gate<PartialShare> for BooleanGate {
     type DimTy = DynDim;
 
     fn is_interactive(&self) -> bool {
@@ -482,42 +503,24 @@ impl Gate for BooleanGate {
         }
     }
 
-    fn as_base_gate(&self) -> Option<&BaseGate<Self::Share, Self::DimTy>> {
+    fn as_base_gate(&self) -> Option<&BaseGate<PartialShare, Self::DimTy>> {
         match self {
             Self::Base(base_gate) => Some(base_gate),
             _ => None,
         }
     }
 
-    fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
+    fn wrap_base_gate(base_gate: BaseGate<PartialShare, Self::DimTy>) -> Self {
         Self::Base(base_gate)
     }
+}
 
-    fn evaluate_non_interactive(
-        &self,
-        party_id: usize,
-        mut inputs: impl Iterator<Item = Self::Share>,
-    ) -> Self::Share {
-        match self {
-            Self::Base(base) => base.evaluate_non_interactive(party_id, inputs),
-            Self::And2 | Self::And3 | Self::And4 => {
-                panic!("Called evaluate_non_interactive on Gate::And<N>")
-            }
-            Self::Xor => {
-                let a = inputs.next().expect("Empty input");
-                let b = inputs.next().expect("Empty input");
-                a ^ b
-            }
-            Self::Inv => {
-                let inp = inputs.next().expect("Empty input");
-                if party_id == 0 {
-                    !inp
-                } else {
-                    inp
-                }
-            }
-            Self::Tensor(_) => todo!(),
-        }
+impl Not for ShareMatrix {
+    type Output = Self;
+
+    fn not(mut self) -> Self::Output {
+        self.public = !self.public;
+        self
     }
 }
 
@@ -538,7 +541,16 @@ impl TensorShare {
     }
 }
 
+impl Default for PartialShare {
+    fn default() -> Self {
+        Self::Scalar(false)
+    }
+}
+
+impl super::Plain for PartialShare {}
+
 impl super::Share for TensorShare {
+    type Plain = PartialShare;
     // TODO this doesn't really make sense at the moment, but is necessary so that
     //  the executor can use these shares since it current requires that the
     //  Gate::SimdShare = Protocol::ShareStorage ... Yea, not ideal
@@ -551,8 +563,8 @@ impl Default for TensorShare {
     }
 }
 
-impl From<BaseGate<TensorShare, DynDim>> for BooleanGate {
-    fn from(base_gate: BaseGate<TensorShare, DynDim>) -> Self {
+impl From<BaseGate<PartialShare, DynDim>> for BooleanGate {
+    fn from(base_gate: BaseGate<PartialShare, DynDim>) -> Self {
         Self::Base(base_gate)
     }
 }
@@ -644,31 +656,6 @@ impl SetupStorage for SetupData {
     }
 }
 
-impl Share {
-    pub fn new(private: bool, public: bool) -> Self {
-        Self { public, private }
-    }
-
-    pub fn get_public(&self) -> bool {
-        self.public
-    }
-
-    pub fn get_private(&self) -> bool {
-        self.private
-    }
-}
-
-impl Not for Share {
-    type Output = Share;
-
-    fn not(self) -> Self::Output {
-        Self {
-            public: self.public,
-            private: !self.private,
-        }
-    }
-}
-
 impl TensorShare {
     #[track_caller]
     fn set_public(&mut self, public: PartialShare) {
@@ -698,13 +685,17 @@ impl BitXor for TensorShare {
                 public: this.public ^ rhs.public,
                 private: this.private ^ rhs.private,
             }),
+            (TensorShare::Vec(this), TensorShare::Vec(rhs)) => TensorShare::Vec(ShareVec::new(
+                this.public.fast_bit_xor(&rhs.public),
+                this.private.fast_bit_xor(&rhs.private),
+            )),
             (TensorShare::Matrix(this), TensorShare::Matrix(rhs)) => {
                 TensorShare::Matrix(ShareMatrix {
                     public: this.public ^ rhs.public,
                     private: this.private ^ rhs.private,
                 })
             }
-            _ => todo!(),
+            _other => panic!("Incompatible TensorShare types"),
         }
     }
 }
@@ -715,12 +706,8 @@ impl Not for TensorShare {
     fn not(self) -> Self::Output {
         match self {
             TensorShare::Scalar(share) => TensorShare::Scalar(!share),
-            TensorShare::Vec(_) => {
-                todo!()
-            }
-            TensorShare::Matrix(_) => {
-                todo!()
-            }
+            TensorShare::Vec(v) => TensorShare::Vec(!v),
+            TensorShare::Matrix(m) => TensorShare::Matrix(!m),
         }
     }
 }
@@ -770,7 +757,7 @@ impl BitXor for PartialShare {
                     rhs.len(),
                     "Xor on PartialShare::Vec of unequal length"
                 );
-                PartialShare::Vec(this ^ rhs)
+                PartialShare::Vec(this.fast_bit_xor(&rhs))
             }
             (PartialShare::Matrix(this), PartialShare::Matrix(rhs)) => {
                 assert_eq!(
@@ -788,33 +775,10 @@ impl BitXor for PartialShare {
 }
 
 impl DeltaSharing {
-    pub fn new(
-        priv_seed: [u8; 32],
-        local_joint_seed: [u8; 32],
-        remote_joint_seed: [u8; 32],
-        input_position_share_type_map: HashMap<usize, ShareType>,
-    ) -> Self {
-        Self {
-            private_rng: ChaChaRng::from_seed(priv_seed),
-            local_joint_rng: ChaChaRng::from_seed(local_joint_seed),
-            remote_joint_rng: ChaChaRng::from_seed(remote_joint_seed),
-            input_position_share_type_map,
-        }
-    }
-
-    /// # Warning - Insercure
-    /// Insecurely initialize DeltaSharing RNGs with default value. No input_position_share_type_map
-    /// is needed when all the RNGs are the same.
-    pub fn insecure_default() -> Self {
-        Self {
-            private_rng: ChaChaRng::seed_from_u64(0),
-            local_joint_rng: ChaChaRng::seed_from_u64(0),
-            remote_joint_rng: ChaChaRng::seed_from_u64(0),
-            input_position_share_type_map: HashMap::new(),
-        }
-    }
-
-    pub fn share(&mut self, input: Vec<PartialShare>) -> (DeltaShareStorage, Vec<PartialShare>) {
+    pub fn share_tensor(
+        &mut self,
+        input: Vec<PartialShare>,
+    ) -> (DeltaShareStorage, Vec<PartialShare>) {
         input
             .into_iter()
             .map(|public| match public {
@@ -844,7 +808,10 @@ impl DeltaSharing {
             .unzip()
     }
 
-    pub fn plain_delta_to_share(&mut self, plain_deltas: Vec<PartialShare>) -> DeltaShareStorage {
+    pub fn plain_delta_to_share_tensor(
+        &mut self,
+        plain_deltas: Vec<PartialShare>,
+    ) -> DeltaShareStorage {
         plain_deltas
             .into_iter()
             .map(|plain_delta| match plain_delta {
@@ -866,7 +833,7 @@ impl DeltaSharing {
             .collect()
     }
 
-    pub fn reconstruct(a: DeltaShareStorage, b: DeltaShareStorage) -> Vec<PartialShare> {
+    pub fn reconstruct_tensor(a: DeltaShareStorage, b: DeltaShareStorage) -> Vec<PartialShare> {
         a.into_iter()
             .zip(b)
             .map(|(sh1, sh2)| {
@@ -911,21 +878,21 @@ impl<Mtp> AbySetupProvider<Mtp> {
 }
 
 #[async_trait]
-impl<MtpErr, Mtp, Idx: GateIdx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx>
+impl<MtpErr, Mtp, Idx: GateIdx> FunctionDependentSetup<BoolTensorAby2, Idx>
     for AbySetupProvider<Mtp>
 where
     MtpErr: Error + Send + Sync + Debug + 'static,
     Mtp: MTProvider<Output = MulTriples, Error = MtpErr> + Send,
 {
-    type Output = SetupData;
     type Error = Infallible;
 
     async fn setup(
         &mut self,
         shares: &GateOutputs<DeltaShareStorage>,
-        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        circuit: &ExecutableCircuit<PartialShare, BooleanGate, Idx>,
     ) -> Result<(), Self::Error> {
-        let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate, Idx> = CircuitBuilder::new();
+        let circ_builder: CircuitBuilder<bool, boolean_gmw::BooleanGate, Idx> =
+            CircuitBuilder::new();
         let old = circ_builder.install();
         let total_inputs = circuit
             .interactive_iter()
@@ -966,7 +933,7 @@ where
                 .collect()
         };
 
-        let setup_data_circ: ExecutableCircuit<boolean_gmw::BooleanGate, Idx> =
+        let setup_data_circ: ExecutableCircuit<bool, boolean_gmw::BooleanGate, Idx> =
             ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
         old.install();
         let mut executor: Executor<BooleanGmw, Idx> =
@@ -1011,7 +978,7 @@ where
         Ok(())
     }
 
-    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+    async fn request_setup_output(&mut self, count: usize) -> Result<SetupData, Self::Error> {
         Ok(self.setup_data.as_mut().unwrap().split_off_last(count))
     }
 }

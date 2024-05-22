@@ -1,14 +1,15 @@
 use async_trait::async_trait;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use seec::circuit::base_circuit::BaseGate;
 use seec::circuit::{BaseCircuit, ExecutableCircuit};
 use seec::executor::{Executor, GateOutputs, Input};
+use seec::gate::base::BaseGate;
 use seec::mul_triple::boolean::insecure_provider::InsecureMTProvider;
 use seec::private_test_utils::init_tracing;
+use seec::protocols::aby2::{DeltaSharing, ShareType};
 use seec::protocols::tensor_aby2::{
-    AbySetupProvider, BoolTensorAby2, BooleanGate, DeltaShareStorage, DeltaSharing, PartialShare,
-    SetupData, ShareType, TensorGate,
+    AbySetupProvider, BoolTensorAby2, BooleanGate, DeltaShareStorage, PartialShare, SetupData,
+    TensorGate,
 };
 use seec::protocols::{DynDim, FunctionDependentSetup, Protocol, SetupStorage};
 use seec::Circuit;
@@ -44,14 +45,13 @@ impl MockSetupProvider {
 }
 
 #[async_trait]
-impl FunctionDependentSetup<DeltaShareStorage, BooleanGate, usize> for MockSetupProvider {
-    type Output = SetupData;
+impl FunctionDependentSetup<BoolTensorAby2, usize> for MockSetupProvider {
     type Error = ();
 
     async fn setup(
         &mut self,
         _shares: &GateOutputs<DeltaShareStorage>,
-        circuit: &ExecutableCircuit<BooleanGate, usize>,
+        circuit: &ExecutableCircuit<PartialShare, BooleanGate, usize>,
     ) -> Result<(), Self::Error> {
         let res = circuit
             .interactive_with_parents_iter()
@@ -89,7 +89,7 @@ impl FunctionDependentSetup<DeltaShareStorage, BooleanGate, usize> for MockSetup
         Ok(())
     }
 
-    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+    async fn request_setup_output(&mut self, count: usize) -> Result<SetupData, Self::Error> {
         Ok(self.setup_data.split_off_last(count))
     }
 }
@@ -101,9 +101,8 @@ async fn simple_matmul() -> anyhow::Result<()> {
     let circ = ExecutableCircuit::DynLayers(build_circ());
     let mut rng = ChaChaRng::seed_from_u64(4269);
     let priv_seed1 = rng.gen();
-    let priv_seed2 = rng.gen(); //rng.gen();
-    let joint_seed1 = rng.gen(); //rng.gen();
-    let joint_seed2 = rng.gen(); //rng.gen();
+    let priv_seed2 = rng.gen();
+    let joint_seed = rng.gen();
 
     let share_map1 = (0..1)
         .map(|pos| (pos, ShareType::Local))
@@ -114,8 +113,8 @@ async fn simple_matmul() -> anyhow::Result<()> {
         .chain((1..2).map(|pos| (pos, ShareType::Local)))
         .collect();
     dbg!(&share_map1);
-    let mut sharing_state1 = DeltaSharing::new(priv_seed1, joint_seed1, joint_seed2, share_map1);
-    let mut sharing_state2 = DeltaSharing::new(priv_seed2, joint_seed2, joint_seed1, share_map2);
+    let mut sharing_state1 = DeltaSharing::new(0, priv_seed1, joint_seed, share_map1);
+    let mut sharing_state2 = DeltaSharing::new(1, priv_seed2, joint_seed, share_map2);
     let state1 = BoolTensorAby2::new(sharing_state1.clone());
     let state2 = BoolTensorAby2::new(sharing_state2.clone());
 
@@ -152,18 +151,18 @@ async fn simple_matmul() -> anyhow::Result<()> {
 
     let mat = PartialShare::Matrix(BitMatrix::random(&mut rng, 4, 4));
 
-    let (shared_id_mat, plain_delta_id_mat) = sharing_state1.share(vec![id_mat.clone()]);
-    let mut inp2 = sharing_state2.plain_delta_to_share(plain_delta_id_mat);
-    let (shared_mat, plain_delta_mat) = sharing_state2.share(vec![mat.clone()]);
+    let (shared_id_mat, plain_delta_id_mat) = sharing_state1.share_tensor(vec![id_mat.clone()]);
+    let mut inp2 = sharing_state2.plain_delta_to_share_tensor(plain_delta_id_mat);
+    let (shared_mat, plain_delta_mat) = sharing_state2.share_tensor(vec![mat.clone()]);
     inp2.extend(shared_mat);
 
     let inp1 = {
         let mut inp = shared_id_mat;
-        inp.extend(sharing_state1.plain_delta_to_share(plain_delta_mat));
+        inp.extend(sharing_state1.plain_delta_to_share_tensor(plain_delta_mat));
         inp
     };
 
-    let reconst = DeltaSharing::reconstruct(inp1.clone(), inp2.clone());
+    let reconst = DeltaSharing::reconstruct_tensor(inp1.clone(), inp2.clone());
     assert_eq!(reconst, [id_mat, mat.clone()]);
 
     let (mut ch1, mut ch2) = seec_channel::in_memory::new_pair(16);
@@ -175,14 +174,14 @@ async fn simple_matmul() -> anyhow::Result<()> {
 
     let out0 = out0.into_scalar().unwrap();
     let out1 = out1.into_scalar().unwrap();
-    let out = DeltaSharing::reconstruct(out0, out1);
+    let out = DeltaSharing::reconstruct_tensor(out0, out1);
     eprintln!("{:b}", out[0].clone().into_matrix().unwrap());
     assert_eq!(out[0], mat, "Wrong output");
 
     Ok(())
 }
 
-fn build_circ() -> Circuit<BooleanGate, usize> {
+fn build_circ() -> Circuit<PartialShare, BooleanGate, usize> {
     let mut circ = BaseCircuit::new();
 
     let in1 = circ.add_gate(BooleanGate::Base(BaseGate::Input(DynDim::new(&[4, 4]))));

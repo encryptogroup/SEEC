@@ -12,7 +12,9 @@ use rand::Rng;
 use seec_bitmatrix::Storage;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::ops::{Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Shl, Shr};
+use std::ops::{
+    Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not, Shl, Shr,
+};
 use std::{array, mem};
 
 #[derive(Pod, Zeroable, Debug, Default, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -257,6 +259,15 @@ impl Add for Block {
         Block {
             data: self.data + rhs.data,
         }
+    }
+}
+
+impl Not for Block {
+    type Output = Self;
+
+    fn not(mut self) -> Self::Output {
+        self.data = !self.data;
+        self
     }
 }
 

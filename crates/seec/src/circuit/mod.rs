@@ -1,5 +1,5 @@
 //! Circuit builder and executable circuit types.
-use crate::protocols::Gate;
+use crate::protocols::{Gate, Plain};
 use crate::SubCircuitGate;
 use bytemuck::Pod;
 use either::Either;
@@ -78,17 +78,17 @@ pub trait LayerIterable {
 #[serde(bound = "\
     G: serde::Serialize + serde::de::DeserializeOwned,\
     Idx: GateIdx + Ord + Eq + Hash + serde::Serialize + serde::de::DeserializeOwned")]
-pub enum ExecutableCircuit<G, Idx> {
-    DynLayers(dyn_layers::Circuit<G, Idx>),
+pub enum ExecutableCircuit<P, G, Idx> {
+    DynLayers(dyn_layers::Circuit<P, G, Idx>),
     StaticLayers(static_layers::Circuit<G, Idx>),
 }
 
-pub enum ExecutableLayer<'c, G, Idx: Hash + PartialEq + Eq> {
-    DynLayer(dyn_layers::CircuitLayer<G, Idx>),
+pub enum ExecutableLayer<'c, P, G, Idx: Hash + PartialEq + Eq> {
+    DynLayer(dyn_layers::CircuitLayer<P, G, Idx>),
     StaticLayer(static_layers::ScLayerIterator<'c, G, Idx>),
 }
 
-impl<G, Idx> ExecutableCircuit<G, Idx> {
+impl<P, G, Idx> ExecutableCircuit<P, G, Idx> {
     pub fn interactive_count(&self) -> usize {
         match self {
             ExecutableCircuit::DynLayers(circ) => circ.interactive_count(),
@@ -141,7 +141,7 @@ impl<G, Idx> ExecutableCircuit<G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> ExecutableCircuit<G, Idx> {
+impl<P: Plain, G: Gate<P>, Idx: GateIdx> ExecutableCircuit<P, G, Idx> {
     pub fn precompute_layers(self) -> Self {
         match self {
             ExecutableCircuit::DynLayers(circ) => {
@@ -227,7 +227,7 @@ impl<G: Gate, Idx: GateIdx> ExecutableCircuit<G, Idx> {
         }
     }
 
-    pub fn layer_iter(&self) -> impl Iterator<Item = ExecutableLayer<'_, G, Idx>> + '_ {
+    pub fn layer_iter(&self) -> impl Iterator<Item = ExecutableLayer<'_, P, G, Idx>> + '_ {
         match self {
             ExecutableCircuit::DynLayers(circ) => {
                 Either::Left(dyn_layers::CircuitLayerIter::new(circ).map(ExecutableLayer::DynLayer))
@@ -239,7 +239,7 @@ impl<G: Gate, Idx: GateIdx> ExecutableCircuit<G, Idx> {
     }
 }
 
-impl<G: Clone, Idx: GateIdx> Clone for ExecutableCircuit<G, Idx> {
+impl<P: Clone, G: Clone, Idx: GateIdx> Clone for ExecutableCircuit<P, G, Idx> {
     fn clone(&self) -> Self {
         match self {
             Self::DynLayers(circ) => Self::DynLayers(circ.clone()),
@@ -248,7 +248,7 @@ impl<G: Clone, Idx: GateIdx> Clone for ExecutableCircuit<G, Idx> {
     }
 }
 
-impl<'c, G: Gate, Idx: GateIdx> ExecutableLayer<'c, G, Idx> {
+impl<'c, P: Plain, G: Gate<P>, Idx: GateIdx> ExecutableLayer<'c, P, G, Idx> {
     pub fn interactive_count(&self) -> usize {
         match self {
             ExecutableLayer::DynLayer(layer) => layer.interactive_iter().count(),
@@ -319,7 +319,7 @@ impl<'c, G: Gate, Idx: GateIdx> ExecutableLayer<'c, G, Idx> {
 
     pub fn interactive_parents_iter<'s>(
         &'s self,
-        circ: &'c ExecutableCircuit<G, Idx>,
+        circ: &'c ExecutableCircuit<P, G, Idx>,
     ) -> impl Iterator<Item = impl Iterator<Item = SubCircuitGate<Idx>> + 'c> + 's
     where
         'c: 's,
@@ -358,7 +358,7 @@ impl<'c, G: Gate, Idx: GateIdx> ExecutableLayer<'c, G, Idx> {
 
     pub fn non_interactive_with_parents_iter<'s>(
         &'s self,
-        circ: &'c ExecutableCircuit<G, Idx>,
+        circ: &'c ExecutableCircuit<P, G, Idx>,
     ) -> impl Iterator<
         Item = (
             (G, SubCircuitGate<Idx>),

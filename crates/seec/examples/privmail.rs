@@ -218,7 +218,7 @@ async fn main() -> anyhow::Result<()> {
         args.duplication_factor,
     );
 
-    let circuit: ExecutableCircuit<_, _> =
+    let circuit: ExecutableCircuit<bool, _, _> =
         ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
     // if args.save_circuit {
     //     circuit.save_dot("privmail.dot")?;

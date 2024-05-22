@@ -1,7 +1,7 @@
-use crate::circuit::base_circuit::BaseGate;
+use crate::gate::base::BaseGate;
 use crate::mul_triple::arithmetic::MulTriple;
 use crate::mul_triple::arithmetic::MulTriples;
-use crate::protocols::{Gate, Protocol, Ring, ScalarDim, SetupStorage, Share, Sharing};
+use crate::protocols::{Gate, Protocol, Ring, ScalarDim, SetupStorage, Sharing};
 use itertools::izip;
 use rand::distributions::{Distribution, Standard};
 use rand::{CryptoRng, Rng};
@@ -31,12 +31,51 @@ pub struct AdditiveSharing<RING, RNG: CryptoRng + Rng> {
 }
 
 impl<R: Ring> Protocol for ArithmeticGmw<R> {
+    type Plain = R;
+    type Share = R;
     type Msg = Msg<R>;
     type SimdMsg = ();
     type Gate = ArithmeticGate<R>;
     type Wire = ();
     type ShareStorage = Vec<R>;
     type SetupStorage = MulTriples<R>;
+
+    fn share_constant(
+        &self,
+        party_id: usize,
+        _output_share: Self::Share,
+        val: Self::Plain,
+    ) -> Self::Share {
+        if party_id == 0 {
+            val
+        } else {
+            R::ZERO
+        }
+    }
+
+    fn evaluate_non_interactive(
+        &self,
+        party_id: usize,
+        gate: &Self::Gate,
+        inputs: impl Iterator<Item = Self::Share>,
+    ) -> Self::Share {
+        let mut inputs = inputs.into_iter();
+        match gate {
+            ArithmeticGate::Base(base) => base.default_evaluate(party_id, inputs.by_ref()),
+            ArithmeticGate::Mul => panic!("Called evaluate_non_interactive on Gate::AND"),
+            ArithmeticGate::Add => {
+                let x = inputs.next().expect("Empty input");
+                let y = inputs.next().expect("Empty input");
+                x.wrapping_add(&y)
+            }
+            ArithmeticGate::Sub => {
+                // TODO is this the correct order?
+                let x = inputs.next().expect("Empty input");
+                let y = inputs.next().expect("Empty input");
+                x.wrapping_sub(&y)
+            }
+        }
+    }
 
     fn compute_msg(
         &self,
@@ -98,8 +137,7 @@ impl<R: Ring> Protocol for ArithmeticGmw<R> {
     }
 }
 
-impl<R: Ring + Share> Gate for ArithmeticGate<R> {
-    type Share = R;
+impl<R: Ring> Gate<R> for ArithmeticGate<R> {
     type DimTy = ScalarDim;
 
     fn is_interactive(&self) -> bool {
@@ -113,38 +151,15 @@ impl<R: Ring + Share> Gate for ArithmeticGate<R> {
         }
     }
 
-    fn as_base_gate(&self) -> Option<&BaseGate<Self::Share>> {
+    fn as_base_gate(&self) -> Option<&BaseGate<R>> {
         match self {
             ArithmeticGate::Base(base_gate) => Some(base_gate),
             _ => None,
         }
     }
 
-    fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
+    fn wrap_base_gate(base_gate: BaseGate<R>) -> Self {
         Self::Base(base_gate)
-    }
-
-    fn evaluate_non_interactive(
-        &self,
-        party_id: usize,
-        inputs: impl IntoIterator<Item = Self::Share>,
-    ) -> Self::Share {
-        let mut inputs = inputs.into_iter();
-        match self {
-            ArithmeticGate::Base(base) => base.evaluate_non_interactive(party_id, inputs.by_ref()),
-            ArithmeticGate::Mul => panic!("Called evaluate_non_interactive on Gate::AND"),
-            ArithmeticGate::Add => {
-                let x = inputs.next().expect("Empty input");
-                let y = inputs.next().expect("Empty input");
-                x.wrapping_add(&y)
-            }
-            ArithmeticGate::Sub => {
-                // TODO is this the correct order?
-                let x = inputs.next().expect("Empty input");
-                let y = inputs.next().expect("Empty input");
-                x.wrapping_sub(&y)
-            }
-        }
     }
 }
 
@@ -194,37 +209,17 @@ where
     }
 }
 
-impl Share for u8 {
-    type SimdShare = Vec<u8>;
-}
-
-impl Share for u16 {
-    type SimdShare = Vec<u16>;
-}
-
-impl Share for u32 {
-    type SimdShare = Vec<u32>;
-}
-
-impl Share for u64 {
-    type SimdShare = Vec<u64>;
-}
-
-impl Share for u128 {
-    type SimdShare = Vec<u128>;
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::circuit::base_circuit::BaseGate;
     use crate::circuit::{BaseCircuit, DefaultIdx, ExecutableCircuit};
+    use crate::gate::base::BaseGate;
     use crate::private_test_utils::{execute_circuit, TestChannel};
     use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGate, ArithmeticGmw};
     use crate::protocols::ScalarDim;
 
     #[tokio::test]
     async fn simple_circ() -> anyhow::Result<()> {
-        let mut bc = BaseCircuit::<_, DefaultIdx>::new();
+        let mut bc = BaseCircuit::<u32, _, DefaultIdx>::new();
         let inp1 = bc.add_gate(ArithmeticGate::Base(BaseGate::Input(ScalarDim)));
         let inp2 = bc.add_gate(ArithmeticGate::Base(BaseGate::Input(ScalarDim)));
         let inp3 = bc.add_gate(ArithmeticGate::Base(BaseGate::Input(ScalarDim)));

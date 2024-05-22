@@ -1,7 +1,7 @@
-use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::{ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{Executor, GateOutputs, Input};
+use crate::gate::base::BaseGate;
 use crate::mul_triple::boolean::MulTriples;
 use crate::mul_triple::MTProvider;
 use crate::protocols::boolean_gmw::BooleanGmw;
@@ -32,11 +32,11 @@ pub struct BooleanAby2 {
 
 #[derive(Clone, Debug)]
 pub struct DeltaSharing {
-    private_rng: ChaChaRng,
-    local_joint_rng: ChaChaRng,
-    remote_joint_rng: ChaChaRng,
+    pub(crate) private_rng: ChaChaRng,
+    pub(crate) local_joint_rng: ChaChaRng,
+    pub(crate) remote_joint_rng: ChaChaRng,
     // TODO ughh
-    input_position_share_type_map: HashMap<usize, ShareType>,
+    pub(crate) input_position_share_type_map: HashMap<usize, ShareType>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -47,14 +47,14 @@ pub enum ShareType {
 
 #[derive(Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Debug, Default)]
 pub struct Share {
-    public: bool,
-    private: bool,
+    pub(crate) public: bool,
+    pub(crate) private: bool,
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq)]
-pub struct DeltaShareStorage {
-    public: BitVec,
-    private: BitVec,
+#[derive(Clone, Debug, Default, Hash, Ord, PartialOrd, Eq, PartialEq)]
+pub struct ShareVec {
+    pub(crate) public: BitVec,
+    pub(crate) private: BitVec,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ pub enum Msg {
 
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
 pub enum BooleanGate {
-    Base(BaseGate<Share, ScalarDim>),
+    Base(BaseGate<bool, ScalarDim>),
     And { n: u8 },
     Xor,
     Inv,
@@ -127,12 +127,54 @@ pub struct AstraSetupProvider {
 
 impl Protocol for BooleanAby2 {
     const SIMD_SUPPORT: bool = false;
+    type Plain = bool;
+    type Share = Share;
     type Msg = Msg;
     type SimdMsg = ();
     type Gate = BooleanGate;
     type Wire = ();
-    type ShareStorage = DeltaShareStorage;
+    type ShareStorage = ShareVec;
     type SetupStorage = SetupData;
+
+    fn share_constant(
+        &self,
+        _party_id: usize,
+        output_share: Self::Share,
+        val: Self::Plain,
+    ) -> Self::Share {
+        assert!(
+            !output_share.private,
+            "Private part of constant share must be 0"
+        );
+        Share {
+            public: val,
+            private: false,
+        }
+    }
+
+    fn evaluate_non_interactive(
+        &self,
+        party_id: usize,
+        gate: &Self::Gate,
+        mut inputs: impl Iterator<Item = Self::Share>,
+    ) -> Self::Share {
+        match gate {
+            BooleanGate::Base(base) => base.default_evaluate(party_id, inputs.by_ref()),
+            BooleanGate::And { .. } => {
+                panic!("Called evaluate_non_interactive on Gate::And<N>")
+            }
+            BooleanGate::Xor => {
+                let a = inputs.next().expect("Empty input");
+                let b = inputs.next().expect("Empty input");
+                a.xor(b)
+            }
+            BooleanGate::Inv => {
+                let inp = inputs.next().expect("Empty input");
+                // inverts public mask for both parties
+                !inp
+            }
+        }
+    }
 
     fn compute_msg(
         &self,
@@ -179,14 +221,14 @@ impl Protocol for BooleanAby2 {
     fn setup_gate_outputs<Idx: GateIdx>(
         &mut self,
         _party_id: usize,
-        circuit: &ExecutableCircuit<Self::Gate, Idx>,
+        circuit: &ExecutableCircuit<Self::Plain, Self::Gate, Idx>,
     ) -> GateOutputs<Self::ShareStorage> {
         let storage: Vec<_> = circuit
             .gate_counts()
             // Okay to use the default value, as they will be overwritten in the next step
             .map(|(gate_count, simd_size)| {
                 assert_eq!(None, simd_size, "SIMD not supported for ABY2 protocol");
-                Input::Scalar(DeltaShareStorage::repeat(Default::default(), gate_count))
+                Input::Scalar(ShareVec::repeat(Default::default(), gate_count))
             })
             .collect();
         let mut storage = GateOutputs::new(storage);
@@ -290,11 +332,7 @@ impl BooleanGate {
                 | BaseGate::ConnectToMain(_)
                 | BaseGate::Debug
                 | BaseGate::Identity => inputs.next().expect("Empty input"),
-                BaseGate::Constant(c) => {
-                    assert!(!c.private, "Private part of constant gate share must be 0");
-                    // return constant as the public part is simply the constant
-                    *c
-                }
+                BaseGate::Constant(_) => Share::default(),
                 BaseGate::ConnectToMainFromSimd(_) => {
                     unimplemented!("SIMD currently not supported for ABY2")
                 }
@@ -364,8 +402,7 @@ impl BooleanGate {
     }
 }
 
-impl Gate for BooleanGate {
-    type Share = Share;
+impl Gate<bool> for BooleanGate {
     type DimTy = ScalarDim;
 
     fn is_interactive(&self) -> bool {
@@ -381,44 +418,15 @@ impl Gate for BooleanGate {
         }
     }
 
-    fn as_base_gate(&self) -> Option<&BaseGate<Self::Share>> {
+    fn as_base_gate(&self) -> Option<&BaseGate<bool>> {
         match self {
             BooleanGate::Base(base_gate) => Some(base_gate),
             _ => None,
         }
     }
 
-    fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
+    fn wrap_base_gate(base_gate: BaseGate<bool, Self::DimTy>) -> Self {
         Self::Base(base_gate)
-    }
-
-    fn evaluate_non_interactive(
-        &self,
-        party_id: usize,
-        mut inputs: impl Iterator<Item = Self::Share>,
-    ) -> Self::Share {
-        match self {
-            BooleanGate::Base(BaseGate::Constant(c)) => {
-                // overwrite base gate constant evaluation, because
-                // for aby2 the default implementation is wrong, and
-                // we can simply return the constant
-                *c
-            }
-            BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, inputs.by_ref()),
-            BooleanGate::And { .. } => {
-                panic!("Called evaluate_non_interactive on Gate::And<N>")
-            }
-            BooleanGate::Xor => {
-                let a = inputs.next().expect("Empty input");
-                let b = inputs.next().expect("Empty input");
-                a.xor(b)
-            }
-            BooleanGate::Inv => {
-                let inp = inputs.next().expect("Empty input");
-                // inverts public mask for both parties
-                !inp
-            }
-        }
     }
 }
 
@@ -429,11 +437,12 @@ impl Default for Msg {
 }
 
 impl super::Share for Share {
-    type SimdShare = DeltaShareStorage;
+    type Plain = bool;
+    type SimdShare = ShareVec;
 }
 
-impl From<BaseGate<Share>> for BooleanGate {
-    fn from(base_gate: BaseGate<Share>) -> Self {
+impl From<BaseGate<bool>> for BooleanGate {
+    fn from(base_gate: BaseGate<bool>) -> Self {
         Self::Base(base_gate)
     }
 }
@@ -448,7 +457,13 @@ impl From<&bristol::Gate> for BooleanGate {
     }
 }
 
-impl ShareStorage<Share> for DeltaShareStorage {
+impl ShareVec {
+    pub fn new(public: BitVec, private: BitVec) -> Self {
+        Self { public, private }
+    }
+}
+
+impl ShareStorage<Share> for ShareVec {
     fn len(&self) -> usize {
         debug_assert_eq!(self.private.len(), self.public.len());
         self.private.len()
@@ -479,7 +494,7 @@ pub struct ShareIter {
     private: <BitVec as IntoIterator>::IntoIter,
 }
 
-impl IntoIterator for DeltaShareStorage {
+impl IntoIterator for ShareVec {
     type Item = Share;
     type IntoIter = ShareIter;
 
@@ -506,7 +521,7 @@ impl Iterator for ShareIter {
 
 impl ExactSizeIterator for ShareIter {}
 
-impl FromIterator<Share> for DeltaShareStorage {
+impl FromIterator<Share> for ShareVec {
     fn from_iter<T: IntoIterator<Item = Share>>(iter: T) -> Self {
         let (public, private) = iter
             .into_iter()
@@ -516,12 +531,21 @@ impl FromIterator<Share> for DeltaShareStorage {
     }
 }
 
-impl Extend<Share> for DeltaShareStorage {
+impl Extend<Share> for ShareVec {
     fn extend<T: IntoIterator<Item = Share>>(&mut self, iter: T) {
         for share in iter {
             self.private.push(share.private);
             self.public.push(share.public);
         }
+    }
+}
+
+impl Not for ShareVec {
+    type Output = Self;
+
+    fn not(mut self) -> Self::Output {
+        self.public = !self.public;
+        self
     }
 }
 
@@ -585,7 +609,6 @@ impl Not for Share {
     type Output = Share;
 
     fn not(self) -> Self::Output {
-        // TODO correctness? Should be correct, since `not(a xor b) <=> (not a) xor b`
         Self {
             public: !self.public,
             private: self.private,
@@ -626,7 +649,7 @@ impl DeltaSharing {
         }
     }
 
-    pub fn share(&mut self, input: BitVec) -> (DeltaShareStorage, BitVec) {
+    pub fn share(&mut self, input: BitVec) -> (ShareVec, BitVec) {
         input
             .into_iter()
             .map(|bit| {
@@ -639,14 +662,14 @@ impl DeltaSharing {
             .unzip()
     }
 
-    pub fn plain_delta_to_share(&mut self, plain_deltas: BitVec) -> DeltaShareStorage {
+    pub fn plain_delta_to_share(&mut self, plain_deltas: BitVec) -> ShareVec {
         plain_deltas
             .into_iter()
             .map(|plain_delta| Share::new(self.remote_joint_rng.gen(), plain_delta))
             .collect()
     }
 
-    pub fn reconstruct(a: DeltaShareStorage, b: DeltaShareStorage) -> BitVec {
+    pub fn reconstruct(a: ShareVec, b: ShareVec) -> BitVec {
         a.into_iter()
             .zip(b)
             .map(|(sh1, sh2)| {
@@ -679,22 +702,21 @@ impl<Mtp> AbySetupProvider<Mtp> {
 }
 
 #[async_trait]
-impl<MtpErr, Mtp, Idx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx>
-    for AbySetupProvider<Mtp>
+impl<MtpErr, Mtp, Idx> FunctionDependentSetup<BooleanAby2, Idx> for AbySetupProvider<Mtp>
 where
     MtpErr: Error + Send + Sync + Debug + 'static,
     Mtp: MTProvider<Output = MulTriples, Error = MtpErr> + Send,
     Idx: GateIdx,
 {
-    type Output = SetupData;
     type Error = Infallible;
 
     async fn setup(
         &mut self,
-        shares: &GateOutputs<DeltaShareStorage>,
-        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        shares: &GateOutputs<ShareVec>,
+        circuit: &ExecutableCircuit<bool, BooleanGate, Idx>,
     ) -> Result<(), Self::Error> {
-        let circ_builder: CircuitBuilder<boolean_gmw::BooleanGate, Idx> = CircuitBuilder::new();
+        let circ_builder: CircuitBuilder<bool, boolean_gmw::BooleanGate, Idx> =
+            CircuitBuilder::new();
         let old = circ_builder.install();
         let total_inputs: usize = circuit
             .interactive_iter()
@@ -734,7 +756,7 @@ where
                 .collect()
         };
 
-        let setup_data_circ: ExecutableCircuit<boolean_gmw::BooleanGate, Idx> =
+        let setup_data_circ: ExecutableCircuit<bool, boolean_gmw::BooleanGate, Idx> =
             ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
         old.install();
         let mut executor: Executor<BooleanGmw, Idx> =
@@ -771,7 +793,7 @@ where
         Ok(())
     }
 
-    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+    async fn request_setup_output(&mut self, count: usize) -> Result<SetupData, Self::Error> {
         Ok(self
             .setup_data
             .as_mut()
@@ -797,7 +819,7 @@ impl AstraSetupHelper {
 
     pub async fn setup<Idx: GateIdx>(
         self,
-        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        circuit: &ExecutableCircuit<bool, BooleanGate, Idx>,
         input_map: HashMap<usize, InputBy>,
     ) {
         let p0_gate_outputs =
@@ -849,11 +871,11 @@ impl AstraSetupHelper {
     fn setup_gate_outputs<Idx: GateIdx>(
         &self,
         party_id: usize,
-        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        circuit: &ExecutableCircuit<bool, BooleanGate, Idx>,
         local_seed: [u8; 32],
         joint_seed: [u8; 32],
         input_map: &HashMap<usize, InputBy>,
-    ) -> GateOutputs<DeltaShareStorage> {
+    ) -> GateOutputs<ShareVec> {
         // The idea is to reuse the `BooleanAby2` setup_gate_outputs method with the correct
         // rngs to generate the correct values for the helper
 
@@ -896,17 +918,16 @@ impl AstraSetupProvider {
 }
 
 #[async_trait]
-impl<Idx> FunctionDependentSetup<DeltaShareStorage, BooleanGate, Idx> for AstraSetupProvider
+impl<Idx> FunctionDependentSetup<BooleanAby2, Idx> for AstraSetupProvider
 where
     Idx: GateIdx,
 {
-    type Output = SetupData;
     type Error = Infallible;
 
     async fn setup(
         &mut self,
-        _shares: &GateOutputs<DeltaShareStorage>,
-        circuit: &ExecutableCircuit<BooleanGate, Idx>,
+        _shares: &GateOutputs<ShareVec>,
+        circuit: &ExecutableCircuit<bool, BooleanGate, Idx>,
     ) -> Result<(), Self::Error> {
         if self.party_id == 0 {
             let lambda_values: Vec<_> = (0..circuit.interactive_count())
@@ -935,7 +956,7 @@ where
         Ok(())
     }
 
-    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+    async fn request_setup_output(&mut self, count: usize) -> Result<SetupData, Self::Error> {
         Ok(self
             .setup_data
             .as_mut()
@@ -955,7 +976,7 @@ mod tests {
 
     #[tokio::test]
     async fn multi_and() {
-        let mut c = BaseCircuit::<BG>::new();
+        let mut c = BaseCircuit::<bool, BG>::new();
         let i0 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));
         let i1 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));
         let i2 = c.add_gate(BG::Base(BaseGate::Input(ScalarDim)));

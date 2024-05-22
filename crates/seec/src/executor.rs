@@ -11,36 +11,28 @@ use std::{iter, mem, vec};
 use seec_channel::{Receiver, Sender};
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::builder::SubCircuitGate;
 use crate::circuit::{CircuitId, DefaultIdx, ExecutableCircuit, GateIdx};
 use crate::errors::ExecutorError;
+use crate::gate::base::BaseGate;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
-    ErasedError, FunctionDependentSetup, Gate, Protocol, Share, ShareOf, ShareStorage, SimdShareOf,
+    ErasedError, FunctionDependentSetup, Gate, Protocol, Share, ShareStorage, SimdShareOf,
 };
 use crate::utils::BoxError;
 
 pub type BoolGmwExecutor<'c> = Executor<'c, BooleanGmw, DefaultIdx>;
 
 pub struct Executor<'c, P: Protocol, Idx> {
-    circuit: &'c ExecutableCircuit<P::Gate, Idx>,
+    circuit: &'c ExecutableCircuit<P::Plain, P::Gate, Idx>,
     protocol_state: P,
     gate_outputs: GateOutputs<P::ShareStorage>,
     party_id: usize,
     setup: DynFDSetup<'c, P, Idx>,
 }
 
-pub type DynFDSetup<'c, P, Idx> = Box<
-    dyn FunctionDependentSetup<
-            <P as Protocol>::ShareStorage,
-            <P as Protocol>::Gate,
-            Idx,
-            Output = <P as Protocol>::SetupStorage,
-            Error = BoxError,
-        > + Send
-        + 'c,
->;
+pub type DynFDSetup<'c, P, Idx> =
+    Box<dyn FunctionDependentSetup<P, Idx, Error = BoxError> + Send + 'c>;
 
 #[derive(Debug, Clone)]
 pub struct GateOutputs<Shares> {
@@ -71,7 +63,7 @@ impl<'c, P, Idx> Executor<'c, P, Idx>
 where
     P: Protocol + Default,
     Idx: GateIdx,
-    <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
+    P::Share: Share<SimdShare = P::ShareStorage>,
 {
     // for some reason the manual future desugaring is needed here...
     // the send problem of async is so annoying...
@@ -80,14 +72,12 @@ where
         // FDError, // this little hack is needed to work around https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
         FDSetup,
     >(
-        circuit: &'c ExecutableCircuit<P::Gate, Idx>,
+        circuit: &'c ExecutableCircuit<P::Plain, P::Gate, Idx>,
         party_id: usize,
         setup: FDSetup,
     ) -> impl Future<Output = Result<Executor<'c, P, Idx>, ExecutorError>> + Send
     where
-        FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>
-            + Send
-            + 'c,
+        FDSetup: FunctionDependentSetup<P, Idx> + Send + 'c,
         FDSetup::Error: Error + Send + Sync + 'static,
     {
         async move { Self::new_with_state(P::default(), circuit, party_id, setup).await }
@@ -102,19 +92,17 @@ impl<'c, P, Idx> Executor<'c, P, Idx>
 where
     P: Protocol,
     Idx: GateIdx,
-    <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
+    P::Share: Share<SimdShare = P::ShareStorage>,
 {
     pub async fn new_with_state<FDSetup>(
         mut protocol_state: P,
-        circuit: &'c ExecutableCircuit<P::Gate, Idx>,
+        circuit: &'c ExecutableCircuit<P::Plain, P::Gate, Idx>,
         party_id: usize,
         mut setup: FDSetup,
     ) -> Result<Executor<'c, P, Idx>, ExecutorError>
     where
         // FDError: Error + Send + Sync + 'static,
-        FDSetup: FunctionDependentSetup<P::ShareStorage, P::Gate, Idx, Output = P::SetupStorage>
-            + Send
-            + 'c,
+        FDSetup: FunctionDependentSetup<P, Idx> + Send + 'c,
         FDSetup::Error: Error + Send + Sync + 'static,
     {
         let gate_outputs = protocol_state.setup_gate_outputs(party_id, circuit);
@@ -169,7 +157,7 @@ where
                 trace!(?gate, ?sc_gate_id, "Evaluating");
 
                 match gate.as_base_gate() {
-                    Some(base_gate @ BaseGate::Input(_)) => {
+                    Some(BaseGate::Input(_)) => {
                         assert_eq!(
                             sc_gate_id.circuit_id, 0,
                             "Input gate in SubCircuit. Use SubCircuitInput"
@@ -181,8 +169,9 @@ where
                             .binary_search(&sc_gate_id.gate_id)
                             .expect("Input gate not contained in input_gates");
                         if main_is_simd {
-                            let output = base_gate.evaluate_non_interactive_simd(
+                            let output = self.protocol_state.evaluate_non_interactive_simd(
                                 self.party_id,
+                                &gate,
                                 iter::once(
                                     &inputs.as_simd().expect("main circ is simd but input not")
                                         [inp_idx],
@@ -196,8 +185,9 @@ where
                             );
                             self.gate_outputs.set_simd(sc_gate_id, output);
                         } else {
-                            let output = base_gate.evaluate_non_interactive(
+                            let output = self.protocol_state.evaluate_non_interactive(
                                 self.party_id,
+                                &gate,
                                 iter::once(
                                     inputs
                                         .as_scalar()
@@ -214,14 +204,15 @@ where
                             self.gate_outputs.set(sc_gate_id, output);
                         }
                     }
-                    Some(base_gate @ BaseGate::SubCircuitInput(_)) => {
+                    Some(BaseGate::SubCircuitInput(_)) => {
                         let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
                         match (main_is_simd, simd_size.is_some()) {
                             (true, true) => {
                                 // simd to siimd
                                 let inputs = self.simd_inputs(parents);
-                                let simd_output =
-                                    base_gate.evaluate_non_interactive_simd(self.party_id, inputs);
+                                let simd_output = self
+                                    .protocol_state
+                                    .evaluate_non_interactive_simd(self.party_id, &gate, inputs);
                                 trace!(
                                     ?simd_output,
                                     sc_gate_id = %sc_gate_id,
@@ -232,8 +223,7 @@ where
                             }
                             (false, true) => {
                                 // non-simd to simd
-                                let inputs = self.inputs(parents);
-                                let output = base_gate.evaluate_sc_input_simd(inputs);
+                                let output = self.inputs(parents).collect();
                                 trace!(
                                     ?output,
                                     sc_gate_id = %sc_gate_id,
@@ -245,15 +235,18 @@ where
                             (false, false) => {
                                 // non-simd to non-simd
                                 let inputs = self.inputs(parents);
-                                let simd_output =
-                                    base_gate.evaluate_non_interactive(self.party_id, inputs);
+                                let output = self.protocol_state.evaluate_non_interactive(
+                                    self.party_id,
+                                    &gate,
+                                    inputs,
+                                );
                                 trace!(
-                                    ?simd_output,
+                                    ?output,
                                     sc_gate_id = %sc_gate_id,
                                     "Evaluated {:?} gate",
                                     gate
                                 );
-                                self.gate_outputs.set(sc_gate_id, simd_output);
+                                self.gate_outputs.set(sc_gate_id, output);
                             }
                             (true, false) => {
                                 // simd to non-simd is illegal
@@ -261,11 +254,11 @@ where
                             }
                         }
                     }
-                    Some(base_gate @ BaseGate::ConnectToMainFromSimd(_)) => {
+                    Some(BaseGate::ConnectToMainFromSimd((_, select))) => {
                         let input = self
                             .gate_outputs
                             .get_simd(parents.next().expect("Missing input"));
-                        let output = base_gate.evaluate_connect_to_main_simd(input);
+                        let output = input.get(*select as usize);
                         trace!(
                             ?output,
                             sc_gate_id = %sc_gate_id,
@@ -275,21 +268,29 @@ where
                         self.gate_outputs.set(sc_gate_id, output);
                         continue;
                     }
-                    _other => {
+                    other => {
                         let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
-                        if simd_size.is_none() {
-                            let inputs = self.inputs(parents);
-                            let output = gate.evaluate_non_interactive(self.party_id, inputs);
-                            trace!(
-                                ?output,
-                                sc_gate_id = %sc_gate_id,
-                                "Evaluated {:?} gate",
-                                gate
-                            );
-                            self.gate_outputs.set(sc_gate_id, output);
-                        } else {
-                            let inputs = self.simd_inputs(parents);
-                            let output = gate.evaluate_non_interactive_simd(self.party_id, inputs);
+                        if let Some(simd_size) = simd_size {
+                            let output = if let Some(BaseGate::Constant(c)) = other {
+                                // get unchecked because it was not set from a gate evaluation
+                                // before. However, this value might have been initialized in
+                                // setup_gate_outputs
+                                let current_out = self.gate_outputs.get_simd_unchecked(sc_gate_id);
+                                self.protocol_state.share_constant_simd(
+                                    self.party_id,
+                                    current_out,
+                                    c.clone(),
+                                    simd_size,
+                                )
+                            } else {
+                                let inputs = self.simd_inputs(parents);
+                                self.protocol_state.evaluate_non_interactive_simd(
+                                    self.party_id,
+                                    &gate,
+                                    inputs,
+                                )
+                            };
+
                             trace!(
                                 ?output,
                                 sc_gate_id = %sc_gate_id,
@@ -297,6 +298,32 @@ where
                                 gate
                             );
                             self.gate_outputs.set_simd(sc_gate_id, output);
+                        } else {
+                            let output = if let Some(BaseGate::Constant(c)) = other {
+                                // get unchecked because it was not set from a gate evaluation
+                                // before. However, this value might have been initialized in
+                                // setup_gate_outputs
+                                let current_out = self.gate_outputs.get_unchecked(sc_gate_id);
+                                self.protocol_state.share_constant(
+                                    self.party_id,
+                                    current_out,
+                                    c.clone(),
+                                )
+                            } else {
+                                let inputs = self.inputs(parents);
+                                self.protocol_state.evaluate_non_interactive(
+                                    self.party_id,
+                                    &gate,
+                                    inputs,
+                                )
+                            };
+                            trace!(
+                                ?output,
+                                sc_gate_id = %sc_gate_id,
+                                "Evaluated {:?} gate",
+                                gate
+                            );
+                            self.gate_outputs.set(sc_gate_id, output);
                         }
                     }
                 };
@@ -477,7 +504,7 @@ where
     fn inputs<'s, 'p>(
         &'s self,
         parent_ids: impl Iterator<Item = SubCircuitGate<Idx>> + 'p,
-    ) -> impl Iterator<Item = ShareOf<P::Gate>> + 'p
+    ) -> impl Iterator<Item = P::Share> + 'p
     where
         's: 'p,
     {
@@ -487,7 +514,7 @@ where
     fn simd_inputs<'s, 'p>(
         &'s self,
         parent_ids: impl Iterator<Item = SubCircuitGate<Idx>> + 'p,
-    ) -> impl Iterator<Item = &SimdShareOf<P::Gate>> + 'p
+    ) -> impl Iterator<Item = &SimdShareOf<P::Share>> + 'p
     where
         's: 'p,
     {
@@ -655,7 +682,7 @@ impl<Shares> FromIterator<Input<Shares>> for GateOutputs<Shares> {
 
 #[cfg(test)]
 mod tests {
-    use crate::circuit::base_circuit::BaseGate;
+    use crate::gate::base::BaseGate;
     use anyhow::Result;
     use bitvec::{bitvec, prelude::Lsb0};
     use tracing::debug;
@@ -735,7 +762,7 @@ mod tests {
         let inputs_0 = bitvec![usize, Lsb0; 1, 1, 0, 0];
         let inputs_1 = bitvec![usize, Lsb0; 0, 1, 0, 1];
         let exp_output = bitvec![usize, Lsb0; 1, 1, 0];
-        let adder: Circuit<BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
+        let adder: Circuit<bool, BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
 
         debug!("Into circuit");
         let out = execute_circuit::<BooleanGmw, _, _>(

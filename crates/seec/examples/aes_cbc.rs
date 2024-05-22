@@ -308,7 +308,7 @@ async fn execute(args: &ExecuteArgs) -> Result<()> {
 }
 
 async fn bench_execute(args: &ExecuteArgs) -> Result<()> {
-    let exec_circ: ExecutableCircuit<BooleanGate, usize> = bincode::deserialize_from(
+    let exec_circ: ExecutableCircuit<bool, BooleanGate, usize> = bincode::deserialize_from(
         BufReader::new(File::open(&args.circuit).context("Failed to open circuit file")?),
     )?;
 
@@ -351,7 +351,7 @@ async fn encrypt(
     shared_key: &BitSlice<usize>,
     shared_iv: &BitSlice<usize>,
 ) -> Result<Output<BitVec<usize>>> {
-    let exec_circ: ExecutableCircuit<BooleanGate, usize> = bincode::deserialize_from(
+    let exec_circ: ExecutableCircuit<bool, BooleanGate, usize> = bincode::deserialize_from(
         BufReader::new(File::open(&args.circuit).context("Failed to open circuit file")?),
     )?;
 
@@ -382,7 +382,7 @@ async fn encrypt(
 fn build_enc_circuit(
     data_size_bits: usize,
     use_sc: bool,
-) -> Result<ExecutableCircuit<BooleanGate, usize>> {
+) -> Result<ExecutableCircuit<bool, BooleanGate, usize>> {
     assert_eq!(
         data_size_bits % 128,
         0,
@@ -399,6 +399,7 @@ fn build_enc_circuit(
         .for_each(|chunk| aes_cbc_chunk(&key, chunk, &mut chaining_state, use_sc));
 
     Ok(ExecutableCircuit::DynLayers(CircuitBuilder::<
+        bool,
         BooleanGate,
         usize,
     >::global_into_circuit()))
@@ -427,7 +428,7 @@ fn aes128(
     chunk: &[Secret<BooleanGmw, usize>],
     use_sc: bool,
 ) -> Vec<Secret<BooleanGmw, usize>> {
-    static AES_CIRC: Lazy<SharedCircuit<BooleanGate, usize>> = Lazy::new(|| {
+    static AES_CIRC: Lazy<SharedCircuit<bool, BooleanGate, usize>> = Lazy::new(|| {
         let aes_circ_str = include_str!("../test_resources/bristol-circuits/aes_128.bristol");
         BaseCircuit::from_bristol(
             seec::bristol::circuit(aes_circ_str).expect("parsing AES circuit failed"),

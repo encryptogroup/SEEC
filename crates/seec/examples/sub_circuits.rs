@@ -37,7 +37,7 @@ fn main() {
 
     (or_out ^ false).output();
 
-    let circuit: Circuit<BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
+    let circuit: Circuit<bool, BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
     let layer_iter = CircuitLayerIter::new(&circuit);
     for layer in layer_iter {
         dbg!(layer);

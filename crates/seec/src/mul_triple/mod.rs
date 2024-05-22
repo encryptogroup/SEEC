@@ -2,7 +2,7 @@
 
 use crate::circuit::ExecutableCircuit;
 use crate::executor::GateOutputs;
-use crate::protocols::FunctionDependentSetup;
+use crate::protocols::{FunctionDependentSetup, Protocol};
 use crate::utils::{BoxError, ErasedError};
 use async_trait::async_trait;
 use std::error::Error;
@@ -63,23 +63,25 @@ impl<Out, Err> MTProvider for Box<dyn MTProvider<Output = Out, Error = Err> + Se
 // TODO I think this impl would disallow downstream crates to impl FunctionDependentSetup
 //  on second thought, this might not be the case
 #[async_trait]
-impl<ShareStorage: Sync, G: Send + Sync, Idx: Send + Sync, Mtp: MTProvider + Send>
-    FunctionDependentSetup<ShareStorage, G, Idx> for Mtp
+impl<P, Idx, Mtp> FunctionDependentSetup<P, Idx> for Mtp
+where
+    P: Protocol,
+    Idx: Send + Sync,
+    Mtp: MTProvider<Output = P::SetupStorage> + Send,
 {
-    type Output = Mtp::Output;
     type Error = Mtp::Error;
 
     async fn setup(
         &mut self,
-        _shares: &GateOutputs<ShareStorage>,
-        _circuit: &ExecutableCircuit<G, Idx>,
+        _shares: &GateOutputs<P::ShareStorage>,
+        _circuit: &ExecutableCircuit<P::Plain, P::Gate, Idx>,
     ) -> Result<(), Self::Error> {
         // TODO, should this call precompute_mts ? Mhh, currently I call it explicitly
         //  when I want to perform FIP
         Ok(())
     }
 
-    async fn request_setup_output(&mut self, count: usize) -> Result<Self::Output, Self::Error> {
+    async fn request_setup_output(&mut self, count: usize) -> Result<P::SetupStorage, Self::Error> {
         self.request_mts(count).await
     }
 }

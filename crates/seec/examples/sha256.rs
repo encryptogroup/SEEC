@@ -53,7 +53,7 @@ struct Args {
 async fn main() -> Result<()> {
     let _guard = init_tracing()?;
     let args = Args::parse();
-    let circuit: ExecutableCircuit<BooleanGate, u32> = ExecutableCircuit::DynLayers(
+    let circuit: ExecutableCircuit<bool, BooleanGate, u32> = ExecutableCircuit::DynLayers(
         BaseCircuit::load_bristol(args.circuit, Load::Circuit)?.into(),
     );
 

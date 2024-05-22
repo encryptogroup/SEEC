@@ -1,10 +1,10 @@
 use crate::bristol;
-use crate::circuit::base_circuit::BaseGate;
 use crate::common::BitVec;
 use crate::evaluate::and;
+use crate::gate::base::BaseGate;
 use crate::mul_triple::boolean::MulTriple;
 use crate::mul_triple::boolean::MulTriples;
-use crate::protocols::{Gate, Protocol, ScalarDim, SetupStorage, Share, Sharing};
+use crate::protocols::{Gate, Plain, Protocol, ScalarDim, SetupStorage, Share, Sharing};
 use crate::utils::{rand_bitvec, BitVecExt};
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
@@ -45,12 +45,70 @@ pub struct XorSharing<R: CryptoRng + Rng> {
 
 impl Protocol for BooleanGmw {
     const SIMD_SUPPORT: bool = true;
+    type Plain = bool;
+    type Share = bool;
     type Msg = Msg;
     type SimdMsg = SimdMsg;
     type Gate = BooleanGate;
     type Wire = ();
     type ShareStorage = BitVec<usize>;
     type SetupStorage = MulTriples;
+
+    fn share_constant(&self, party_id: usize, _output_share: bool, val: bool) -> Self::Share {
+        if party_id == 0 {
+            val
+        } else {
+            false
+        }
+    }
+
+    fn evaluate_non_interactive(
+        &self,
+        party_id: usize,
+        gate: &Self::Gate,
+        mut inputs: impl Iterator<Item = Self::Share>,
+    ) -> Self::Share {
+        match gate {
+            BooleanGate::Base(base) => base.default_evaluate(party_id, inputs),
+            BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
+            BooleanGate::Xor => {
+                inputs.next().expect("Missing inputs") ^ inputs.next().expect("Missing inputs")
+            }
+            BooleanGate::Inv => {
+                let inp = inputs.next().expect("Empty input");
+                if party_id == 0 {
+                    !inp
+                } else {
+                    inp
+                }
+            }
+        }
+    }
+
+    fn evaluate_non_interactive_simd<'e>(
+        &self,
+        party_id: usize,
+        gate: &Self::Gate,
+        mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
+    ) -> <Self::Share as Share>::SimdShare {
+        match gate {
+            BooleanGate::Base(base) => base.default_evaluate_simd(party_id, inputs),
+            BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
+            BooleanGate::Xor => inputs
+                .next()
+                .expect("Missing inputs")
+                .clone()
+                .fast_bit_xor(inputs.next().expect("Missing inputs")),
+            BooleanGate::Inv => {
+                let inp = inputs.next().expect("Empty input").clone();
+                if party_id == 0 {
+                    !inp
+                } else {
+                    inp
+                }
+            }
+        }
+    }
 
     fn compute_msg(
         &self,
@@ -207,12 +265,14 @@ impl Protocol for BooleanGmw {
     }
 }
 
+impl Plain for bool {}
+
 impl Share for bool {
+    type Plain = bool;
     type SimdShare = BitVec<usize>;
 }
 
-impl Gate for BooleanGate {
-    type Share = bool;
+impl Gate<bool> for BooleanGate {
     type DimTy = ScalarDim;
 
     fn is_interactive(&self) -> bool {
@@ -227,62 +287,15 @@ impl Gate for BooleanGate {
         }
     }
 
-    fn as_base_gate(&self) -> Option<&BaseGate<Self::Share>> {
+    fn as_base_gate(&self) -> Option<&BaseGate<bool>> {
         match self {
             BooleanGate::Base(base_gate) => Some(base_gate),
             _ => None,
         }
     }
 
-    fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
+    fn wrap_base_gate(base_gate: BaseGate<bool, Self::DimTy>) -> Self {
         Self::Base(base_gate)
-    }
-
-    #[inline]
-    fn evaluate_non_interactive(
-        &self,
-        party_id: usize,
-        mut inputs: impl Iterator<Item = Self::Share>,
-    ) -> Self::Share {
-        match self {
-            BooleanGate::Base(base) => base.evaluate_non_interactive(party_id, inputs),
-            BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
-            BooleanGate::Xor => {
-                inputs.next().expect("Missing inputs") ^ inputs.next().expect("Missing inputs")
-            }
-            BooleanGate::Inv => {
-                let inp = inputs.next().expect("Empty input");
-                if party_id == 0 {
-                    !inp
-                } else {
-                    inp
-                }
-            }
-        }
-    }
-
-    fn evaluate_non_interactive_simd<'this, 'e>(
-        &'this self,
-        party_id: usize,
-        mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
-    ) -> <Self::Share as Share>::SimdShare {
-        match self {
-            BooleanGate::Base(base) => base.evaluate_non_interactive_simd(party_id, inputs),
-            BooleanGate::And => panic!("Called evaluate_non_interactive on Gate::AND"),
-            BooleanGate::Xor => inputs
-                .next()
-                .expect("Missing inputs")
-                .clone()
-                .fast_bit_xor(inputs.next().expect("Missing inputs")),
-            BooleanGate::Inv => {
-                let inp = inputs.next().expect("Empty input").clone();
-                if party_id == 0 {
-                    !inp
-                } else {
-                    inp
-                }
-            }
-        }
     }
 }
 
@@ -348,7 +361,7 @@ mod tests {
         let a = Secret::<_, u32>::input(0);
         (a & false).output();
 
-        let circ = CircuitBuilder::<BooleanGate, u32>::global_into_circuit();
+        let circ = CircuitBuilder::<bool, BooleanGate, u32>::global_into_circuit();
         let out = execute_circuit::<BooleanGmw, _, _>(
             &ExecutableCircuit::DynLayers(circ),
             true,

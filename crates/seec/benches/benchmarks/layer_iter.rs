@@ -7,7 +7,7 @@ use seec::secret::{inputs, low_depth_reduce, Secret};
 use seec::{sub_circuit, BooleanGate, CircuitBuilder};
 
 fn build_circuit(keyword_size: usize, target_text_size: usize) -> Circuit {
-    CircuitBuilder::<BooleanGate, u32>::new().install();
+    CircuitBuilder::<bool, BooleanGate, u32>::new().install();
     let keyword: Vec<_> = (0..keyword_size)
         .map(|_| inputs(8).try_into().unwrap())
         .collect();
@@ -17,7 +17,7 @@ fn build_circuit(keyword_size: usize, target_text_size: usize) -> Circuit {
 
     create_search_circuit(&keyword, &target_text);
 
-    let circ = CircuitBuilder::<BooleanGate, u32>::global_into_circuit();
+    let circ = CircuitBuilder::<bool, BooleanGate, u32>::global_into_circuit();
     circ
 }
 

@@ -42,6 +42,7 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
 
     let inputs_size_ty = quote!((#(<#input_tys as ::seec::SubCircuitInput>::Size, )*));
     let input_protocol_ty = quote!(<#first_input_ty as ::seec::SubCircuitInput>::Protocol);
+    let input_plain_ty = quote!(<#input_protocol_ty as ::seec::protocols::Protocol>::Plain);
     let input_gate_ty = quote!(<#input_protocol_ty as ::seec::protocols::Protocol>::Gate);
     let input_idx_ty = quote!(<#first_input_ty as ::seec::SubCircuitInput>::Idx);
 
@@ -76,12 +77,12 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
                 ::parking_lot::Mutex<
                     ::std::collections::HashMap<
                         #inputs_size_ty,
-                        (::seec::circuit::SharedCircuit<#input_gate_ty, #input_idx_ty>, _internal_ForceSendSync<#inner_ret>)
+                        (::seec::circuit::SharedCircuit<#input_plain_ty, #input_gate_ty, #input_idx_ty>, _internal_ForceSendSync<#inner_ret>)
                     >
                 >
             > = ::once_cell::sync::Lazy::new(|| ::parking_lot::Mutex::new(::std::collections::HashMap::new()));
 
-            ::seec::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::with_global(|builder| {
+            ::seec::CircuitBuilder::<#input_plain_ty, #input_gate_ty, #input_idx_ty>::with_global(|builder| {
                 builder.add_cache(&*CACHE);
             });
 
@@ -92,8 +93,8 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
 
             let (sc_id, ret) = match CACHE.lock().entry(input_size.clone()) {
                 ::std::collections::hash_map::Entry::Vacant(entry) => {
-                    let sub_circuit = ::seec::SharedCircuit::<#input_gate_ty, #input_idx_ty>::default();
-                    let sc_id = ::seec::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::push_global_circuit(sub_circuit.clone());
+                    let sub_circuit = ::seec::SharedCircuit::<#input_plain_ty, #input_gate_ty, #input_idx_ty>::default();
+                    let sc_id = ::seec::CircuitBuilder::<#input_plain_ty, #input_gate_ty, #input_idx_ty>::push_global_circuit(sub_circuit.clone());
                     let ret = #call_inner;
                     let ret = ::seec::SubCircuitOutput::create_output_gates(ret);
                     entry.insert((sub_circuit, _internal_ForceSendSync(ret.clone())));
@@ -101,11 +102,11 @@ pub(crate) fn sub_circuit(input: ItemFn) -> TokenStream {
                 }
                 ::std::collections::hash_map::Entry::Occupied(entry) => {
                     let (sub_circuit, ret) = entry.get();
-                    let sc_id = ::seec::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::push_global_circuit(sub_circuit.clone());
+                    let sc_id = ::seec::CircuitBuilder::<#input_plain_ty, #input_gate_ty, #input_idx_ty>::push_global_circuit(sub_circuit.clone());
                     (sc_id, ret.0.clone())
                 }
             };
-            ::seec::CircuitBuilder::<#input_gate_ty, #input_idx_ty>::with_global(|builder| {
+            ::seec::CircuitBuilder::<#input_plain_ty, #input_gate_ty, #input_idx_ty>::with_global(|builder| {
                 builder.connect_sub_circuit(&circ_inputs, sc_id);
             });
 

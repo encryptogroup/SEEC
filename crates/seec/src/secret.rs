@@ -10,9 +10,9 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 
 use itertools::Itertools;
 
-use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::builder::SharedCircuit;
 use crate::circuit::{BooleanGate, CircuitId, DefaultIdx, GateId, GateIdx};
+use crate::gate::base::BaseGate;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::ScalarDim;
 use crate::CircuitBuilder;
@@ -105,7 +105,7 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
             "Can't connect Secret of main circuit to main circuit"
         );
         let out = self.sub_circuit_output();
-        CircuitBuilder::<BooleanGate, Idx>::with_global(|builder| {
+        CircuitBuilder::<bool, BooleanGate, Idx>::with_global(|builder| {
             let input_to_main = Secret::sub_circuit_input(
                 0,
                 BooleanGate::Base(BaseGate::SubCircuitInput(ScalarDim)),
@@ -123,7 +123,7 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
         self.circuit_id
     }
 
-    pub(crate) fn get_circuit(&self) -> SharedCircuit<BooleanGate, Idx> {
+    pub(crate) fn get_circuit(&self) -> SharedCircuit<bool, BooleanGate, Idx> {
         CircuitBuilder::get_global_circuit(self.circuit_id)
             .expect("circuit_id is not stored in global CircuitBuilder")
     }
@@ -386,7 +386,7 @@ pub(crate) fn sub_circuit_inputs<Idx: GateIdx>(
 ///     .output();
 /// // It is important that the Gate and Idx type of the circuit match up with those of the
 /// // Secrets, as otherwise an empty circuit will be returned
-/// let and_tree: Circuit<BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
+/// let and_tree: Circuit<bool, BooleanGate, DefaultIdx> = CircuitBuilder::global_into_circuit();
 /// assert_eq!(and_tree.interactive_count(), 22)
 /// ```
 ///
