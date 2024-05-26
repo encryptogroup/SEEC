@@ -62,6 +62,7 @@ pub mod common;
 pub mod errors;
 pub(crate) mod evaluate;
 pub mod executor;
+pub mod gate;
 pub mod mul_triple;
 pub mod parse;
 #[cfg(feature = "_integration_tests")]

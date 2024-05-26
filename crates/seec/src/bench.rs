@@ -9,8 +9,8 @@ use crate::executor::{Executor, Input, Message};
 use crate::mul_triple::storage::MTStorage;
 use crate::mul_triple::{boolean, MTProvider};
 use crate::protocols::boolean_gmw::BooleanGmw;
-use crate::protocols::mixed_gmw::{MixedGmw, MixedShare};
-use crate::protocols::{mixed_gmw, Gate, Protocol, Ring, Share, ShareStorage};
+use crate::protocols::mixed_gmw::{Mixed, MixedGmw};
+use crate::protocols::{mixed_gmw, Protocol, Ring, Share, ShareStorage};
 use crate::utils::{BoxError, ErasedError};
 use crate::CircuitBuilder;
 use anyhow::{anyhow, Context};
@@ -78,18 +78,18 @@ where
 }
 
 // TODO this is wrong to just always generate arith shares, so it lives here in the bench API
-impl<R> Distribution<MixedShare<R>> for Standard
+impl<R> Distribution<Mixed<R>> for Standard
 where
     Standard: Distribution<R>,
 {
-    fn sample<RNG: Rng + ?Sized>(&self, rng: &mut RNG) -> MixedShare<R> {
-        MixedShare::Arith(rng.sample(Standard))
+    fn sample<RNG: Rng + ?Sized>(&self, rng: &mut RNG) -> Mixed<R> {
+        Mixed::Arith(rng.sample(Standard))
     }
 }
 
 pub struct BenchParty<P: Protocol, Idx> {
     id: usize,
-    circ: Option<ExecutableCircuit<P::Gate, Idx>>,
+    circ: Option<ExecutableCircuit<P::Plain, P::Gate, Idx>>,
     server: Option<SocketAddr>,
     meta: String,
     insecure_setup: bool,
@@ -117,9 +117,9 @@ pub struct BenchResult {
 impl<P, Idx> BenchParty<P, Idx>
 where
     P: BenchProtocol,
-    Standard: Distribution<<<P as Protocol>::Gate as Gate>::Share>,
+    Standard: Distribution<P::Share>,
     Idx: GateIdx,
-    <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
+    P::Share: Share<SimdShare = P::ShareStorage>,
 {
     pub fn new(id: usize) -> Self {
         Self {
@@ -143,7 +143,7 @@ where
         self
     }
 
-    pub fn explicit_circuit(mut self, circuit: ExecutableCircuit<P::Gate, Idx>) -> Self {
+    pub fn explicit_circuit(mut self, circuit: ExecutableCircuit<P::Plain, P::Gate, Idx>) -> Self {
         self.circ = Some(circuit);
         self
     }
@@ -247,7 +247,7 @@ where
                 let circ = match &self.circ {
                     Some(circ) => circ,
                     None => {
-                        let circ = CircuitBuilder::<P::Gate, Idx>::global_into_circuit();
+                        let circ = CircuitBuilder::<P::Plain, P::Gate, Idx>::global_into_circuit();
                         if self.precompute_layers {
                             owned_circ = ExecutableCircuit::DynLayers(circ).precompute_layers();
                             &owned_circ

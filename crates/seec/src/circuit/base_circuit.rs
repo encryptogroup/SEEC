@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs;
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
@@ -20,8 +21,9 @@ use tracing::{debug, info, instrument, trace};
 
 use crate::circuit::{CircuitId, DefaultIdx, GateIdx, LayerIterable};
 use crate::errors::CircuitError;
+use crate::gate::base::BaseGate;
 use crate::protocols::boolean_gmw::BooleanGate;
-use crate::protocols::{Dimension, Gate, ScalarDim, Share, ShareStorage, Wire};
+use crate::protocols::{Gate, ScalarDim, Wire};
 use crate::{bristol, SharedCircuit, SubCircuitGate};
 
 type CircuitGraph<Gate, Idx, Wire> = Graph<Gate, Wire, Directed, Idx>;
@@ -30,7 +32,7 @@ type CircuitGraph<Gate, Idx, Wire> = Graph<Gate, Wire, Directed, Idx>;
 #[serde(bound = "Gate: serde::Serialize + serde::de::DeserializeOwned,\
     Idx: GateIdx + serde::Serialize + serde::de::DeserializeOwned,\
     Wire: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct BaseCircuit<Gate = BooleanGate, Idx = u32, Wire = ()> {
+pub struct BaseCircuit<Plain = bool, Gate = BooleanGate, Idx = u32, Wire = ()> {
     graph: CircuitGraph<Gate, Idx, Wire>,
     is_main: bool,
     simd_size: Option<NonZeroUsize>,
@@ -40,25 +42,26 @@ pub struct BaseCircuit<Gate = BooleanGate, Idx = u32, Wire = ()> {
     constant_gates: Vec<GateId<Idx>>,
     sub_circuit_output_gates: Vec<GateId<Idx>>,
     pub(crate) sub_circuit_input_gates: Vec<GateId<Idx>>,
+    _plain: PhantomData<Plain>,
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
-pub enum BaseGate<T, D = ScalarDim> {
-    Output(D),
-    Input(D),
-    /// Input from a sub circuit called within a circuit.
-    SubCircuitInput(D),
-    /// Output from this circuit into another sub circuit
-    SubCircuitOutput(D),
-    ConnectToMain(D),
-    /// Connects a sub circuit to the main circuit and selects the i'th individual value from
-    /// the SIMD output
-    ConnectToMainFromSimd((D, u32)),
-    /// Identity gate, simply outputs its input
-    Identity,
-    Constant(T),
-    Debug,
-}
+// #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+// pub enum BaseGate<T, D = ScalarDim> {
+//     Output(D),
+//     Input(D),
+//     /// Input from a sub circuit called within a circuit.
+//     SubCircuitInput(D),
+//     /// Output from this circuit into another sub circuit
+//     SubCircuitOutput(D),
+//     ConnectToMain(D),
+//     /// Connects a sub circuit to the main circuit and selects the i'th individual value from
+//     /// the SIMD output
+//     ConnectToMainFromSimd((D, u32)),
+//     /// Identity gate, simply outputs its input
+//     Identity,
+//     Constant(T),
+//     Debug,
+// }
 
 #[derive(
     Debug,
@@ -78,7 +81,7 @@ pub enum BaseGate<T, D = ScalarDim> {
 #[repr(transparent)]
 pub struct GateId<Idx = DefaultIdx>(pub(crate) Idx);
 
-impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
+impl<P, G: Gate<P>, Idx: GateIdx, W: Wire> BaseCircuit<P, G, Idx, W> {
     pub fn new() -> Self {
         Self {
             graph: Default::default(),
@@ -90,6 +93,7 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
             constant_gates: vec![],
             sub_circuit_output_gates: vec![],
             sub_circuit_input_gates: vec![],
+            _plain: PhantomData,
         }
     }
 
@@ -191,7 +195,7 @@ impl<G: Gate, Idx: GateIdx, W: Wire> BaseCircuit<G, Idx, W> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
+impl<P, G: Gate<P>, Idx: GateIdx> BaseCircuit<P, G, Idx, ()> {
     #[tracing::instrument(level = "trace", skip(self), fields(% from, % to))]
     pub fn add_wire(&mut self, from: GateId<Idx>, to: GateId<Idx>) {
         self.graph.add_edge(from.into(), to.into(), ());
@@ -257,7 +261,7 @@ impl<G: Gate, Idx: GateIdx> BaseCircuit<G, Idx, ()> {
     }
 }
 
-impl<G, Idx, W> BaseCircuit<G, Idx, W> {
+impl<P, G, Idx, W> BaseCircuit<P, G, Idx, W> {
     pub fn is_simd(&self) -> bool {
         self.simd_size.is_some()
     }
@@ -298,7 +302,7 @@ impl<G, Idx, W> BaseCircuit<G, Idx, W> {
         &self.sub_circuit_output_gates
     }
 
-    pub fn into_shared(self) -> SharedCircuit<G, Idx, W> {
+    pub fn into_shared(self) -> SharedCircuit<P, G, Idx, W> {
         SharedCircuit::new(Mutex::new(self))
     }
 
@@ -313,10 +317,10 @@ pub enum Load {
     SubCircuit,
 }
 
-impl<Share, G, Idx: GateIdx> BaseCircuit<G, Idx>
+impl<P, G, Idx: GateIdx> BaseCircuit<P, G, Idx>
 where
-    Share: Clone,
-    G: Gate<Share = Share> + From<BaseGate<Share>> + for<'a> From<&'a bristol::Gate>,
+    P: Clone,
+    G: Gate<P> + From<BaseGate<P>> + for<'a> From<&'a bristol::Gate>,
 {
     #[tracing::instrument(skip(bristol), ret)]
     pub fn from_bristol(bristol: bristol::Circuit, load: Load) -> Result<Self, CircuitError> {
@@ -372,7 +376,7 @@ where
     }
 }
 
-impl<G: Clone, Idx: GateIdx, W: Clone> Clone for BaseCircuit<G, Idx, W> {
+impl<P: Clone, G: Clone, Idx: GateIdx, W: Clone> Clone for BaseCircuit<P, G, Idx, W> {
     fn clone(&self) -> Self {
         Self {
             graph: self.graph.clone(),
@@ -384,17 +388,18 @@ impl<G: Clone, Idx: GateIdx, W: Clone> Clone for BaseCircuit<G, Idx, W> {
             constant_gates: self.constant_gates.clone(),
             sub_circuit_output_gates: self.sub_circuit_output_gates.clone(),
             sub_circuit_input_gates: self.sub_circuit_input_gates.clone(),
+            _plain: PhantomData,
         }
     }
 }
 
-impl<G: Gate, Idx: GateIdx> Default for BaseCircuit<G, Idx> {
+impl<P, G: Gate<P>, Idx: GateIdx> Default for BaseCircuit<P, G, Idx> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
+impl<P, G, Idx, W> Debug for BaseCircuit<P, G, Idx, W> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BaseCircuit")
             .field("input_count", &self.input_count())
@@ -414,106 +419,106 @@ impl<G, Idx, W> Debug for BaseCircuit<G, Idx, W> {
     }
 }
 
-impl<T: Share, D: Dimension> BaseGate<T, D> {
-    pub(crate) fn evaluate_sc_input_simd(
-        &self,
-        inputs: impl Iterator<Item = <Self as Gate>::Share>,
-    ) -> <<Self as Gate>::Share as Share>::SimdShare {
-        let Self::SubCircuitInput(_) = self else {
-            panic!("Called evaluate_sc_input_simd on wrong gate {self:?}");
-        };
-        inputs.collect()
-    }
-
-    pub(crate) fn evaluate_connect_to_main_simd(
-        &self,
-        input: &<<Self as Gate>::Share as Share>::SimdShare,
-    ) -> <Self as Gate>::Share {
-        let Self::ConnectToMainFromSimd((_, at)) = self else {
-            panic!("Called evaluate_connect_to_main_simd on wrong gate {self:?}");
-        };
-        input.get(*at as usize)
-    }
-}
-
-impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
-    type Share = T;
-    type DimTy = D;
-
-    fn is_interactive(&self) -> bool {
-        false
-    }
-
-    fn input_size(&self) -> usize {
-        1
-    }
-
-    fn as_base_gate(&self) -> Option<&BaseGate<Self::Share, D>> {
-        Some(self)
-    }
-
-    fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
-        base_gate
-    }
-
-    fn evaluate_non_interactive(
-        &self,
-        party_id: usize,
-        mut inputs: impl Iterator<Item = Self::Share>,
-    ) -> Self::Share {
-        match self {
-            Self::Constant(constant) => {
-                if party_id == 0 {
-                    constant.clone()
-                } else {
-                    constant.zero()
-                }
-            }
-            Self::Output(_)
-            | Self::Input(_)
-            | Self::SubCircuitInput(_)
-            | Self::SubCircuitOutput(_)
-            | Self::ConnectToMain(_)
-            | Self::Identity => inputs
-                .next()
-                .unwrap_or_else(|| panic!("Empty input for {self:?}")),
-            Self::ConnectToMainFromSimd(_) => {
-                panic!("BaseGate::evaluate_non_interactive called on SIMD gates")
-            }
-            Self::Debug => {
-                let inp = inputs.next().expect("Empty input");
-                debug!("BaseGate::Debug party_id={party_id}: {inp:?}");
-                inp
-            }
-        }
-    }
-
-    fn evaluate_non_interactive_simd<'e>(
-        &self,
-        _party_id: usize,
-        mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
-    ) -> <Self::Share as Share>::SimdShare {
-        match self {
-            BaseGate::Output(_)
-            | BaseGate::Input(_)
-            | BaseGate::ConnectToMain(_)
-            | BaseGate::SubCircuitInput(_)
-            | BaseGate::SubCircuitOutput(_)
-            | BaseGate::ConnectToMainFromSimd(_)
-            | BaseGate::Identity => inputs.next().expect("Missing input to {self:?}").clone(),
-            BaseGate::Constant(_constant) => {
-                todo!("SimdShare from constant")
-            }
-            BaseGate::Debug => {
-                todo!("Debug SIMD gate not impld")
-            }
-        }
-    }
-}
+// impl<T: Share, D: Dimension> BaseGate<T, D> {
+//     pub(crate) fn evaluate_sc_input_simd(
+//         &self,
+//         inputs: impl Iterator<Item = <Self as Gate>::Share>,
+//     ) -> <<Self as Gate>::Share as Share>::SimdShare {
+//         let Self::SubCircuitInput(_) = self else {
+//             panic!("Called evaluate_sc_input_simd on wrong gate {self:?}");
+//         };
+//         inputs.collect()
+//     }
+//
+//     pub(crate) fn evaluate_connect_to_main_simd(
+//         &self,
+//         input: &<<Self as Gate>::Share as Share>::SimdShare,
+//     ) -> <Self as Gate>::Share {
+//         let Self::ConnectToMainFromSimd((_, at)) = self else {
+//             panic!("Called evaluate_connect_to_main_simd on wrong gate {self:?}");
+//         };
+//         input.get(*at as usize)
+//     }
+// }
+//
+// impl<T: Share, D: Dimension> Gate for BaseGate<T, D> {
+//     type Share = T;
+//     type DimTy = D;
+//
+//     fn is_interactive(&self) -> bool {
+//         false
+//     }
+//
+//     fn input_size(&self) -> usize {
+//         1
+//     }
+//
+//     fn as_base_gate(&self) -> Option<&BaseGate<Self::Share, D>> {
+//         Some(self)
+//     }
+//
+//     fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
+//         base_gate
+//     }
+//
+//     fn evaluate_non_interactive(
+//         &self,
+//         party_id: usize,
+//         mut inputs: impl Iterator<Item = Self::Share>,
+//     ) -> Self::Share {
+//         match self {
+//             Self::Constant(constant) => {
+//                 if party_id == 0 {
+//                     constant.clone()
+//                 } else {
+//                     constant.zero()
+//                 }
+//             }
+//             Self::Output(_)
+//             | Self::Input(_)
+//             | Self::SubCircuitInput(_)
+//             | Self::SubCircuitOutput(_)
+//             | Self::ConnectToMain(_)
+//             | Self::Identity => inputs
+//                 .next()
+//                 .unwrap_or_else(|| panic!("Empty input for {self:?}")),
+//             Self::ConnectToMainFromSimd(_) => {
+//                 panic!("BaseGate::evaluate_non_interactive called on SIMD gates")
+//             }
+//             Self::Debug => {
+//                 let inp = inputs.next().expect("Empty input");
+//                 debug!("BaseGate::Debug party_id={party_id}: {inp:?}");
+//                 inp
+//             }
+//         }
+//     }
+//
+//     fn evaluate_non_interactive_simd<'e>(
+//         &self,
+//         _party_id: usize,
+//         mut inputs: impl Iterator<Item = &'e <Self::Share as Share>::SimdShare>,
+//     ) -> <Self::Share as Share>::SimdShare {
+//         match self {
+//             BaseGate::Output(_)
+//             | BaseGate::Input(_)
+//             | BaseGate::ConnectToMain(_)
+//             | BaseGate::SubCircuitInput(_)
+//             | BaseGate::SubCircuitOutput(_)
+//             | BaseGate::ConnectToMainFromSimd(_)
+//             | BaseGate::Identity => inputs.next().expect("Missing input to {self:?}").clone(),
+//             BaseGate::Constant(_constant) => {
+//                 todo!("SimdShare from constant")
+//             }
+//             BaseGate::Debug => {
+//                 todo!("Debug SIMD gate not impld")
+//             }
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone)]
-pub struct BaseLayerIter<'a, G, Idx: GateIdx, W> {
-    circuit: &'a BaseCircuit<G, Idx, W>,
+pub struct BaseLayerIter<'a, P, G, Idx: GateIdx, W> {
+    circuit: &'a BaseCircuit<P, G, Idx, W>,
     inputs_needed_cnt: Vec<u32>,
     prev_interactive: VecDeque<NodeIndex<Idx>>,
     to_visit: VecDeque<NodeIndex<Idx>>,
@@ -526,8 +531,8 @@ pub struct BaseLayerIter<'a, G, Idx: GateIdx, W> {
     gates_produced: usize,
 }
 
-impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
-    pub fn new(circuit: &'a BaseCircuit<G, Idx, W>) -> Self {
+impl<'a, P, G: Gate<P>, Idx: GateIdx, W: Wire> BaseLayerIter<'a, P, G, Idx, W> {
+    pub fn new(circuit: &'a BaseCircuit<P, G, Idx, W>) -> Self {
         let mut uninit = Self::new_uninit(circuit);
 
         uninit.next_layer.extend(
@@ -540,7 +545,7 @@ impl<'a, Idx: GateIdx, G: Gate, W: Wire> BaseLayerIter<'a, G, Idx, W> {
         uninit
     }
 
-    pub fn new_uninit(circuit: &'a BaseCircuit<G, Idx, W>) -> Self {
+    pub fn new_uninit(circuit: &'a BaseCircuit<P, G, Idx, W>) -> Self {
         let inputs_needed_cnt = circuit
             .as_graph()
             .node_identifiers()
@@ -694,7 +699,7 @@ impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
     }
 }
 
-impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, W> {
+impl<'a, P, G: Gate<P>, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, P, G, Idx, W> {
     type Item = CircuitLayer<G, Idx>;
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
@@ -771,9 +776,9 @@ impl<'a, G: Gate, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, G, Idx, 
     }
 }
 
-impl<G: Gate, Idx: GateIdx, W: Wire> LayerIterable for BaseCircuit<G, Idx, W> {
+impl<P, G: Gate<P>, Idx: GateIdx, W: Wire> LayerIterable for BaseCircuit<P, G, Idx, W> {
     type Layer = CircuitLayer<G, Idx>;
-    type LayerIter<'this> = BaseLayerIter<'this, G, Idx, W> where Self: 'this;
+    type LayerIter<'this> = BaseLayerIter<'this, P, G, Idx, W> where Self: 'this;
 
     fn layer_iter(&self) -> Self::LayerIter<'_> {
         BaseLayerIter::new(self)
@@ -966,7 +971,7 @@ mod tests {
         let aes_text =
             fs::read_to_string("test_resources/bristol-circuits/AES-non-expanded.txt").unwrap();
         let parsed = bristol::circuit(&aes_text).unwrap();
-        let converted: BaseCircuit<BooleanGate, u32> =
+        let converted: BaseCircuit<bool, BooleanGate, u32> =
             BaseCircuit::from_bristol(parsed.clone(), Load::Circuit).unwrap();
         assert_eq!(
             parsed.header.gates + converted.input_count() + converted.output_count(),

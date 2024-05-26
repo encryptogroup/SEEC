@@ -16,18 +16,18 @@ use smallvec::SmallVec;
 use tracing::{debug, trace};
 use typemap::{Key, ShareMap};
 
-use crate::circuit::base_circuit::BaseGate;
 use crate::circuit::circuit_connections::CrossCircuitConnections;
 use crate::circuit::{
     dyn_layers::Circuit, BaseCircuit, BooleanGate, CircuitId, DefaultIdx, GateId, GateIdx,
 };
+use crate::gate::base::BaseGate;
 use crate::protocols::boolean_gmw::BooleanGmw;
-use crate::protocols::{Gate, Protocol, ScalarDim};
+use crate::protocols::{Gate, Plain, Protocol, ScalarDim};
 use crate::secret::{sub_circuit_inputs, Secret};
 use crate::utils::ByAddress;
 
-pub type SharedCircuit<G = BooleanGate, Idx = DefaultIdx, W = ()> =
-    Arc<Mutex<BaseCircuit<G, Idx, W>>>;
+pub type SharedCircuit<P = bool, G = BooleanGate, Idx = DefaultIdx, W = ()> =
+    Arc<Mutex<BaseCircuit<P, G, Idx, W>>>;
 
 /// Lazily initialized global CircuitBuilders. This is used by the Secret API's and the
 /// #[sub_circuit] macro to construct a circuit without having direct access to the circuits.
@@ -36,10 +36,10 @@ pub(crate) static CIRCUIT_BUILDER_MAP: Lazy<Mutex<ShareMap>> =
     Lazy::new(|| Mutex::new(ShareMap::custom()));
 
 /// Needed for the ShareMap.
-struct KeyWrapper<G, Idx>(PhantomData<(G, Idx)>);
+struct KeyWrapper<P, G, Idx>(PhantomData<(P, G, Idx)>);
 
-impl<G: Gate, Idx: GateIdx> Key for KeyWrapper<G, Idx> {
-    type Value = CircuitBuilder<G, Idx>;
+impl<P: 'static, G: 'static, Idx: 'static> Key for KeyWrapper<P, G, Idx> {
+    type Value = CircuitBuilder<P, G, Idx>;
 }
 
 /// Used by the sub_circuit attr proc macro
@@ -52,8 +52,8 @@ pub struct SubCircuitGate<Idx = DefaultIdx> {
     pub gate_id: GateId<Idx>,
 }
 
-pub struct CircuitBuilder<G = BooleanGate, Idx = DefaultIdx> {
-    pub(crate) circuits: Vec<SharedCircuit<G, Idx>>,
+pub struct CircuitBuilder<P = bool, G = BooleanGate, Idx = DefaultIdx> {
+    pub(crate) circuits: Vec<SharedCircuit<P, G, Idx>>,
     connections: CrossCircuitConnections<Idx>,
     caches: HashSet<ByAddress<'static, dyn SubCircCache + Send + Sync>>,
 }
@@ -87,34 +87,34 @@ impl<Idx: GateIdx> SubCircuitGate<Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
+impl<P: Plain, G: Gate<P>, Idx: GateIdx> CircuitBuilder<P, G, Idx> {
     pub fn install(self) -> Self {
         Self::with_global(|builder| mem::replace(builder, self))
     }
 
-    pub fn get_global_circuit(id: CircuitId) -> Option<SharedCircuit<G, Idx>> {
+    pub fn get_global_circuit(id: CircuitId) -> Option<SharedCircuit<P, G, Idx>> {
         Self::with_global(|builder| builder.get_circuit(id))
     }
 
-    pub fn push_global_circuit(circuit: SharedCircuit<G, Idx>) -> CircuitId {
+    pub fn push_global_circuit(circuit: SharedCircuit<P, G, Idx>) -> CircuitId {
         Self::with_global(|builder| builder.push_circuit(circuit))
     }
 
     #[allow(clippy::unwrap_or_default)]
     pub fn with_global<R, F>(op: F) -> R
     where
-        F: FnOnce(&mut CircuitBuilder<G, Idx>) -> R,
+        F: FnOnce(&mut CircuitBuilder<P, G, Idx>) -> R,
     {
         let mut map = CIRCUIT_BUILDER_MAP.lock();
         let builder = map
-            .entry::<KeyWrapper<G, Idx>>()
-            .or_insert_with(CircuitBuilder::default);
+            .entry::<KeyWrapper<P, G, Idx>>()
+            .or_insert_with(CircuitBuilder::<P, G, Idx>::default);
         op(builder)
     }
 
     pub fn with_global_main_circ_mut<R, F>(f: F) -> R
     where
-        F: FnOnce(&mut BaseCircuit<G, Idx>) -> R,
+        F: FnOnce(&mut BaseCircuit<P, G, Idx>) -> R,
     {
         Self::with_global(|builder| {
             let main_circ = builder.get_main_circuit();
@@ -123,21 +123,21 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
         })
     }
 
-    pub fn global_into_circuit() -> Circuit<G, Idx> {
+    pub fn global_into_circuit() -> Circuit<P, G, Idx> {
         let mut global_builder = Self::with_global(mem::take);
         global_builder.clear_caches();
         global_builder.into_circuit()
     }
 
     #[tracing::instrument(level = "trace", skip(self, to_circuit, to_gate_ids))]
-    pub(crate) fn connect_sub_circuit_gates<P>(
+    pub(crate) fn connect_sub_circuit_gates<Prot>(
         &mut self,
-        from: &[Secret<P, Idx>],
-        to_circuit: &mut BaseCircuit<G, Idx>,
+        from: &[Secret<Prot, Idx>],
+        to_circuit: &mut BaseCircuit<P, G, Idx>,
         to_circuit_id: CircuitId,
         to_gate_ids: &[GateId<Idx>],
     ) where
-        P: Protocol<Gate = G>,
+        Prot: Protocol<Gate = G>,
     {
         let inputs: Vec<_> = from.iter().cloned().map(Into::into).collect();
 
@@ -217,13 +217,13 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
     }
 
     #[tracing::instrument(level = "trace", skip(self, inputs))]
-    pub fn connect_sub_circuit<P>(
+    pub fn connect_sub_circuit<Prot>(
         &mut self,
-        inputs: &[Secret<P, Idx>],
+        inputs: &[Secret<Prot, Idx>],
         sc_id: CircuitId,
-    ) -> Vec<Secret<P, Idx>>
+    ) -> Vec<Secret<Prot, Idx>>
     where
-        P: Protocol<Gate = G>,
+        Prot: Protocol<Gate = G>,
     {
         trace!(to = sc_id, ?inputs);
         let circuit = self
@@ -285,7 +285,7 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
+impl<P, G: Gate<P>, Idx: GateIdx> CircuitBuilder<P, G, Idx> {
     pub fn new() -> Self {
         let main_circ = BaseCircuit::new();
         Self {
@@ -299,15 +299,15 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
         self.circuits.len()
     }
 
-    pub fn get_main_circuit(&self) -> SharedCircuit<G, Idx> {
+    pub fn get_main_circuit(&self) -> SharedCircuit<P, G, Idx> {
         self.circuits[0].clone()
     }
 
-    pub fn get_circuit(&self, id: CircuitId) -> Option<SharedCircuit<G, Idx>> {
+    pub fn get_circuit(&self, id: CircuitId) -> Option<SharedCircuit<P, G, Idx>> {
         self.circuits.get(id as usize).cloned()
     }
 
-    pub fn push_circuit(&mut self, circuit: SharedCircuit<G, Idx>) -> CircuitId {
+    pub fn push_circuit(&mut self, circuit: SharedCircuit<P, G, Idx>) -> CircuitId {
         let id = self.circuits.len().try_into().expect("Too many circuits");
         self.circuits.push(circuit);
         id
@@ -337,7 +337,7 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
         }
     }
 
-    pub fn into_circuit(self) -> Circuit<G, Idx> {
+    pub fn into_circuit(self) -> Circuit<P, G, Idx> {
         // Converts the Vec<Arc<Mutex<Circuit>>> into Vec<Circuit> and HashMap<CircuitId, usize>
         // to reduce locking overhead and ptr indirection + enable Ser/De
         let mut circuits = vec![];
@@ -383,7 +383,7 @@ impl<G: Gate, Idx: GateIdx> CircuitBuilder<G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> Default for CircuitBuilder<G, Idx> {
+impl<P, G: Gate<P>, Idx: GateIdx> Default for CircuitBuilder<P, G, Idx> {
     fn default() -> Self {
         Self::new()
     }
@@ -470,7 +470,7 @@ impl<Idx: GateIdx, const N: usize> SubCircuitOutput for [Secret<BooleanGmw, Idx>
         );
         let main_inputs_gates: Vec<_> = main_inputs.iter().map(|sw| sw.output_of).collect();
         self.iter_mut().for_each(|sh| sh.circuit_id = circuit_id);
-        CircuitBuilder::<BooleanGate, Idx>::with_global(|global| {
+        CircuitBuilder::<bool, BooleanGate, Idx>::with_global(|global| {
             let mut main_circ = global.get_main_circuit().lock_arc();
             global.connect_sub_circuit_gates(&self, &mut *main_circ, 0, &main_inputs_gates);
         });
@@ -495,7 +495,7 @@ impl<Idx: GateIdx> SubCircuitOutput for Vec<Secret<BooleanGmw, Idx>> {
         );
         let main_inputs_gates: Vec<_> = main_inputs.iter().map(|sw| sw.output_of).collect();
         self.iter_mut().for_each(|sh| sh.circuit_id = circuit_id);
-        CircuitBuilder::<BooleanGate, Idx>::with_global(|global| {
+        CircuitBuilder::<bool, BooleanGate, Idx>::with_global(|global| {
             let mut main_circ = global.get_main_circuit().lock_arc();
             global.connect_sub_circuit_gates(&self, &mut *main_circ, 0, &main_inputs_gates);
         });
@@ -515,7 +515,7 @@ impl<Idx: GateIdx> SubCircuitOutput for Vec<Secret<BooleanGmw, Idx>> {
                     ))),
                 );
                 let main_input_gates: Vec<_> = main_inputs.iter().map(|sw| sw.output_of).collect();
-                CircuitBuilder::<BooleanGate, Idx>::with_global(|global| {
+                CircuitBuilder::<bool, BooleanGate, Idx>::with_global(|global| {
                     let mut main_circ = global.get_main_circuit().lock_arc();
                     global.connect_sub_circuit_gates(&self, &mut *main_circ, 0, &main_input_gates);
                 });
@@ -534,7 +534,7 @@ impl<Idx: GateIdx> SubCircuitOutput for Secret<BooleanGmw, Idx> {
         let main_input =
             Secret::sub_circuit_input(0, BooleanGate::Base(BaseGate::SubCircuitInput(ScalarDim)));
         self.circuit_id = circuit_id;
-        CircuitBuilder::<BooleanGate, Idx>::with_global(|global| {
+        CircuitBuilder::<bool, BooleanGate, Idx>::with_global(|global| {
             global.connect_circuits(iter::once((self, main_input.clone())));
         });
         main_input

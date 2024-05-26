@@ -28,27 +28,21 @@ use tracing::{debug, info};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-use crate::circuit::base_circuit::{BaseGate, Load};
+use crate::circuit::base_circuit::Load;
 use crate::circuit::ExecutableCircuit;
 use crate::circuit::{BaseCircuit, BooleanGate, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{Executor, Input};
+use crate::gate::base::BaseGate;
 use crate::mul_triple::{arithmetic, boolean};
 use crate::protocols::arithmetic_gmw::{AdditiveSharing, ArithmeticGmw};
 use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
-use crate::protocols::mixed_gmw::{MixedGmw, MixedShareStorage, MixedSharing};
-use crate::protocols::{
-    mixed_gmw, FunctionDependentSetup, Gate, Protocol, Ring, ScalarDim, Share, Sharing,
-};
+use crate::protocols::mixed_gmw::{self, MixedGmw, MixedShareStorage, MixedSharing};
+use crate::protocols::{FunctionDependentSetup, Protocol, Ring, ScalarDim, Share, Sharing};
 
 pub trait ProtocolTestExt: Protocol + Default {
-    type InsecureSetup<Idx: GateIdx>: FunctionDependentSetup<
-            Self::ShareStorage,
-            Self::Gate,
-            Idx,
-            Output = Self::SetupStorage,
-            Error = Infallible,
-        > + Default
+    type InsecureSetup<Idx: GateIdx>: FunctionDependentSetup<Self, Idx, Error = Infallible>
+        + Default
         + Clone
         + Send
         + Sync;
@@ -71,7 +65,7 @@ where
     type InsecureSetup<Idx: GateIdx> = mixed_gmw::InsecureMixedSetup<R>;
 }
 
-pub fn create_and_tree(depth: u32) -> BaseCircuit {
+pub fn create_and_tree(depth: u32) -> BaseCircuit<bool> {
     let total_nodes = 2_u32.pow(depth);
     let mut layer_count = total_nodes / 2;
     let mut circuit = BaseCircuit::new();
@@ -301,9 +295,10 @@ pub async fn execute_bristol<I: IntoInput<XorSharing<ThreadRng>>>(
 ) -> Result<BitVec<usize>> {
     let path = bristol_file.as_ref().to_path_buf();
     let now = Instant::now();
-    let bc =
-        spawn_blocking(move || BaseCircuit::<BooleanGate, u32>::load_bristol(path, Load::Circuit))
-            .await??;
+    let bc = spawn_blocking(move || {
+        BaseCircuit::<bool, BooleanGate, u32>::load_bristol(path, Load::Circuit)
+    })
+    .await??;
     info!(
         parsing_time = %now.elapsed().as_millis(),
         "Parsing bristol time (ms)"
@@ -314,13 +309,13 @@ pub async fn execute_bristol<I: IntoInput<XorSharing<ThreadRng>>>(
 
 #[tracing::instrument(skip(circuit, inputs))]
 pub async fn execute_circuit<P, Idx, S: Sharing>(
-    circuit: &ExecutableCircuit<P::Gate, Idx>,
+    circuit: &ExecutableCircuit<P::Plain, P::Gate, Idx>,
     inputs: impl IntoInput<S>,
     channel: TestChannel,
 ) -> Result<S::Shared>
 where
     P: ProtocolTestExt<ShareStorage = S::Shared>,
-    <P::Gate as Gate>::Share: Share<SimdShare = P::ShareStorage>,
+    P::Share: Share<SimdShare = P::ShareStorage>,
     Idx: GateIdx,
     <P as Protocol>::ShareStorage: Send + Sync,
 {

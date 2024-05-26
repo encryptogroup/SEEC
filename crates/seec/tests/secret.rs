@@ -24,7 +24,7 @@ async fn and_tree() -> Result<()> {
     let inputs_1 = BitVec::repeat(true, input_count);
 
     let exp_output: BitVec = BitVec::repeat(true, 1);
-    let and_tree: ExecutableCircuit<BooleanGate, DefaultIdx> =
+    let and_tree: ExecutableCircuit<bool, BooleanGate, DefaultIdx> =
         ExecutableCircuit::DynLayers(CircuitBuilder::global_into_circuit());
     let out =
         execute_circuit::<BooleanGmw, _, _>(&and_tree, [inputs_0, inputs_1], TestChannel::Tcp)

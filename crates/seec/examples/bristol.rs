@@ -222,7 +222,7 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
     Ok(())
 }
 
-fn load_circ(args: &ExecuteArgs) -> Result<ExecutableCircuit<BooleanGate, u32>> {
+fn load_circ(args: &ExecuteArgs) -> Result<ExecutableCircuit<bool, BooleanGate, u32>> {
     let res = bincode::deserialize_from(BufReader::new(
         File::open(&args.circuit).context("Failed to open circuit file")?,
     ));

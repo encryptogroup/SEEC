@@ -1,12 +1,13 @@
-use crate::circuit::base_circuit::{BaseGate, Load};
+use crate::circuit::base_circuit::Load;
 use crate::circuit::{BaseCircuit, ExecutableCircuit, GateIdx};
 use crate::common::BitVec;
 use crate::executor::{GateOutputs, Input};
+use crate::gate::base::BaseGate;
 use crate::mul_triple::{arithmetic, boolean, MTProvider};
 use crate::protocols::arithmetic_gmw::ArithmeticGmw;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
-    arithmetic_gmw, boolean_gmw, Gate, Protocol, Ring, ScalarDim, SetupStorage, Share,
+    arithmetic_gmw, boolean_gmw, Gate, Plain, Protocol, Ring, ScalarDim, SetupStorage, Share,
     ShareStorage, Sharing,
 };
 use crate::{bristol, circuit, GateId};
@@ -24,11 +25,14 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::{iter, mem};
-use tracing::{instrument, trace};
+use tracing::trace;
 use typemap_rev::{TypeMap, TypeMapKey};
 
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
-pub struct MixedGmw<R>(PhantomData<R>);
+pub struct MixedGmw<R> {
+    b: BooleanGmw,
+    a: ArithmeticGmw<R>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Msg<R> {
@@ -46,41 +50,41 @@ pub struct Msg<R> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum MixedShare<R> {
+pub enum Mixed<R> {
     Bool(bool),
     Arith(R),
 }
 
-impl<R> MixedShare<R> {
+impl<R> Mixed<R> {
     pub fn into_bool(self) -> Option<bool> {
         match self {
-            MixedShare::Bool(b) => Some(b),
-            MixedShare::Arith(_) => None,
+            Mixed::Bool(b) => Some(b),
+            Mixed::Arith(_) => None,
         }
     }
     pub fn into_arith(self) -> Option<R> {
         match self {
-            MixedShare::Bool(_) => None,
-            MixedShare::Arith(r) => Some(r),
+            Mixed::Bool(_) => None,
+            Mixed::Arith(r) => Some(r),
         }
     }
 
     pub fn unwrap_bool(self) -> bool {
         match self {
-            MixedShare::Bool(b) => b,
-            MixedShare::Arith(_) => panic!("called unwrap_bool on Arith"),
+            Mixed::Bool(b) => b,
+            Mixed::Arith(_) => panic!("called unwrap_bool on Arith"),
         }
     }
     pub fn unwrap_arith(self) -> R {
         match self {
-            MixedShare::Bool(_) => panic!("called unwrap_arith on Bool"),
-            MixedShare::Arith(r) => r,
+            Mixed::Bool(_) => panic!("called unwrap_arith on Bool"),
+            Mixed::Arith(r) => r,
         }
     }
 }
 
 // TODO Default here is prob wrong
-impl<R> Default for MixedShare<R> {
+impl<R> Default for Mixed<R> {
     fn default() -> Self {
         Self::Bool(false)
     }
@@ -88,7 +92,7 @@ impl<R> Default for MixedShare<R> {
 
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum MixedGate<R> {
-    Base(BaseGate<MixedShare<R>>),
+    Base(BaseGate<Mixed<R>>),
     Bool(boolean_gmw::BooleanGate),
     Arith(arithmetic_gmw::ArithmeticGate<R>),
     Conv(ConvGate),
@@ -114,11 +118,11 @@ pub enum ConvGate {
 pub enum MixedShareStorage<R: Ring> {
     Bool(<boolean_gmw::BooleanGmw as Protocol>::ShareStorage),
     Arith(<arithmetic_gmw::ArithmeticGmw<R> as Protocol>::ShareStorage),
-    Mixed(Vec<MixedShare<R>>),
+    Mixed(Vec<Mixed<R>>),
 }
 
-impl<R: Ring> Extend<MixedShare<R>> for MixedShareStorage<R> {
-    fn extend<T: IntoIterator<Item = MixedShare<R>>>(&mut self, iter: T) {
+impl<R: Ring> Extend<Mixed<R>> for MixedShareStorage<R> {
+    fn extend<T: IntoIterator<Item = Mixed<R>>>(&mut self, iter: T) {
         let mut iter = iter.into_iter();
         let rec_extend = |this: &mut Self, sh, iter| {
             this.as_mixed();
@@ -129,10 +133,10 @@ impl<R: Ring> Extend<MixedShare<R>> for MixedShareStorage<R> {
             MixedShareStorage::Bool(bv) => {
                 while let Some(val) = iter.next() {
                     match val {
-                        MixedShare::Bool(b) => {
+                        Mixed::Bool(b) => {
                             bv.push(b);
                         }
-                        a @ MixedShare::Arith(_) => {
+                        a @ Mixed::Arith(_) => {
                             rec_extend(self, a, iter);
                             return;
                         }
@@ -142,11 +146,11 @@ impl<R: Ring> Extend<MixedShare<R>> for MixedShareStorage<R> {
             MixedShareStorage::Arith(v) => {
                 while let Some(val) = iter.next() {
                     match val {
-                        b @ MixedShare::Bool(_) => {
+                        b @ Mixed::Bool(_) => {
                             rec_extend(self, b, iter);
                             return;
                         }
-                        MixedShare::Arith(a) => {
+                        Mixed::Arith(a) => {
                             v.push(a);
                         }
                     }
@@ -160,21 +164,21 @@ impl<R: Ring> Extend<MixedShare<R>> for MixedShareStorage<R> {
 }
 
 impl<R: Ring> MixedShareStorage<R> {
-    pub fn try_push(&mut self, s: MixedShare<R>) {
+    pub fn try_push(&mut self, s: Mixed<R>) {
         match (self, s) {
-            (Self::Bool(bv), MixedShare::Bool(b)) => {
+            (Self::Bool(bv), Mixed::Bool(b)) => {
                 bv.push(b);
             }
-            (Self::Arith(v), MixedShare::Arith(r)) => {
+            (Self::Arith(v), Mixed::Arith(r)) => {
                 v.push(r);
             }
             (Self::Mixed(v), s) => {
                 v.push(s);
             }
-            (Self::Bool(_), MixedShare::Arith(_)) => {
+            (Self::Bool(_), Mixed::Arith(_)) => {
                 panic!("Can't push Arith share on Bool storage")
             }
-            (Self::Arith(_), MixedShare::Bool(_)) => {
+            (Self::Arith(_), Mixed::Bool(_)) => {
                 panic!("Can't push Bool share on Arith storage")
             }
         }
@@ -183,10 +187,10 @@ impl<R: Ring> MixedShareStorage<R> {
     pub fn as_mixed(&mut self) {
         *self = match self {
             MixedShareStorage::Bool(bv) => {
-                MixedShareStorage::Mixed(bv.iter().by_vals().map(MixedShare::Bool).collect())
+                MixedShareStorage::Mixed(bv.iter().by_vals().map(Mixed::Bool).collect())
             }
             MixedShareStorage::Arith(av) => {
-                MixedShareStorage::Mixed(mem::take(av).into_iter().map(MixedShare::Arith).collect())
+                MixedShareStorage::Mixed(mem::take(av).into_iter().map(Mixed::Arith).collect())
             }
             MixedShareStorage::Mixed(_) => return,
         }
@@ -194,39 +198,38 @@ impl<R: Ring> MixedShareStorage<R> {
 }
 
 impl<R: Ring> IntoIterator for MixedShareStorage<R> {
-    type Item = MixedShare<R>;
+    type Item = Mixed<R>;
     type IntoIter = Box<dyn Iterator<Item = Self::Item>>;
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            MixedShareStorage::Bool(s) => Box::new(s.into_iter().map(MixedShare::Bool)),
-            MixedShareStorage::Arith(s) => Box::new(s.into_iter().map(MixedShare::Arith)),
+            MixedShareStorage::Bool(s) => Box::new(s.into_iter().map(Mixed::Bool)),
+            MixedShareStorage::Arith(s) => Box::new(s.into_iter().map(Mixed::Arith)),
             MixedShareStorage::Mixed(s) => Box::new(s.into_iter()),
         }
     }
 }
 
-impl<R: Ring> FromIterator<MixedShare<R>> for MixedShareStorage<R> {
-    fn from_iter<T: IntoIterator<Item = MixedShare<R>>>(iter: T) -> Self {
+impl<R: Ring> FromIterator<Mixed<R>> for MixedShareStorage<R> {
+    fn from_iter<T: IntoIterator<Item = Mixed<R>>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
         let mut acc = match iter.next() {
             None => return MixedShareStorage::default(),
-            Some(MixedShare::Bool(b)) => MixedShareStorage::Bool(BitVec::repeat(b, 1)),
-            Some(MixedShare::Arith(r)) => MixedShareStorage::Arith(vec![r]),
+            Some(Mixed::Bool(b)) => MixedShareStorage::Bool(BitVec::repeat(b, 1)),
+            Some(Mixed::Arith(r)) => MixedShareStorage::Arith(vec![r]),
         };
         iter.for_each(|el| acc.try_push(el));
         acc
     }
 }
 
-// TODO does this make sense? Where do I use this default and how would it break for an arith SC?
 impl<R: Ring> Default for MixedShareStorage<R> {
     fn default() -> Self {
         MixedShareStorage::Mixed(Default::default())
     }
 }
 
-impl<R: Ring> ShareStorage<MixedShare<R>> for MixedShareStorage<R> {
+impl<R: Ring> ShareStorage<Mixed<R>> for MixedShareStorage<R> {
     fn len(&self) -> usize {
         match self {
             MixedShareStorage::Bool(s) => s.len(),
@@ -235,38 +238,38 @@ impl<R: Ring> ShareStorage<MixedShare<R>> for MixedShareStorage<R> {
         }
     }
 
-    fn repeat(val: MixedShare<R>, len: usize) -> Self {
+    fn repeat(val: Mixed<R>, len: usize) -> Self {
         match val {
-            MixedShare::Bool(b) => Self::Bool(BitVec::repeat(b, len)),
-            MixedShare::Arith(r) => Self::Arith(vec![r; len]),
+            Mixed::Bool(b) => Self::Bool(BitVec::repeat(b, len)),
+            Mixed::Arith(r) => Self::Arith(vec![r; len]),
         }
     }
 
-    fn set(&mut self, idx: usize, val: MixedShare<R>) {
+    fn set(&mut self, idx: usize, val: Mixed<R>) {
         match (self, val) {
-            (Self::Bool(bv), MixedShare::Bool(b)) => {
+            (Self::Bool(bv), Mixed::Bool(b)) => {
                 bv.set(idx, b);
             }
-            (Self::Arith(v), MixedShare::Arith(r)) => {
+            (Self::Arith(v), Mixed::Arith(r)) => {
                 v[idx] = r;
             }
             (Self::Mixed(v), s) => {
                 v[idx] = s;
             }
             // TODO, what if i just convert to Self::Mixed in these two cases?
-            (Self::Bool(_), MixedShare::Arith(_)) => {
+            (Self::Bool(_), Mixed::Arith(_)) => {
                 panic!("Can't set Arith share on Bool storage")
             }
-            (Self::Arith(_), MixedShare::Bool(_)) => {
+            (Self::Arith(_), Mixed::Bool(_)) => {
                 panic!("Can't set Bool share on Arith storage")
             }
         }
     }
 
-    fn get(&self, idx: usize) -> MixedShare<R> {
+    fn get(&self, idx: usize) -> Mixed<R> {
         match self {
-            MixedShareStorage::Bool(bv) => MixedShare::Bool(bv[idx]),
-            MixedShareStorage::Arith(v) => MixedShare::Arith(v[idx].clone()),
+            MixedShareStorage::Bool(bv) => Mixed::Bool(bv[idx]),
+            MixedShareStorage::Arith(v) => Mixed::Arith(v[idx].clone()),
             MixedShareStorage::Mixed(v) => v[idx].clone(),
         }
     }
@@ -359,6 +362,8 @@ where
     [R; 1]: BitViewSized,
 {
     const SIMD_SUPPORT: bool = false;
+    type Plain = Mixed<R>;
+    type Share = Mixed<R>;
     type Msg = Msg<R>;
     type SimdMsg = ();
     type Gate = MixedGate<R>;
@@ -366,12 +371,79 @@ where
     type ShareStorage = MixedShareStorage<R>;
     type SetupStorage = MixedSetupStorage<R>;
 
+    fn share_constant(
+        &self,
+        party_id: usize,
+        _output_share: Self::Share,
+        val: Self::Plain,
+    ) -> Self::Share {
+        match val {
+            Mixed::Bool(b) => Mixed::Bool(self.b.share_constant(party_id, false, b)),
+            Mixed::Arith(a) => Mixed::Arith(self.a.share_constant(party_id, R::ZERO, a)),
+        }
+    }
+
+    fn evaluate_non_interactive(
+        &self,
+        party_id: usize,
+        gate: &Self::Gate,
+        mut inputs: impl Iterator<Item = Self::Share>,
+    ) -> Self::Share {
+        let mut unwrap_inp = || inputs.next().expect("Missing input");
+
+        match gate {
+            MixedGate::Base(base) => base.default_evaluate(party_id, inputs),
+            MixedGate::Bool(g) => {
+                let inputs = inputs.map(|i| match i {
+                    Mixed::Bool(b) => b,
+                    Mixed::Arith(_) => {
+                        panic!("Received arithmetic share as input for Boolean {g:?}")
+                    }
+                });
+                let out = self.b.evaluate_non_interactive(party_id, g, inputs);
+                Mixed::Bool(out)
+            }
+            MixedGate::Arith(g) => {
+                let inputs = inputs.map(|i| match i {
+                    Mixed::Arith(e) => e,
+                    Mixed::Bool(_) => {
+                        panic!("Received Boolean share as input for arithmetic {g:?}")
+                    }
+                });
+                let out = self.a.evaluate_non_interactive(party_id, g, inputs);
+                Mixed::Arith(out)
+            }
+            MixedGate::Conv(ConvGate::A2BSelectBit(idx)) => {
+                let r = match unwrap_inp() {
+                    Mixed::Arith(r) => r,
+                    Mixed::Bool(_) => {
+                        panic!("Received Boolean share as input for ConvGate::A2BSelectBit")
+                    }
+                };
+                Mixed::Bool(r.get_bit(*idx))
+            }
+            MixedGate::Conv(ConvGate::Select) => {
+                let [a, b] = [unwrap_inp(), unwrap_inp()];
+                if party_id == 0 {
+                    a
+                } else {
+                    b
+                }
+            }
+            int @ MixedGate::Conv(
+                ConvGate::A2BBoolShareSnd | ConvGate::A2BBoolShareRcv | ConvGate::B2A,
+            ) => {
+                panic!("Got interactive gate {int:?} in evaluate_non_interactive")
+            }
+        }
+    }
+
     fn compute_msg(
         &self,
         party_id: usize,
         interactive_gates: impl Iterator<Item = MixedGate<R>>,
-        _gate_outputs: impl Iterator<Item = MixedShare<R>>,
-        mut inputs: impl Iterator<Item = MixedShare<R>>,
+        _gate_outputs: impl Iterator<Item = Mixed<R>>,
+        mut inputs: impl Iterator<Item = Mixed<R>>,
         preprocessing_data: &mut MixedSetupStorage<R>,
     ) -> Self::Msg {
         trace!("compute_msg");
@@ -386,12 +458,8 @@ where
             |(mut bgates, mut agates, mut conv_gates), mgate| {
                 match mgate {
                     MixedGate::Bool(g) => {
-                        b_inputs.extend(
-                            inputs
-                                .by_ref()
-                                .take(g.input_size())
-                                .map(MixedShare::unwrap_bool),
-                        );
+                        b_inputs
+                            .extend(inputs.by_ref().take(g.input_size()).map(Mixed::unwrap_bool));
                         bgates.push(g);
                     }
                     MixedGate::Arith(g) => {
@@ -399,7 +467,7 @@ where
                             inputs
                                 .by_ref()
                                 .take(g.input_size())
-                                .map(MixedShare::unwrap_arith),
+                                .map(Mixed::unwrap_arith),
                         );
                         agates.push(g);
                     }
@@ -435,7 +503,7 @@ where
         for g in conv_gates {
             match g {
                 ConvGate::A2BBoolShareSnd => {
-                    let MixedShare::Arith(r) = conv_inputs.next().expect("Missing input") else {
+                    let Mixed::Arith(r) = conv_inputs.next().expect("Missing input") else {
                         panic!("expected Arith input but got Bool");
                     };
                     let rand: R = random();
@@ -478,7 +546,7 @@ where
         &self,
         party_id: usize,
         interactive_gates: impl Iterator<Item = Self::Gate>,
-        _gate_outputs: impl Iterator<Item = MixedShare<R>>,
+        _gate_outputs: impl Iterator<Item = Mixed<R>>,
         own_msg: Self::Msg,
         other_msg: Self::Msg,
         preprocessing_data: &mut MixedSetupStorage<R>,
@@ -511,16 +579,16 @@ where
         for g in interactive_gates {
             match g {
                 MixedGate::Base(g) => panic!("Unexpected base gate {g:?}"),
-                MixedGate::Bool(_) => ret.push(MixedShare::Bool(
+                MixedGate::Bool(_) => ret.push(Mixed::Bool(
                     b_storage.next().expect("Insufficient Bool outputs"),
                 )),
-                MixedGate::Arith(_) => ret.push(MixedShare::Arith(
+                MixedGate::Arith(_) => ret.push(Mixed::Arith(
                     a_storage.next().expect("Insufficient Arith outputs"),
                 )),
-                MixedGate::Conv(ConvGate::A2BBoolShareSnd) => ret.push(MixedShare::Arith(
+                MixedGate::Conv(ConvGate::A2BBoolShareSnd) => ret.push(Mixed::Arith(
                     own_reshares.next().expect("Missing own bool reshare"),
                 )),
-                MixedGate::Conv(ConvGate::A2BBoolShareRcv) => ret.push(MixedShare::Arith(
+                MixedGate::Conv(ConvGate::A2BBoolShareRcv) => ret.push(Mixed::Arith(
                     other_reshares.next().expect("Missing other bool reshare"),
                 )),
                 MixedGate::Conv(ConvGate::B2A) => {
@@ -547,7 +615,7 @@ where
                         })
                         .reduce(|a, b| a.wrapping_add(&b))
                         .unwrap();
-                    ret.push(MixedShare::Arith(xa));
+                    ret.push(Mixed::Arith(xa));
                 }
                 MixedGate::Conv(ConvGate::A2BSelectBit(_) | ConvGate::Select) => {
                     panic!("Non-interactive gate in evaluate_interactive")
@@ -560,7 +628,7 @@ where
     fn setup_gate_outputs<Idx: GateIdx>(
         &mut self,
         _party_id: usize,
-        circuit: &ExecutableCircuit<Self::Gate, Idx>,
+        circuit: &ExecutableCircuit<Self::Plain, Self::Gate, Idx>,
     ) -> GateOutputs<Self::ShareStorage> {
         let data = circuit
             .gate_counts()
@@ -573,19 +641,21 @@ where
     }
 }
 
-impl<R: Ring> Share for MixedShare<R> {
+impl<R: Ring> Plain for Mixed<R> {}
+
+impl<R: Ring> Share for Mixed<R> {
+    type Plain = Mixed<R>;
     type SimdShare = MixedShareStorage<R>;
 
     fn zero(&self) -> Self {
         match self {
-            MixedShare::Bool(_) => MixedShare::Bool(false),
-            MixedShare::Arith(_) => MixedShare::Arith(R::ZERO),
+            Mixed::Bool(_) => Mixed::Bool(false),
+            Mixed::Arith(_) => Mixed::Arith(R::ZERO),
         }
     }
 }
 
-impl<R: Ring> Gate for MixedGate<R> {
-    type Share = MixedShare<R>;
+impl<R: Ring> Gate<Mixed<R>> for MixedGate<R> {
     type DimTy = ScalarDim;
 
     fn is_interactive(&self) -> bool {
@@ -614,7 +684,7 @@ impl<R: Ring> Gate for MixedGate<R> {
         }
     }
 
-    fn as_base_gate(&self) -> Option<&BaseGate<Self::Share>> {
+    fn as_base_gate(&self) -> Option<&BaseGate<Mixed<R>>> {
         // TODO, what about base gates inside Self::Bool or Arith?
         match self {
             MixedGate::Base(base_gate) => Some(base_gate),
@@ -622,63 +692,8 @@ impl<R: Ring> Gate for MixedGate<R> {
         }
     }
 
-    fn wrap_base_gate(base_gate: BaseGate<Self::Share, Self::DimTy>) -> Self {
+    fn wrap_base_gate(base_gate: BaseGate<Mixed<R>, Self::DimTy>) -> Self {
         Self::Base(base_gate)
-    }
-
-    #[inline]
-    fn evaluate_non_interactive(
-        &self,
-        party_id: usize,
-        mut inputs: impl Iterator<Item = Self::Share>,
-    ) -> Self::Share {
-        let mut unwrap_inp = || inputs.next().expect("Missing input");
-
-        match self {
-            MixedGate::Base(base) => base.evaluate_non_interactive(party_id, inputs),
-            MixedGate::Bool(g) => {
-                let inputs = inputs.map(|i| match i {
-                    MixedShare::Bool(b) => b,
-                    MixedShare::Arith(_) => {
-                        panic!("Received arithmetic share as input for Boolean {g:?}")
-                    }
-                });
-                let out = g.evaluate_non_interactive(party_id, inputs);
-                MixedShare::Bool(out)
-            }
-            MixedGate::Arith(g) => {
-                let inputs = inputs.map(|i| match i {
-                    MixedShare::Arith(e) => e,
-                    MixedShare::Bool(_) => {
-                        panic!("Received Boolean share as input for arithmetic {g:?}")
-                    }
-                });
-                let out = g.evaluate_non_interactive(party_id, inputs);
-                MixedShare::Arith(out)
-            }
-            MixedGate::Conv(ConvGate::A2BSelectBit(idx)) => {
-                let r = match unwrap_inp() {
-                    MixedShare::Arith(r) => r,
-                    MixedShare::Bool(_) => {
-                        panic!("Received Boolean share as input for ConvGate::A2BSelectBit")
-                    }
-                };
-                MixedShare::Bool(r.get_bit(*idx))
-            }
-            MixedGate::Conv(ConvGate::Select) => {
-                let [a, b] = [unwrap_inp(), unwrap_inp()];
-                if party_id == 0 {
-                    a
-                } else {
-                    b
-                }
-            }
-            int @ MixedGate::Conv(
-                ConvGate::A2BBoolShareSnd | ConvGate::A2BBoolShareRcv | ConvGate::B2A,
-            ) => {
-                panic!("Got interactive gate {int:?} in evaluate_non_interactive")
-            }
-        }
     }
 }
 
@@ -692,8 +707,8 @@ impl<R> From<&bristol::Gate> for MixedGate<R> {
     }
 }
 
-impl<R> From<BaseGate<MixedShare<R>>> for MixedGate<R> {
-    fn from(value: BaseGate<MixedShare<R>>) -> Self {
+impl<R> From<BaseGate<Mixed<R>>> for MixedGate<R> {
+    fn from(value: BaseGate<Mixed<R>>) -> Self {
         Self::Base(value)
     }
 }
@@ -711,7 +726,7 @@ where
     R: Ring,
     A: Sharing<Plain = R, Shared = Vec<R>>,
 {
-    type Plain = MixedShare<R>;
+    type Plain = Mixed<R>;
     type Shared = MixedShareStorage<R>;
 
     fn share(&mut self, input: Self::Shared) -> [Self::Shared; 2] {
@@ -739,7 +754,7 @@ where
     }
 }
 
-pub fn a2b<R: Ring>(bc: &mut BaseCircuit<MixedGate<R>>, a: GateId) -> Vec<GateId> {
+pub fn a2b<R: Ring>(bc: &mut BaseCircuit<Mixed<R>, MixedGate<R>>, a: GateId) -> Vec<GateId> {
     let a2b0 = bc.add_wired_gate(MixedGate::Conv(ConvGate::A2BBoolShareSnd), &[a]);
     let a2b1 = bc.add_wired_gate(MixedGate::Conv(ConvGate::A2BBoolShareRcv), &[a]);
     // potentially switch gates, depending on party_id of executing party
@@ -756,7 +771,7 @@ pub fn a2b<R: Ring>(bc: &mut BaseCircuit<MixedGate<R>>, a: GateId) -> Vec<GateId
 }
 
 fn depth_optimized_add<R: Ring>(
-    bc: &mut BaseCircuit<MixedGate<R>>,
+    bc: &mut BaseCircuit<Mixed<R>, MixedGate<R>>,
     a: &[GateId],
     b: &[GateId],
 ) -> Vec<GateId> {
@@ -765,7 +780,7 @@ fn depth_optimized_add<R: Ring>(
     static ADDERS: Lazy<Mutex<TypeMap>> = Lazy::new(Mutex::default);
     struct Key<R>(PhantomData<R>);
     impl<R: Ring> TypeMapKey for Key<R> {
-        type Value = BaseCircuit<MixedGate<R>>;
+        type Value = BaseCircuit<Mixed<R>, MixedGate<R>>;
     }
     assert_eq!(R::BITS, a.len(), "Wrong number of inputs");
     assert_eq!(R::BITS, b.len(), "Wrong number of inputs");
@@ -785,48 +800,11 @@ fn depth_optimized_add<R: Ring>(
     bc.add_sub_circuit(adder, a.iter().chain(b).copied())
 }
 
-#[instrument(level = "debug", ret, skip_all)]
-fn basic_add<R: Ring>(
-    bc: &mut BaseCircuit<MixedGate<R>>,
-    a: &[GateId],
-    b: &[GateId],
-) -> Vec<GateId> {
-    use boolean_gmw::BooleanGate;
-    macro_rules! xor {
-        ($a:expr, $b:expr) => {
-            bc.add_wired_gate(MixedGate::Bool(BooleanGate::Xor), &[$a, $b])
-        };
-    }
-    macro_rules! and {
-        ($a:expr, $b:expr) => {
-            bc.add_wired_gate(MixedGate::Bool(BooleanGate::And), &[$a, $b])
-        };
-    }
-
-    let mut carry = bc.add_gate(MixedGate::Base(BaseGate::Constant(MixedShare::Bool(false))));
-
-    let mut full_adder = |a, b, c| {
-        let xab = xor!(a, b);
-        let s = xor!(xab, c);
-        let aab = and!(a, b);
-        let axab = and!(c, xab);
-        let c_out = xor!(aab, axab);
-        (s, c_out)
-    };
-    let mut out = vec![];
-    for (a_i, b_i) in a.iter().zip(b) {
-        let (s, c) = full_adder(*a_i, *b_i, carry);
-        out.push(s);
-        carry = c;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
-    use super::depth_optimized_add;
-    use crate::circuit::base_circuit::BaseGate;
+    use super::{depth_optimized_add, Mixed};
     use crate::circuit::{BaseCircuit, DefaultIdx, ExecutableCircuit};
+    use crate::gate::base::BaseGate;
     use crate::private_test_utils::{execute_circuit, init_tracing, TestChannel, ToBool};
     use crate::protocols::arithmetic_gmw::ArithmeticGate;
     use crate::protocols::mixed_gmw::{
@@ -838,7 +816,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_bool_logic() -> anyhow::Result<()> {
-        let mut bc: BaseCircuit<MixedGate<u32>> = BaseCircuit::new();
+        let mut bc: BaseCircuit<Mixed<u32>, MixedGate<u32>> = BaseCircuit::new();
 
         let in0 = bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim)));
         let in1 = bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim)));
@@ -860,7 +838,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_arith_circ() -> anyhow::Result<()> {
-        let mut bc = BaseCircuit::<MixedGate<u32>, _>::new();
+        let mut bc = BaseCircuit::<Mixed<u32>, MixedGate<u32>, _>::new();
         let inp1 = bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim)));
         let inp2 = bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim)));
         let inp3 = bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim)));
@@ -868,7 +846,7 @@ mod tests {
         let mul = bc.add_wired_gate(MixedGate::Arith(ArithmeticGate::Mul), &[inp3, add]);
         bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[mul]);
 
-        let ec: ExecutableCircuit<MixedGate<u32>, _> = ExecutableCircuit::DynLayers(bc.into());
+        let ec = ExecutableCircuit::DynLayers(bc.into());
 
         let out = execute_circuit::<MixedGmw<u32>, u32, MixedSharing<_, _, u32>>(
             &ec,
@@ -885,7 +863,7 @@ mod tests {
     #[tokio::test]
     async fn low_depth_add_test() -> anyhow::Result<()> {
         let _g = init_tracing();
-        let mut bc = BaseCircuit::<MixedGate<u8>, _>::new();
+        let mut bc = BaseCircuit::<Mixed<u8>, MixedGate<u8>, _>::new();
 
         let inp1: Vec<_> = (0..8)
             .map(|_| bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim))))
@@ -898,7 +876,7 @@ mod tests {
             bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[g]);
         }
 
-        let ec: ExecutableCircuit<MixedGate<u8>, _> = ExecutableCircuit::DynLayers(bc.into());
+        let ec = ExecutableCircuit::DynLayers(bc.into());
 
         let out = execute_circuit::<MixedGmw<u8>, DefaultIdx, MixedSharing<_, _, u8>>(
             &ec,
@@ -916,7 +894,7 @@ mod tests {
     #[tokio::test]
     async fn basic_mixed_circ_a2b() -> anyhow::Result<()> {
         let _g = init_tracing();
-        let mut bc = BaseCircuit::<MixedGate<u8>, _>::new();
+        let mut bc = BaseCircuit::<Mixed<u8>, MixedGate<u8>, _>::new();
 
         let inp1 = bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim)));
 
@@ -925,7 +903,7 @@ mod tests {
             bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[g]);
         }
 
-        let ec: ExecutableCircuit<MixedGate<u8>, _> = ExecutableCircuit::DynLayers(bc.into());
+        let ec = ExecutableCircuit::DynLayers(bc.into());
 
         let out = execute_circuit::<MixedGmw<u8>, DefaultIdx, MixedSharing<_, _, u8>>(
             &ec,
@@ -943,7 +921,7 @@ mod tests {
     #[tokio::test]
     async fn basic_mixed_circ_b2a() -> anyhow::Result<()> {
         let _g = init_tracing();
-        let mut bc = BaseCircuit::<MixedGate<u8>, _>::new();
+        let mut bc = BaseCircuit::<Mixed<u8>, MixedGate<u8>, _>::new();
 
         let inps: Vec<_> = (0..8)
             .map(|_| bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim))))
@@ -951,7 +929,7 @@ mod tests {
         let b2a = bc.add_wired_gate(MixedGate::Conv(ConvGate::B2A), &inps);
         bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[b2a]);
 
-        let ec: ExecutableCircuit<MixedGate<u8>, _> = ExecutableCircuit::DynLayers(bc.into());
+        let ec = ExecutableCircuit::DynLayers(bc.into());
 
         let out = execute_circuit::<MixedGmw<u8>, DefaultIdx, MixedSharing<_, _, u8>>(
             &ec,
@@ -967,7 +945,7 @@ mod tests {
     #[tokio::test]
     async fn complex_mixed_circ() -> anyhow::Result<()> {
         let _g = init_tracing();
-        let mut bc = BaseCircuit::<MixedGate<u16>, _>::new();
+        let mut bc = BaseCircuit::<Mixed<u16>, MixedGate<u16>, _>::new();
 
         let binps: Vec<_> = (0..16)
             .map(|_| bc.add_gate(MixedGate::Base(BaseGate::Input(ScalarDim))))
@@ -982,7 +960,7 @@ mod tests {
         let res_a = bc.add_wired_gate(MixedGate::Conv(ConvGate::B2A), &added);
         bc.add_wired_gate(MixedGate::Base(BaseGate::Output(ScalarDim)), &[res_a]);
 
-        let ec: ExecutableCircuit<MixedGate<u16>, _> = ExecutableCircuit::DynLayers(bc.into());
+        let ec = ExecutableCircuit::DynLayers(bc.into());
 
         let out = execute_circuit::<MixedGmw<u16>, DefaultIdx, MixedSharing<_, _, u16>>(
             &ec,

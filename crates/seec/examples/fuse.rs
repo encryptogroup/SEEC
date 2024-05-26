@@ -5,7 +5,7 @@ use clap::{Args, Parser};
 use seec::bench::BenchParty;
 use seec::circuit::ExecutableCircuit;
 use seec::parse::fuse::{CallMode, FuseConverter};
-use seec::protocols::mixed_gmw::{MixedGate, MixedGmw};
+use seec::protocols::mixed_gmw::{Mixed, MixedGate, MixedGmw};
 use std::fs::File;
 use std::io;
 use std::io::{stdout, BufReader, BufWriter, Write};
@@ -168,7 +168,7 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
     Ok(())
 }
 
-fn load_circ(args: &ExecuteArgs) -> Result<ExecutableCircuit<MixedGate<u32>, u32>> {
+fn load_circ(args: &ExecuteArgs) -> Result<ExecutableCircuit<Mixed<u32>, MixedGate<u32>, u32>> {
     bincode::deserialize_from(BufReader::new(
         File::open(&args.circuit).context("Failed to open circuit file")?,
     ))

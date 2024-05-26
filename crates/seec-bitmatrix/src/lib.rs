@@ -17,7 +17,7 @@ use rayon::iter::IndexedParallelIterator;
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Binary, Debug, Formatter};
-use std::ops::{BitAnd, BitXor, Range};
+use std::ops::{BitAnd, BitXor, Not, Range};
 use std::slice::{ChunksExact, ChunksExactMut};
 
 #[cfg(is_nightly)]
@@ -48,7 +48,7 @@ pub struct BitMatrixViewMut<'a, T> {
 }
 
 pub trait Storage:
-    bytemuck::Pod + BitXor<Output = Self> + BitAnd<Output = Self> + Send + Sync
+    bytemuck::Pod + BitXor<Output = Self> + BitAnd<Output = Self> + Not<Output = Self> + Send + Sync
 {
     const BITS: usize;
 
@@ -99,6 +99,14 @@ impl<T: Storage> BitMatrix<T> {
             cols: self.cols,
             data: self.data.as_mut_slice(),
         }
+    }
+
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub fn cols(&self) -> usize {
+        self.cols
     }
 
     // Returns dimensions (rows, columns).
@@ -309,6 +317,15 @@ fn raw_row_idx<T: Storage>(row: usize, cols: usize) -> Range<usize> {
     let start_idx = row * cols_el;
     let end_idx = (row + 1) * cols_el;
     start_idx..end_idx
+}
+
+impl<T: Storage> Not for BitMatrix<T> {
+    type Output = Self;
+
+    fn not(mut self) -> Self::Output {
+        self.data.iter_mut().for_each(|el| *el = !*el);
+        self
+    }
 }
 
 impl<T: Storage> BitXor for BitMatrix<T> {

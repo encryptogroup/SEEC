@@ -2,7 +2,7 @@
 use crate::circuit::circuit_connections::CrossCircuitConnections;
 use crate::circuit::{base_circuit, dyn_layers::CircuitLayerIter, CircuitId, GateIdx};
 use crate::common::BitVec;
-use crate::protocols::Gate;
+use crate::protocols::{Gate, Plain};
 use crate::{GateId, SubCircuitGate};
 use either::Either;
 use serde::{Deserialize, Serialize};
@@ -123,18 +123,20 @@ impl<G, Idx> Circuit<G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> Circuit<G, Idx> {
-    fn add_layer(
+impl<G: Clone + PartialEq, Idx: GateIdx> Circuit<G, Idx> {
+    fn add_layer<P>(
         &mut self,
         (sc_id, simd_size, sc_layer): (
             CircuitId,
             Option<NonZeroUsize>,
             base_circuit::CircuitLayer<G, Idx>,
         ),
-        circ: &super::dyn_layers::Circuit<G, Idx>,
+        circ: &super::dyn_layers::Circuit<P, G, Idx>,
         layer_ptrs: &[usize],
         splits: &mut HashMap<usize, Vec<usize>>,
-    ) {
+    ) where
+        G: Gate<P>,
+    {
         let mapped_sc_id = self.sc_map[&sc_id];
         let new_sc_layer = ScLayer::from_base_layer(sc_id, sc_layer, circ);
         match self.sub_circuits.get_mut(mapped_sc_id) {
@@ -230,7 +232,7 @@ impl<G: Gate, Idx: GateIdx> Circuit<G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> super::dyn_layers::Circuit<G, Idx> {
+impl<P: Plain, G: Gate<P>, Idx: GateIdx> super::dyn_layers::Circuit<P, G, Idx> {
     pub fn precompute_layers(self) -> Circuit<G, Idx> {
         let layer_iter = CircuitLayerIter::new(&self);
         let mut res_circ = Circuit {
@@ -266,7 +268,7 @@ impl<G, Idx> SubCircuit<G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> SubCircuit<G, Idx> {
+impl<G: Clone, Idx: GateIdx> SubCircuit<G, Idx> {
     fn new(layer: ScLayer<G, Idx>, simd_size: Option<NonZeroUsize>) -> Self {
         Self {
             simd_size,
@@ -294,7 +296,7 @@ impl<G: Gate, Idx: GateIdx> SubCircuit<G, Idx> {
     }
 }
 
-impl<'c, G: Gate, Idx: GateIdx> ExecutableScLayer<'c, G, Idx> {
+impl<'c, G: Clone, Idx: GateIdx> ExecutableScLayer<'c, G, Idx> {
     pub fn len(&self) -> usize {
         self.layer.len()
     }
@@ -431,7 +433,7 @@ impl<'c, G: Gate, Idx: GateIdx> ExecutableScLayer<'c, G, Idx> {
     }
 }
 
-impl<G: Gate, Idx: GateIdx> ScLayer<G, Idx> {
+impl<G, Idx: GateIdx> ScLayer<G, Idx> {
     pub fn len(&self) -> usize {
         self.interactive.len() + self.non_interactive.len()
     }
@@ -444,11 +446,14 @@ impl<G: Gate, Idx: GateIdx> ScLayer<G, Idx> {
         self.interactive.len()
     }
 
-    fn from_base_layer(
+    fn from_base_layer<P>(
         sc_id: CircuitId,
         base_layer: base_circuit::CircuitLayer<G, Idx>,
-        circ: &super::dyn_layers::Circuit<G, Idx>,
-    ) -> Self {
+        circ: &super::dyn_layers::Circuit<P, G, Idx>,
+    ) -> Self
+    where
+        G: Gate<P>,
+    {
         let incoming_cnt_guess =
             (base_layer.interactive_len() + base_layer.non_interactive_len()) * 2;
         let mut incoming_idx = Vec::with_capacity(incoming_cnt_guess);
@@ -472,21 +477,27 @@ impl<G: Gate, Idx: GateIdx> ScLayer<G, Idx> {
             non_interactive,
             interactive,
             incoming_idx,
+            // _plain: PhantomData,
         }
     }
 }
 
-impl<G: Gate, Idx: GateIdx> ScLayerGates<G, Idx> {
+impl<G, Idx> ScLayerGates<G, Idx> {
     fn len(&self) -> usize {
         self.gates.len()
     }
+}
 
-    fn from_base(
+impl<G, Idx: GateIdx> ScLayerGates<G, Idx> {
+    fn from_base<P>(
         sc_id: CircuitId,
         (gates, idx): (Vec<G>, Vec<GateId<Idx>>),
         incoming_idx: &mut Vec<GateId<Idx>>,
-        circ: &super::dyn_layers::Circuit<G, Idx>,
-    ) -> Self {
+        circ: &super::dyn_layers::Circuit<P, G, Idx>,
+    ) -> Self
+    where
+        G: Gate<P>,
+    {
         let mut incoming = Vec::with_capacity(gates.len());
         let mut potential_cross_circ = BitVec::with_capacity(gates.len());
 
@@ -510,7 +521,9 @@ impl<G: Gate, Idx: GateIdx> ScLayerGates<G, Idx> {
             potential_cross_circ,
         }
     }
+}
 
+impl<G: Clone, Idx: GateIdx> ScLayerGates<G, Idx> {
     fn iter(&self) -> impl Iterator<Item = (G, GateId<Idx>)> + Clone + '_ {
         self.gates.iter().cloned().zip(self.idx.iter().cloned())
     }
@@ -548,7 +561,7 @@ impl<'c, G: Clone, Idx: Clone> ScLayerIterator<'c, G, Idx> {
     }
 }
 
-impl<'c, G: Gate, Idx: GateIdx> ScLayerIterator<'c, G, Idx> {
+impl<'c, G: Clone, Idx: GateIdx> ScLayerIterator<'c, G, Idx> {
     pub(crate) fn interactive_count_times_simd(&self) -> usize {
         self.clone()
             .map(|layer| {
@@ -564,7 +577,7 @@ impl<'c, G: Gate, Idx: GateIdx> ScLayerIterator<'c, G, Idx> {
     }
 }
 
-impl<'c, G: Gate, Idx: GateIdx> Iterator for ScLayerIterator<'c, G, Idx> {
+impl<'c, G, Idx: GateIdx> Iterator for ScLayerIterator<'c, G, Idx> {
     type Item = ExecutableScLayer<'c, G, Idx>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -585,7 +598,7 @@ impl<'c, G: Gate, Idx: GateIdx> Iterator for ScLayerIterator<'c, G, Idx> {
     }
 }
 
-impl<'c, G: Gate, Idx: GateIdx> Iterator for LayerIterator<'c, G, Idx> {
+impl<'c, G, Idx: GateIdx> Iterator for LayerIterator<'c, G, Idx> {
     type Item = ScLayerIterator<'c, G, Idx>;
 
     fn next(&mut self) -> Option<Self::Item> {

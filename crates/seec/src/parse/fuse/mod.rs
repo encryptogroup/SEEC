@@ -1,8 +1,8 @@
-use crate::circuit::base_circuit::BaseGate;
+use crate::gate::base::BaseGate;
 use crate::parse::fuse::module_generated::fuse::ir::{
     root_as_module_table, CircuitTable, ModuleTable, NodeTable, PrimitiveOperation, PrimitiveType,
 };
-use crate::protocols::mixed_gmw::{ConvGate, MixedGate, MixedGmw, MixedShare};
+use crate::protocols::mixed_gmw::{ConvGate, Mixed, MixedGate, MixedGmw};
 use crate::protocols::{arithmetic_gmw, boolean_gmw, mixed_gmw, Ring, ScalarDim};
 use crate::secret::Secret;
 use crate::{Circuit, CircuitBuilder, GateId, SharedCircuit};
@@ -26,11 +26,11 @@ mod module_generated;
 /// - add SCs to builder, storing mapping of sc name -> shared_circ
 /// - parse main circ, if sccall is encountered, use connect_sub_circuit and connect_to_main on sc
 
-type BaseCircuit<R> = crate::circuit::BaseCircuit<MixedGate<R>>;
+type BaseCircuit<R> = crate::circuit::BaseCircuit<Mixed<R>, MixedGate<R>>;
 
 pub struct FuseConverter<R> {
-    builder: CircuitBuilder<MixedGate<R>>,
-    sc_map: HashMap<String, SharedCircuit<MixedGate<R>>>,
+    builder: CircuitBuilder<Mixed<R>, MixedGate<R>>,
+    sc_map: HashMap<String, SharedCircuit<Mixed<R>, MixedGate<R>>>,
     call_mode: CallMode,
 }
 
@@ -44,7 +44,7 @@ pub enum ConversionError {
     MissingField(&'static str),
 }
 
-impl<'a, R> TryFrom<ModuleTable<'a>> for Circuit<MixedGate<R>>
+impl<'a, R> TryFrom<ModuleTable<'a>> for Circuit<Mixed<R>, MixedGate<R>>
 where
     R: Ring,
     Standard: Distribution<R>,
@@ -72,13 +72,16 @@ where
 {
     pub fn new(call_mode: CallMode) -> Self {
         Self {
-            builder: CircuitBuilder::<MixedGate<R>>::new(),
+            builder: CircuitBuilder::new(),
             sc_map: HashMap::new(),
             call_mode,
         }
     }
 
-    pub fn convert(self, path: impl AsRef<Path>) -> Result<Circuit<MixedGate<R>>, ConversionError> {
+    pub fn convert(
+        self,
+        path: impl AsRef<Path>,
+    ) -> Result<Circuit<Mixed<R>, MixedGate<R>>, ConversionError> {
         let data = fs::read(path)?;
         let mod_table = root_as_module_table(&data)?;
         self.convert_module(mod_table)
@@ -87,7 +90,7 @@ where
     fn convert_module(
         mut self,
         module: ModuleTable<'_>,
-    ) -> Result<Circuit<MixedGate<R>>, ConversionError> {
+    ) -> Result<Circuit<Mixed<R>, MixedGate<R>>, ConversionError> {
         let ep = module.entry_point().unwrap_or("main");
 
         for c in module
@@ -181,12 +184,12 @@ where
                 PO::Constant => {
                     // TODO properly decode node.payload
                     match node.output_datatypes().map(|v| v.get(0)) {
-                        None => Base(BaseGate::Constant(MixedShare::Bool(true))),
+                        None => Base(BaseGate::Constant(Mixed::Bool(true))),
                         Some(dt) if dt.primitive_type() == PrimitiveType::Bool => {
-                            Base(BaseGate::Constant(MixedShare::Bool(true)))
+                            Base(BaseGate::Constant(Mixed::Bool(true)))
                         }
                         Some(dt) if dt.primitive_type() == PrimitiveType::Int32 => {
-                            Base(BaseGate::Constant(MixedShare::Arith(R::ONE)))
+                            Base(BaseGate::Constant(Mixed::Arith(R::ONE)))
                         }
                         Some(dt) => {
                             panic!("Unsupported constant datatype {dt:?}")
@@ -290,8 +293,9 @@ mod tests {
     use crate::parse::fuse::module_generated::fuse::ir::root_as_module_table;
     use crate::parse::fuse::{CallMode, FuseConverter};
     use crate::private_test_utils::{execute_circuit, init_tracing, TestChannel, ToBool};
-    use crate::protocols::mixed_gmw;
-    use crate::protocols::mixed_gmw::{MixedGmw, MixedShareStorage, MixedSharing};
+    use crate::protocols::mixed_gmw::{
+        Mixed, MixedGate, MixedGmw, MixedShareStorage, MixedSharing,
+    };
     use crate::Circuit;
     use rand::distributions::Standard;
     use rand::{Rng, SeedableRng};
@@ -308,14 +312,14 @@ mod tests {
     fn convert_simple_fuse() {
         let data = fs::read("test_resources/fuse-circuits/tutorial_addition.mfs").unwrap();
         let mod_table = root_as_module_table(&data).expect("Deser fuse fb");
-        let _circ: Circuit<mixed_gmw::MixedGate<u32>> = mod_table.try_into().unwrap();
+        let _circ: Circuit<Mixed<u32>, MixedGate<u32>> = mod_table.try_into().unwrap();
     }
 
     #[tokio::test]
     async fn convert_and_execute_simple_fuse() {
         let data = fs::read("test_resources/fuse-circuits/tutorial_addition.mfs").unwrap();
         let mod_table = root_as_module_table(&data).expect("Deser fuse fb");
-        let circ: Circuit<mixed_gmw::MixedGate<u32>> = mod_table.try_into().unwrap();
+        let circ: Circuit<Mixed<u32>, MixedGate<u32>> = mod_table.try_into().unwrap();
         let ec = ExecutableCircuit::DynLayers(circ);
         let out = execute_circuit::<MixedGmw<u32>, DefaultIdx, MixedSharing<_, _, u32>>(
             &ec,
@@ -336,7 +340,7 @@ mod tests {
         let data = fs::read("test_resources/fuse-circuits/mnist_fuse.mfs").unwrap();
         let mod_table = root_as_module_table(&data).expect("Deser fuse fb");
         let converter = FuseConverter::<u32>::new(CallMode::InlineCircuits);
-        let circ: Circuit<mixed_gmw::MixedGate<u32>> = converter
+        let circ: Circuit<Mixed<u32>, MixedGate<u32>> = converter
             .convert_module(mod_table)
             .expect("Fuse conversion");
         let ec = ExecutableCircuit::DynLayers(circ);
