@@ -12,7 +12,7 @@ static CERT_PEM: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/certs
 static KEY_PEM: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/certs/key.pem"));
 
 pub async fn local_conn() -> anyhow::Result<(Connection, Connection)> {
-    let max_streams = (1 << 60) - 1;
+    let max_streams = 1 << 59;
     let limits = Limits::new()
         .with_max_open_local_unidirectional_streams(max_streams)?
         .with_max_open_remote_unidirectional_streams(max_streams)?;

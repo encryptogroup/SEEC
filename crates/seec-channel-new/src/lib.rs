@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::{Error, IoSlice};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::select;
@@ -23,6 +25,15 @@ pub mod testing;
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Id(pub(crate) u64);
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct ConnectionId(pub(crate) u32);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+struct UniqueId {
+    cid: ConnectionId,
+    id: Id,
+}
+
 type StreamSend = oneshot::Sender<QuicRecvStream>;
 type StreamRecv = oneshot::Receiver<QuicRecvStream>;
 
@@ -30,14 +41,16 @@ pub struct StreamManager {
     acceptor: QuicStreamAcceptor,
     cmd_send: mpsc::UnboundedSender<Cmd>,
     cmd_recv: mpsc::UnboundedReceiver<Cmd>,
-    pending: HashMap<Id, StreamSend>,
-    accepted: HashMap<Id, QuicRecvStream>,
+    pending: HashMap<UniqueId, StreamSend>,
+    accepted: HashMap<UniqueId, QuicRecvStream>,
 }
 
 // TODO provide safer way of cloning or creating a "sub-connection" with less potential
 //  for Id collisions
 #[cfg_attr(any(test, feature = "__bench"), derive(Clone))]
 pub struct Connection {
+    cid: ConnectionId,
+    next_cid: Arc<AtomicU32>,
     handle: Handle,
     cmd: mpsc::UnboundedSender<Cmd>,
 }
@@ -76,8 +89,14 @@ pin_project! {
 }
 
 enum Cmd {
-    NewStream { id: Id, stream_return: StreamSend },
-    AcceptedStream { id: Id, stream: QuicRecvStream },
+    NewStream {
+        uid: UniqueId,
+        stream_return: StreamSend,
+    },
+    AcceptedStream {
+        uid: UniqueId,
+        stream: QuicRecvStream,
+    },
 }
 
 impl StreamManager {
@@ -99,10 +118,10 @@ impl StreamManager {
                         Ok(Some(mut stream)) => {
                             let cmd_send = self.cmd_send.clone();
                             tokio::spawn(async move {
-                                let mut buf = [0; 8];
+                                let mut buf = [0; 12];
                                 stream.read_exact(&mut buf).await.unwrap();
-                                let id = Id::from_bytes(buf);
-                                cmd_send.send(Cmd::AcceptedStream {id, stream}).unwrap()
+                                let uid = UniqueId::from_bytes(buf);
+                                cmd_send.send(Cmd::AcceptedStream {uid, stream}).unwrap()
                             });
                         }
                         Ok(None) => {
@@ -116,18 +135,18 @@ impl StreamManager {
                 }
                 Some(cmd) = self.cmd_recv.recv() => {
                     match cmd {
-                        Cmd::NewStream {id, stream_return} => {
-                            if let Some(accepted) = self.accepted.remove(&id) {
+                        Cmd::NewStream {uid, stream_return} => {
+                            if let Some(accepted) = self.accepted.remove(&uid) {
                                 stream_return.send(accepted).unwrap()
-                            } else if self.pending.insert(id, stream_return).is_some() {
-                                panic!("Id collision for {id:?}");
+                            } else if self.pending.insert(uid, stream_return).is_some() {
+                                panic!("Id collision for {uid:?}");
                             }
                         }
-                        Cmd::AcceptedStream {id, stream} => {
-                            if let Some(stream_ret) = self.pending.remove(&id) {
+                        Cmd::AcceptedStream {uid, stream} => {
+                            if let Some(stream_ret) = self.pending.remove(&uid) {
                                stream_ret.send(stream).unwrap()
                             } else {
-                                self.accepted.insert(id, stream);
+                                self.accepted.insert(uid, stream);
                             }
                         }
                     }
@@ -142,17 +161,35 @@ impl Connection {
         let (handle, acceptor) = quic_conn.split();
         let stream_manager = StreamManager::new(acceptor);
         let conn = Self {
+            cid: ConnectionId(0),
+            next_cid: Arc::new(AtomicU32::new(1)),
             handle,
             cmd: stream_manager.cmd_send.clone(),
         };
         (conn, stream_manager)
     }
 
+    /// Create a sub-connection. The n'th call to sub_connection on **any** `Connection`
+    /// is paired with the n'th call of the other party. Internally, all Connections share
+    /// an incrementing id.
+    pub fn sub_connection(&mut self) -> Self {
+        let cid = self.next_cid.fetch_add(1, Ordering::Relaxed);
+        Self {
+            cid: ConnectionId(cid),
+            next_cid: self.next_cid.clone(),
+            handle: self.handle.clone(),
+            cmd: self.cmd.clone(),
+        }
+    }
+
     pub async fn byte_sub_stream(&mut self, id: Id) -> (SendStreamBytes, ReceiveStreamBytes) {
+        let uid = UniqueId::new(self.cid, id);
         let mut snd = self.handle.open_send_stream().await.unwrap();
-        snd.write_all(&id.to_bytes()).await.unwrap();
+        snd.write_all(&uid.to_bytes()).await.unwrap();
         let (stream_return, stream_recv) = oneshot::channel();
-        self.cmd.send(Cmd::NewStream { id, stream_return }).unwrap();
+        self.cmd
+            .send(Cmd::NewStream { uid, stream_return })
+            .unwrap();
         let snd = SendStreamBytes { inner: snd };
         let recv = ReceiveStreamBytes {
             inner: ReceiveStreamWrapper::Channel { stream_recv },
@@ -166,7 +203,7 @@ impl Connection {
     ) -> (SendStream<T>, ReceiveStream<T>) {
         let (send_bytes, recv_bytes) = self.byte_sub_stream(id).await;
         let mut ld_codec = LengthDelimitedCodec::builder();
-        // TODO what is a sensible max length
+        // TODO what is a sensible max length?
         const MB: usize = 1024 * 1024;
         ld_codec.max_frame_length(256 * MB);
         let framed_send = ld_codec.new_write(send_bytes);
@@ -188,6 +225,30 @@ impl Id {
 
     pub fn to_bytes(self) -> [u8; 8] {
         self.0.to_be_bytes()
+    }
+}
+
+impl UniqueId {
+    fn new(cid: ConnectionId, id: Id) -> Self {
+        Self { cid, id }
+    }
+
+    fn from_bytes(bytes: [u8; 12]) -> Self {
+        let cid = u32::from_be_bytes(bytes[..4].try_into().unwrap());
+        let id = u64::from_be_bytes(bytes[4..12].try_into().unwrap());
+        Self {
+            cid: ConnectionId(cid),
+            id: Id(id),
+        }
+    }
+
+    fn to_bytes(self) -> [u8; 12] {
+        let mut ret = [0; 12];
+        let cid = self.cid.0.to_be_bytes();
+        ret[..4].copy_from_slice(&cid);
+        let id = self.id.to_bytes();
+        ret[4..].copy_from_slice(&id);
+        ret
     }
 }
 
@@ -305,6 +366,22 @@ mod tests {
         let (mut s, mut c) = local_conn().await?;
         let (mut snd, _) = s.sub_stream::<Vec<i32>>(Id::new(0)).await;
         let (_, mut recv) = c.sub_stream::<Vec<i32>>(Id::new(0)).await;
+        snd.send(vec![1, 2, 3]).await?;
+        let ret = recv.next().await.context("recv")??;
+        assert_eq!(vec![1, 2, 3], ret);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sub_connection() -> Result<()> {
+        let (mut s1, mut c1) = local_conn().await?;
+        let mut s2 = s1.sub_connection();
+        let mut c2 = c1.sub_connection();
+        let _ = s1.byte_sub_stream(Id::new(0));
+        let _ = c1.byte_sub_stream(Id::new(0));
+        let (mut snd, _) = s2.sub_stream::<Vec<i32>>(Id::new(0)).await;
+        let (_, mut recv) = c2.sub_stream::<Vec<i32>>(Id::new(0)).await;
+
         snd.send(vec![1, 2, 3]).await?;
         let ret = recv.next().await.context("recv")??;
         assert_eq!(vec![1, 2, 3], ret);
