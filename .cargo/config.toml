@@ -1,5 +1,5 @@
 [build]
-rustflags = ["-C","target-cpu=native"]
+#rustflags = ["-C","target-cpu=native"]
 #[target.x86_64-unknown-linux-gnu]
 ## needed for flamegraph https://github.com/flamegraph-rs/flamegraph
 #linker = "clang"
