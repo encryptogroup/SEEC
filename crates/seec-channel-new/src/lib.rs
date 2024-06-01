@@ -12,11 +12,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tokio::select;
 use tokio::sync::{mpsc, oneshot};
+use tokio::{io, select};
 use tokio_serde::formats::{Bincode, SymmetricalBincode};
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::{event, Level};
+
+#[cfg(feature = "metrics")]
+pub mod metrics;
 
 #[doc(hidden)]
 #[cfg(any(test, feature = "__bench"))]
@@ -172,7 +176,7 @@ impl Connection {
     /// Create a sub-connection. The n'th call to sub_connection on **any** `Connection`
     /// is paired with the n'th call of the other party. Internally, all Connections share
     /// an incrementing id.
-    pub fn sub_connection(&mut self) -> Self {
+    pub fn sub_connection(&self) -> Self {
         let cid = self.next_cid.fetch_add(1, Ordering::Relaxed);
         Self {
             cid: ConnectionId(cid),
@@ -186,6 +190,7 @@ impl Connection {
         let uid = UniqueId::new(self.cid, id);
         let mut snd = self.handle.open_send_stream().await.unwrap();
         snd.write_all(&uid.to_bytes()).await.unwrap();
+        event!(target: "seec_metrics", Level::TRACE, bytes_written = UniqueId::BYTE_LEN);
         let (stream_return, stream_recv) = oneshot::channel();
         self.cmd
             .send(Cmd::NewStream { uid, stream_return })
@@ -229,21 +234,23 @@ impl Id {
 }
 
 impl UniqueId {
+    const BYTE_LEN: usize = 12;
     fn new(cid: ConnectionId, id: Id) -> Self {
         Self { cid, id }
     }
 
-    fn from_bytes(bytes: [u8; 12]) -> Self {
+    fn from_bytes(bytes: [u8; Self::BYTE_LEN]) -> Self {
+        // Panics are optimized out with constant indices
         let cid = u32::from_be_bytes(bytes[..4].try_into().unwrap());
-        let id = u64::from_be_bytes(bytes[4..12].try_into().unwrap());
+        let id = u64::from_be_bytes(bytes[4..Self::BYTE_LEN].try_into().unwrap());
         Self {
             cid: ConnectionId(cid),
             id: Id(id),
         }
     }
 
-    fn to_bytes(self) -> [u8; 12] {
-        let mut ret = [0; 12];
+    fn to_bytes(self) -> [u8; Self::BYTE_LEN] {
+        let mut ret = [0; Self::BYTE_LEN];
         let cid = self.cid.0.to_be_bytes();
         ret[..4].copy_from_slice(&cid);
         let id = self.id.to_bytes();
@@ -259,7 +266,7 @@ impl AsyncWrite for SendStreamBytes {
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
         let this = self.project();
-        this.inner.poll_write(cx, buf)
+        trace_poll(this.inner.poll_write(cx, buf))
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -278,12 +285,19 @@ impl AsyncWrite for SendStreamBytes {
         bufs: &[IoSlice<'_>],
     ) -> Poll<Result<usize, Error>> {
         let this = self.project();
-        this.inner.poll_write_vectored(cx, bufs)
+        trace_poll(this.inner.poll_write_vectored(cx, bufs))
     }
 
     fn is_write_vectored(&self) -> bool {
         self.inner.is_write_vectored()
     }
+}
+
+fn trace_poll(p: Poll<io::Result<usize>>) -> Poll<io::Result<usize>> {
+    if let Poll::Ready(Ok(bytes)) = p {
+        event!(target: "seec_metrics", Level::TRACE, bytes_written = bytes);
+    }
+    p
 }
 
 // Implement AsyncRead for ReceiveStream to poll the oneshot Receiver first if there is not
@@ -300,12 +314,25 @@ impl AsyncRead for ReceiveStreamBytes {
             ReceiveStreamWrapperProj::Channel { stream_recv } => match stream_recv.poll(cx) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Ok(recv_stream)) => {
+                    // We know we read those bytes in the StreamManager, so we emit
+                    // the corresponding event here.
+                    event!(target: "seec_metrics", Level::TRACE, bytes_read = UniqueId::BYTE_LEN);
                     *this.inner = ReceiveStreamWrapper::Stream { recv_stream };
                     self.poll_read(cx, buf)
                 }
                 Poll::Ready(Err(err)) => Poll::Ready(Err(std::io::Error::other(Box::new(err)))),
             },
-            ReceiveStreamWrapperProj::Stream { recv_stream } => recv_stream.poll_read(cx, buf),
+            ReceiveStreamWrapperProj::Stream { recv_stream } => {
+                let len = buf.filled().len();
+                let poll = recv_stream.poll_read(cx, buf);
+                if let Poll::Ready(Ok(())) = poll {
+                    let bytes = buf.filled().len() - len;
+                    if bytes > 0 {
+                        event!(target: "seec_metrics", Level::TRACE, bytes_read = bytes);
+                    }
+                }
+                poll
+            }
         }
     }
 }
