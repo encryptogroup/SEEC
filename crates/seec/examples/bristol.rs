@@ -7,13 +7,19 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser};
-use seec::bench::{BenchParty, ServerTlsConfig};
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
+use seec::bench::{BenchParty, BenchProtocol, ServerTlsConfig};
 use seec::circuit::base_circuit::Load;
 use seec::circuit::{BaseCircuit, ExecutableCircuit};
-use seec::protocols::boolean_gmw::BooleanGmw;
+use seec::gate::base::BaseGate;
+use seec::protocols::{Gate, Share};
+use seec::protocols::{aby2, aby2::BooleanAby2, boolean_gmw::BooleanGmw, Protocol};
 use seec::secret::inputs;
-use seec::SubCircuitOutput;
-use seec::{BooleanGate, CircuitBuilder};
+use seec::{bristol, SubCircuitOutput};
+use seec::{BooleanGate, CircuitBuilder,};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io;
 use std::io::{stdout, BufReader, BufWriter, Write};
@@ -48,6 +54,9 @@ struct CompileArgs {
 
     /// Circuit in bristol format
     circuit: PathBuf,
+
+    #[clap(long)]
+    aby2: bool
 }
 
 #[derive(Args, Debug)]
@@ -94,6 +103,9 @@ struct ExecuteArgs {
 
     /// Circuit to execute. Must be compiled beforehand
     circuit: PathBuf,
+
+    #[clap(long)]
+    aby2: bool
 }
 
 #[tokio::main]
@@ -101,8 +113,19 @@ async fn main() -> Result<()> {
     let prog_args = ProgArgs::parse();
     init_tracing(&prog_args).context("failed to init logging")?;
     match prog_args {
-        ProgArgs::Compile(args) => compile(args).context("failed to compile circuit"),
-        ProgArgs::Execute(args) => execute(args).await.context("failed to execute circuit"),
+        ProgArgs::Compile(args) => {
+            if args.aby2 {
+                compile_aby2(args).context("failed to compile aby2 circuit")
+            } else {
+                compile(args).context("failed to compile circuit")
+            }
+        },
+        ProgArgs::Execute(args) => if args.aby2 {
+            execute::<BooleanAby2>(args).await.context("failed to execute circuit")
+
+        } else {
+            execute::<BooleanGmw>(args).await.context("failed to execute circuit")
+        },
     }
 }
 
@@ -145,6 +168,22 @@ fn compile(compile_args: CompileArgs) -> Result<()> {
     Ok(())
 }
 
+fn compile_aby2(compile_args: CompileArgs) -> Result<()> {
+    assert!(compile_args.simd.is_none());
+    let mut bc: BaseCircuit<bool, aby2::BooleanGate> =
+        BaseCircuit::load_bristol(&compile_args.circuit, Load::Circuit)
+            .expect("failed to load bristol circuit");
+
+    let mut circ = ExecutableCircuit::DynLayers(bc.into());
+    if !compile_args.dyn_layers {
+        circ = circ.precompute_layers();
+    }
+    let out =
+        BufWriter::new(File::create(&compile_args.output).context("failed to create output file")?);
+    bincode::serialize_into(out, &circ).context("failed to serialize circuit")?;
+    Ok(())
+}
+
 impl ProgArgs {
     fn log(&self) -> Option<&PathBuf> {
         match self {
@@ -154,17 +193,24 @@ impl ProgArgs {
     }
 }
 
-async fn execute(execute_args: ExecuteArgs) -> Result<()> {
+async fn execute<P>(execute_args: ExecuteArgs) -> Result<()>
+where
+    P: BenchProtocol<Plain = bool>,
+    <P as Protocol>::Gate: Gate<bool> + DeserializeOwned + Serialize + DeserializeOwned + From<BaseGate<bool>> + for<'a> From<&'a bristol::Gate> + From<BaseGate<bool>>,
+    Standard: Distribution<P::Share>,
+    P::Share: Share<SimdShare = P::ShareStorage>,
+    
+{
     let circ_name = execute_args
         .circuit
         .file_stem()
         .unwrap()
         .to_string_lossy()
         .to_string();
-    let circuit = load_circ(&execute_args).context("failed to load circuit")?;
+    let circuit = load_circ::<P::Gate>(&execute_args).context("failed to load circuit")?;
 
     let create_party = |id, circ| {
-        let mut party = BenchParty::<BooleanGmw, u32>::new(id)
+        let mut party = BenchParty::<P, u32>::new(id)
             .explicit_circuit(circ)
             .repeat(execute_args.repeat)
             .insecure_setup(execute_args.insecure_setup)
@@ -222,7 +268,7 @@ async fn execute(execute_args: ExecuteArgs) -> Result<()> {
     Ok(())
 }
 
-fn load_circ(args: &ExecuteArgs) -> Result<ExecutableCircuit<bool, BooleanGate, u32>> {
+fn load_circ<G>(args: &ExecuteArgs) -> Result<ExecutableCircuit<bool, G, u32>> where G: Gate<bool> + DeserializeOwned + Serialize + for<'a> From<&'a bristol::Gate> + From<BaseGate<bool>> {
     let res = bincode::deserialize_from(BufReader::new(
         File::open(&args.circuit).context("Failed to open circuit file")?,
     ));

@@ -3,7 +3,7 @@
 use crate::circuit::ExecutableCircuit;
 use crate::executor::GateOutputs;
 use crate::protocols::{FunctionDependentSetup, Protocol};
-use crate::utils::{BoxError, ErasedError};
+use crate::utils::BoxError;
 use async_trait::async_trait;
 use std::error::Error;
 
@@ -31,6 +31,8 @@ pub trait MTProvider {
         Box::new(ErasedError(self))
     }
 }
+
+pub struct ErasedError<I>(pub I);
 
 #[async_trait]
 impl<Mtp: MTProvider + Send> MTProvider for &mut Mtp {

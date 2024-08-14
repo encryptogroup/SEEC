@@ -131,8 +131,6 @@ impl<T: BitStore + Copy + BitXorAssign + BitAndAssign> BitVecExt for BitVec<T> {
     }
 }
 
-pub struct ErasedError<I>(pub I);
-
 #[derive(Debug)]
 pub struct BoxError(pub Box<dyn Error + Send + Sync>);
 

@@ -5,13 +5,17 @@
 //! `crates/seec/examples/bristol.rs` binary.
 
 use crate::circuit::{ExecutableCircuit, GateIdx};
-use crate::executor::{Executor, Input, Message};
+use crate::executor::{DynFDSetup, Executor, Input, Message};
+use crate::mul_triple;
 use crate::mul_triple::storage::MTStorage;
 use crate::mul_triple::{boolean, MTProvider};
+use crate::protocols;
+#[cfg(feature = "aby2")]
+use crate::protocols::aby2::{AbySetupMsg, AbySetupProvider, BooleanAby2, DeltaSharing};
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::mixed_gmw::{Mixed, MixedGmw};
-use crate::protocols::{mixed_gmw, Protocol, Ring, Share, ShareStorage};
-use crate::utils::{BoxError, ErasedError};
+use crate::protocols::{mixed_gmw, FunctionDependentSetup, Protocol, Ring, Share, ShareStorage};
+use crate::utils::BoxError;
 use crate::CircuitBuilder;
 use anyhow::{anyhow, Context};
 use bitvec::view::BitViewSized;
@@ -19,6 +23,7 @@ use rand::distributions::{Distribution, Standard};
 use rand::rngs::OsRng;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use remoc::RemoteSend;
 use seec_channel::util::{Phase, RunResult, Statistics};
 use seec_channel::{sub_channels_for, Channel, Sender};
 use serde::{Deserialize, Serialize};
@@ -29,27 +34,41 @@ use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use zappot::ot_ext::ExtOTMsg;
 
 type DynMTP<P> =
     Box<dyn MTProvider<Output = <P as Protocol>::SetupStorage, Error = BoxError> + Send + 'static>;
 
-pub trait BenchProtocol: Protocol + Default + Debug {
+pub trait BenchProtocol: Protocol + Default + Debug + 'static {
+    const FUNCTION_DEPENDENT_SETUP: bool;
+    type SetupMsg: RemoteSend;
+
     fn insecure_setup() -> DynMTP<Self>;
-    fn ot_setup(ch: Channel<Sender<ExtOTMsg>>) -> DynMTP<Self>;
+    fn ot_setup(ch: Channel<Self::SetupMsg>) -> DynMTP<Self>;
     fn stored(path: &Path) -> DynMTP<Self>;
+
+    fn fd_setup<Idx: GateIdx>(
+        party_id: usize,
+        ch: Channel<Self::SetupMsg>,
+    ) -> DynFDSetup<'static, Self, Idx> {
+        panic!("Needs to be implemented for Protocols with FUNCTION_DEPENDENT_SETUP = true")
+    }
 }
 
 impl BenchProtocol for BooleanGmw {
+    const FUNCTION_DEPENDENT_SETUP: bool = false;
+    type SetupMsg = mul_triple::boolean::ot_ext::DefaultMsg;
+
     fn insecure_setup() -> DynMTP<Self> {
-        Box::new(ErasedError(boolean::InsecureMTProvider::default()))
+        Box::new(mul_triple::ErasedError(
+            boolean::InsecureMTProvider::default(),
+        ))
     }
 
-    fn ot_setup(ch: Channel<Sender<ExtOTMsg>>) -> DynMTP<Self> {
+    fn ot_setup(ch: Channel<Self::SetupMsg>) -> DynMTP<Self> {
         let ot_sender = zappot::ot_ext::Sender::default();
         let ot_recv = zappot::ot_ext::Receiver::default();
         let mtp = boolean::OtMTProvider::new(OsRng, ot_sender, ot_recv, ch.0, ch.1);
-        Box::new(ErasedError(mtp))
+        Box::new(mul_triple::ErasedError(mtp))
     }
 
     fn stored(path: &Path) -> DynMTP<Self> {
@@ -64,16 +83,53 @@ where
     Standard: Distribution<R>,
     [R; 1]: BitViewSized,
 {
+    const FUNCTION_DEPENDENT_SETUP: bool = false;
+    type SetupMsg = ();
+
     fn insecure_setup() -> DynMTP<Self> {
         mixed_gmw::InsecureMixedSetup::default().into_dyn()
     }
 
-    fn ot_setup(_ch: Channel<Sender<ExtOTMsg>>) -> DynMTP<Self> {
+    fn ot_setup(_ch: Channel<Self::SetupMsg>) -> DynMTP<Self> {
         todo!()
     }
 
     fn stored(_path: &Path) -> DynMTP<Self> {
         todo!()
+    }
+}
+
+#[cfg(feature = "aby2")]
+impl Default for BooleanAby2 {
+    fn default() -> Self {
+        BooleanAby2::new(DeltaSharing::insecure_default())
+    }
+}
+
+#[cfg(feature = "aby2")]
+impl BenchProtocol for BooleanAby2 {
+    const FUNCTION_DEPENDENT_SETUP: bool = true;
+    type SetupMsg = AbySetupMsg;
+
+    fn insecure_setup() -> DynMTP<Self> {
+        todo!()
+    }
+
+    fn ot_setup(_ch: Channel<Self::SetupMsg>) -> DynMTP<Self> {
+        todo!()
+    }
+
+    fn stored(_path: &Path) -> DynMTP<Self> {
+        todo!()
+    }
+
+    fn fd_setup<Idx: GateIdx>(
+        party_id: usize,
+        ch: Channel<Self::SetupMsg>,
+    ) -> DynFDSetup<'static, Self, Idx> {
+        let setup =
+            AbySetupProvider::new(party_id, boolean::InsecureMTProvider::default(), ch.0, ch.1);
+        Box::new(protocols::ErasedError(setup))
     }
 }
 
@@ -234,15 +290,10 @@ where
                     .with_sleep(self.sleep_after_phase)
                     .without_unaccounted(true);
 
-                let (ot_ch, mut exec_ch) = sub_channels_for!(
-                    &mut sender,
-                    &mut receiver,
-                    128,
-                    Sender<ExtOTMsg>,
-                    Message<P>
-                )
-                .await
-                .context("Establishing sub channels")?;
+                let (setup_ch, mut exec_ch) =
+                    sub_channels_for!(&mut sender, &mut receiver, 128, P::SetupMsg, Message<P>)
+                        .await
+                        .context("Establishing sub channels")?;
 
                 let circ = match &self.circ {
                     Some(circ) => circ,
@@ -257,26 +308,30 @@ where
                         }
                     }
                 };
-
-                let mut mtp = match (self.insecure_setup, &self.stored_mts) {
-                    (false, None) => P::ot_setup(ot_ch),
-                    (true, None) => P::insecure_setup(),
-                    (false, Some(path)) => P::stored(path),
-                    (true, Some(_)) => unreachable!("ensure via setters"),
+                let setup = if !P::FUNCTION_DEPENDENT_SETUP {
+                    let mut mtp = match (self.insecure_setup, &self.stored_mts) {
+                        (false, None) => P::ot_setup(setup_ch),
+                        (true, None) => P::insecure_setup(),
+                        (false, Some(path)) => P::stored(path),
+                        (true, Some(_)) => unreachable!("ensure via setters"),
+                    };
+                    let mts_needed = circ.interactive_count_times_simd();
+                    if !self.interleave_setup {
+                        statistics
+                            .record(Phase::Mts, mtp.precompute_mts(mts_needed))
+                            .await
+                            .map_err(|err| anyhow!(err))
+                            .context("MT precomputation failed")?;
+                    }
+                    Box::new(mtp)
+                } else {
+                    P::fd_setup(self.id, setup_ch)
                 };
-                let mts_needed = circ.interactive_count_times_simd();
-                if !self.interleave_setup {
-                    statistics
-                        .record(Phase::Mts, mtp.precompute_mts(mts_needed))
-                        .await
-                        .map_err(|err| anyhow!(err))
-                        .context("MT precomputation failed")?;
-                }
 
                 let mut executor = statistics
                     .record(
                         Phase::FunctionDependentSetup,
-                        Executor::<P, Idx>::new(circ, self.id, mtp),
+                        Executor::<P, Idx>::new(circ, self.id, setup),
                     )
                     .await
                     .context("Failed to create executor")?;

@@ -40,7 +40,7 @@ use crate::protocols::boolean_gmw::{BooleanGmw, XorSharing};
 use crate::protocols::mixed_gmw::{self, MixedGmw, MixedShareStorage, MixedSharing};
 use crate::protocols::{FunctionDependentSetup, Protocol, Ring, ScalarDim, Share, Sharing};
 
-pub trait ProtocolTestExt: Protocol + Default {
+pub trait ProtocolTestExt: Protocol + Default + 'static {
     type InsecureSetup<Idx: GateIdx>: FunctionDependentSetup<Self, Idx, Error = Infallible>
         + Default
         + Clone

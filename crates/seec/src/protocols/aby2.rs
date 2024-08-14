@@ -14,6 +14,7 @@ use crate::{bristol, executor, CircuitBuilder};
 use ahash::AHashMap;
 use async_trait::async_trait;
 use itertools::Itertools;
+use rand::distributions::{Distribution, Standard};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 use seec_channel::multi::{MultiReceiver, MultiSender};
@@ -62,7 +63,7 @@ pub enum Msg {
     Delta { delta: Vec<u8> },
 }
 
-#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum BooleanGate {
     Base(BaseGate<bool, ScalarDim>),
     And { n: u8 },
@@ -439,6 +440,15 @@ impl Default for Msg {
 impl super::Share for Share {
     type Plain = bool;
     type SimdShare = ShareVec;
+}
+
+impl Distribution<Share> for Standard {
+    fn sample<RNG: Rng + ?Sized>(&self, rng: &mut RNG) -> Share {
+        Share {
+            public: rng.gen(),
+            private: rng.gen(),
+        }
+    }
 }
 
 impl From<BaseGate<bool>> for BooleanGate {

@@ -333,6 +333,28 @@ where
     }
 }
 
+#[async_trait]
+impl<'c, P, Idx> FunctionDependentSetup<P, Idx>
+    for Box<dyn FunctionDependentSetup<P, Idx, Error = BoxError> + Send + 'c>
+where
+    P: Protocol,
+    Idx: Sync,
+{
+    type Error = BoxError;
+
+    async fn setup(
+        &mut self,
+        shares: &GateOutputs<P::ShareStorage>,
+        circuit: &ExecutableCircuit<P::Plain, P::Gate, Idx>,
+    ) -> Result<(), Self::Error> {
+        self.setup(shares, circuit).await
+    }
+
+    async fn request_setup_output(&mut self, count: usize) -> Result<P::SetupStorage, Self::Error> {
+        self.request_setup_output(count).await
+    }
+}
+
 #[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct ScalarDim;
 
