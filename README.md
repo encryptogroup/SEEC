@@ -4,7 +4,17 @@
 
 This framework implements secure 2-party secret-sharing-based multi party computation protocols. Currently, we implement
 the Boolean and arithmetic versions of GMW87 with multiplication triple preprocessing. Additionally, we implement the
-Boolean part of the ABY2.0 protocol.
+Boolean part of the ABY2.0 protocol. 
+
+## Citing SEEC
+If you use SEEC for your academic projects, please cite as follows: 
+@inproceedings{HKS24,
+    author={Robin William Hundt and Nora Khayata and Thomas Schneider},
+    title={{POSTER}: {SEEC} — {M}emory Safety Meets Efficiency in Secure Two-Party Computation},
+    booktitle={ACSAC},
+    year={2024},
+}
+Our poster abstract is available [here](https://encrypto.de/papers/HKS24Poster.pdf).
 
 ## Secure Multi-Party Computation
 
