@@ -26,6 +26,8 @@ pub mod boolean_gmw;
 pub mod mixed_gmw;
 #[cfg(feature = "aby2")]
 pub mod tensor_aby2;
+#[cfg(feature = "aby2")]
+pub mod arithmetic_aby2;
 
 pub type SimdShareOf<S> = <S as Share>::SimdShare;
 
