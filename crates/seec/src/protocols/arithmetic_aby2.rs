@@ -402,6 +402,7 @@ impl<Mtp, R: Ring> AbySetupProvider<Mtp, R> {
     }
 }
 
+type ArithGmwSecret<R, Idx> = Secret<ArithmeticGmw<R>, Idx>;
 impl<R> ArithmeticGate<R>
 where
     R: Ring,
@@ -410,7 +411,7 @@ where
     fn setup_data_circ<'a, Idx: GateIdx>(
         &self,
         input_shares: impl Iterator<Item = &'a Secret<ArithmeticGmw<R>, Idx>>,
-        setup_sub_circ_cache: &mut AHashMap<Vec<Secret<ArithmeticGmw<R>, Idx>>, Secret<ArithmeticGmw<R>, Idx>>,
+        setup_sub_circ_cache: &mut AHashMap<Vec<ArithGmwSecret<R, Idx>>, ArithGmwSecret<R, Idx>>,
     ) -> Vec<Secret<ArithmeticGmw<R>, Idx>> {
         let &ArithmeticGate::Mul = self else {
             assert!(self.is_non_interactive(), "Unhandled interactive gate");
