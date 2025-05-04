@@ -6,6 +6,9 @@ This framework implements secure 2-party secret-sharing-based multi party comput
 the Boolean and arithmetic versions of GMW87 with multiplication triple preprocessing. Additionally, we implement the
 Boolean part of the ABY2.0 protocol. 
 
+> [!NOTE]
+> You need to run the tests with `-- --test-threads=1` at the moment!
+
 ## Citing SEEC
 If you use SEEC for your academic projects, please cite as follows:
 ```

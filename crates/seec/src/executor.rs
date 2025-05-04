@@ -12,7 +12,7 @@ use seec_channel::{Receiver, Sender};
 use tracing::{debug, error, info, instrument, trace};
 
 use crate::circuit::builder::SubCircuitGate;
-use crate::circuit::{CircuitId, DefaultIdx, ExecutableCircuit, GateIdx};
+use crate::circuit::{CircuitId, DefaultIdx, ExecutableCircuit, ExecutableLayer, GateIdx};
 use crate::errors::ExecutorError;
 use crate::gate::base::BaseGate;
 use crate::protocols::boolean_gmw::BooleanGmw;
@@ -150,327 +150,34 @@ where
         let main_is_simd = self.circuit.simd_size(0).is_some();
         // TODO provide the option to calculate next layer  during and communication
         //  take care to not block tokio threads -> use tokio rayon
-        for layer in self.circuit.layer_iter() {
-            for ((gate, sc_gate_id), mut parents) in
-                layer.non_interactive_with_parents_iter(self.circuit)
-            {
-                trace!(?gate, ?sc_gate_id, "Evaluating");
+        for mut layer in self.circuit.layer_iter() {
+            let layer_interactive_count = self.evaluate_single_layer_non_interactive(
+                &inputs,
+                main_is_simd,
+                &mut layer
+            ).await?;
 
-                match gate.as_base_gate() {
-                    Some(BaseGate::Input(_)) => {
-                        assert_eq!(
-                            sc_gate_id.circuit_id, 0,
-                            "Input gate in SubCircuit. Use SubCircuitInput"
-                        );
-                        // TODO, ugh log(n) in loop... and i'm not even sure if this is correct
-                        let inp_idx = self
-                            .circuit
-                            .input_gates()
-                            .binary_search(&sc_gate_id.gate_id)
-                            .expect("Input gate not contained in input_gates");
-                        if main_is_simd {
-                            let output = self.protocol_state.evaluate_non_interactive_simd(
-                                self.party_id,
-                                &gate,
-                                iter::once(
-                                    &inputs.as_simd().expect("main circ is simd but input not")
-                                        [inp_idx],
-                                ),
-                            );
-                            trace!(
-                                ?output,
-                                sc_gate_id = %sc_gate_id,
-                                "Evaluated SIMD {:?} gate",
-                                gate
-                            );
-                            self.gate_outputs.set_simd(sc_gate_id, output);
-                        } else {
-                            let output = self.protocol_state.evaluate_non_interactive(
-                                self.party_id,
-                                &gate,
-                                iter::once(
-                                    inputs
-                                        .as_scalar()
-                                        .expect("main circ is scalar but input is simd")
-                                        .get(inp_idx),
-                                ),
-                            );
-                            trace!(
-                                ?output,
-                                sc_gate_id = %sc_gate_id,
-                                "Evaluated {:?} gate",
-                                gate
-                            );
-                            self.gate_outputs.set(sc_gate_id, output);
-                        }
-                    }
-                    Some(BaseGate::SubCircuitInput(_)) => {
-                        let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
-                        match (main_is_simd, simd_size.is_some()) {
-                            (true, true) => {
-                                // simd to siimd
-                                let inputs = self.simd_inputs(parents);
-                                let simd_output = self
-                                    .protocol_state
-                                    .evaluate_non_interactive_simd(self.party_id, &gate, inputs);
-                                trace!(
-                                    ?simd_output,
-                                    sc_gate_id = %sc_gate_id,
-                                    "Evaluated SIMD {:?} gate",
-                                    gate
-                                );
-                                self.gate_outputs.set_simd(sc_gate_id, simd_output);
-                            }
-                            (false, true) => {
-                                // non-simd to simd
-                                let output = self.inputs(parents).collect();
-                                trace!(
-                                    ?output,
-                                    sc_gate_id = %sc_gate_id,
-                                    "Evaluated {:?} gate",
-                                    gate
-                                );
-                                self.gate_outputs.set_simd(sc_gate_id, output);
-                            }
-                            (false, false) => {
-                                // non-simd to non-simd
-                                let inputs = self.inputs(parents);
-                                let output = self.protocol_state.evaluate_non_interactive(
-                                    self.party_id,
-                                    &gate,
-                                    inputs,
-                                );
-                                trace!(
-                                    ?output,
-                                    sc_gate_id = %sc_gate_id,
-                                    "Evaluated {:?} gate",
-                                    gate
-                                );
-                                self.gate_outputs.set(sc_gate_id, output);
-                            }
-                            (true, false) => {
-                                // simd to non-simd is illegal
-                                return Err(ExecutorError::IllegalCircuit);
-                            }
-                        }
-                    }
-                    Some(BaseGate::ConnectToMainFromSimd((_, select))) => {
-                        let input = self
-                            .gate_outputs
-                            .get_simd(parents.next().expect("Missing input"));
-                        let output = input.get(*select as usize);
-                        trace!(
-                            ?output,
-                            sc_gate_id = %sc_gate_id,
-                            "Evaluated {:?} gate",
-                            gate
-                        );
-                        self.gate_outputs.set(sc_gate_id, output);
-                        continue;
-                    }
-                    other => {
-                        let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
-                        if let Some(simd_size) = simd_size {
-                            let output = if let Some(BaseGate::Constant(c)) = other {
-                                // get unchecked because it was not set from a gate evaluation
-                                // before. However, this value might have been initialized in
-                                // setup_gate_outputs
-                                let current_out = self.gate_outputs.get_simd_unchecked(sc_gate_id);
-                                self.protocol_state.share_constant_simd(
-                                    self.party_id,
-                                    current_out,
-                                    c.clone(),
-                                    simd_size,
-                                )
-                            } else {
-                                let inputs = self.simd_inputs(parents);
-                                self.protocol_state.evaluate_non_interactive_simd(
-                                    self.party_id,
-                                    &gate,
-                                    inputs,
-                                )
-                            };
-
-                            trace!(
-                                ?output,
-                                sc_gate_id = %sc_gate_id,
-                                "Evaluated SIMD {:?} gate",
-                                gate
-                            );
-                            self.gate_outputs.set_simd(sc_gate_id, output);
-                        } else {
-                            let output = if let Some(BaseGate::Constant(c)) = other {
-                                // get unchecked because it was not set from a gate evaluation
-                                // before. However, this value might have been initialized in
-                                // setup_gate_outputs
-                                let current_out = self.gate_outputs.get_unchecked(sc_gate_id);
-                                self.protocol_state.share_constant(
-                                    self.party_id,
-                                    current_out,
-                                    c.clone(),
-                                )
-                            } else {
-                                let inputs = self.inputs(parents);
-                                self.protocol_state.evaluate_non_interactive(
-                                    self.party_id,
-                                    &gate,
-                                    inputs,
-                                )
-                            };
-                            trace!(
-                                ?output,
-                                sc_gate_id = %sc_gate_id,
-                                "Evaluated {:?} gate",
-                                gate
-                            );
-                            self.gate_outputs.set(sc_gate_id, output);
-                        }
-                    }
-                };
-            }
-
-            let layer_int_cnt = layer.interactive_count_times_simd();
-            if layer_int_cnt == 0 {
+            if layer_interactive_count == 0 {
                 trace!("Layer has no interactive gates. Current layer count {layer_count:?}");
-                // If the layer does not contain and gates we continue
+                // If the layer does not contain interactive gates, we continue
                 continue;
             }
-            // Only count layers with and gates
             layer_count += 1;
-            interactive_count += layer_int_cnt;
+            interactive_count += layer_interactive_count;
 
             let mut setup_storage = self
                 .setup
-                .request_setup_output(layer_int_cnt)
+                .request_setup_output(layer_interactive_count)
                 .await
                 .unwrap();
-
             let (scalar, simd) = layer.split_simd();
-
-            let scalar_gate_iter = scalar.interactive_gates().flatten().cloned();
-            // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
-            // over .await
-            let scalar_msg = {
-                let scalar_output_iter = scalar.interactive_indices().flat_map(|(sc, gate_ids)| {
-                    let this = &*self;
-                    gate_ids.iter().map(move |gate_id| {
-                        this.gate_outputs
-                            .get_unchecked(SubCircuitGate::new(sc, *gate_id))
-                    })
-                });
-                let input_iter = scalar
-                    .interactive_parents_iter(self.circuit)
-                    .flat_map(|parents| self.inputs(parents));
-                self.protocol_state.compute_msg(
-                    self.party_id,
-                    scalar_gate_iter.clone(),
-                    scalar_output_iter,
-                    input_iter,
-                    &mut setup_storage,
-                )
-            };
-
-            let simd_gate_iter = simd.interactive_gates().flatten().cloned();
-            // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
-            // over .await
-            let simd_msg = P::SIMD_SUPPORT.then(|| {
-                let simd_output_iter = simd.interactive_indices().flat_map(|(sc, gate_ids)| {
-                    let this = &*self;
-                    gate_ids.iter().map(move |gate_id| {
-                        this.gate_outputs
-                            .get_simd_unchecked(SubCircuitGate::new(sc, *gate_id))
-                    })
-                });
-                let input_iter = simd
-                    .interactive_parents_iter(self.circuit)
-                    .flat_map(|parents| parents.map(|parent| self.gate_outputs.get_simd(parent)));
-                self.protocol_state.compute_msg_simd(
-                    self.party_id,
-                    simd_gate_iter.clone(),
-                    simd_output_iter,
-                    input_iter,
-                    &mut setup_storage,
-                )
-            });
-            let msg = ExecutorMsg {
-                scalar: scalar_msg.clone(),
-                simd: simd_msg.clone(),
-            };
-            sender.send(msg).await.ok().unwrap();
-            for gate in simd.freeable_simd_gates() {
-                match &mut self.gate_outputs.data[gate.circuit_id as usize] {
-                    Input::Scalar(_) => {
-                        error!("BUG in freeable_simd_gates, please report this.")
-                    }
-                    Input::Simd(shares) => {
-                        // take the vec element, which is likely some kind of vec
-                        // for a simd share, and thus, free it
-                        mem::take(&mut shares[gate.gate_id.as_usize()]);
-                    }
-                }
-            }
-            debug!("Sending interactive gates layer");
-            let ExecutorMsg {
-                scalar: resp_scalar,
-                simd: resp_simd,
-            } = receiver.recv().await.ok().unwrap().unwrap();
-
-            // recreate iters afer .await point, for some reason holding them over that
-            // results in a weird compile error. The iterators are Send, but if held over .await
-            // the future is not... Seems like a compiler bug
-            let scalar_output_iter = scalar.interactive_indices().flat_map(|(sc, gate_ids)| {
-                let this = &*self;
-                gate_ids.iter().map(move |gate_id| {
-                    this.gate_outputs
-                        .get_unchecked(SubCircuitGate::new(sc, *gate_id))
-                })
-            });
-            let simd_output_iter = simd.interactive_indices().flat_map(|(sc, gate_ids)| {
-                let this = &*self;
-                gate_ids.iter().map(move |gate_id| {
-                    this.gate_outputs
-                        .get_simd_unchecked(SubCircuitGate::new(sc, *gate_id))
-                })
-            });
-
-            let scalar_interactive_outputs = self.protocol_state.evaluate_interactive(
-                self.party_id,
-                scalar_gate_iter,
-                scalar_output_iter,
-                scalar_msg,
-                resp_scalar,
+            self.evaluate_single_layer_interactive(
+                sender,
+                receiver,
                 &mut setup_storage,
-            );
-            let simd_interactive_outputs = match (simd_msg, resp_simd) {
-                (Some(simd_msg), Some(resp_simd)) => {
-                    Some(self.protocol_state.evaluate_interactive_simd(
-                        self.party_id,
-                        simd_gate_iter,
-                        simd_output_iter,
-                        simd_msg,
-                        resp_simd,
-                        &mut setup_storage,
-                    ))
-                }
-                (Some(_), None) | (None, Some(_)) => panic!("Sent and received simd msg differ"),
-                (None, None) => None,
-            };
-
-            scalar
-                .interactive_iter()
-                .zip(scalar_interactive_outputs)
-                .for_each(|((_, id), out)| {
-                    self.gate_outputs.set(id, out.clone());
-                    trace!(?out, gate_id = %id, "Evaluated interactive gate");
-                });
-            if let Some(simd_interactive_outputs) = simd_interactive_outputs {
-                simd.interactive_iter()
-                    .zip(simd_interactive_outputs)
-                    .for_each(|((_, id), out)| {
-                        self.gate_outputs.set_simd(id, out.clone());
-                        trace!(?out, gate_id = %id, "Evaluated SIMD interactive gate");
-                    });
-            }
+                &scalar,
+                &simd
+            ).await;
         }
         info!(
             layer_count,
@@ -490,6 +197,327 @@ where
             let output_iter = out_iter.map(|id| self.gate_outputs.get(SubCircuitGate::new(0, *id)));
             Ok(Input::Scalar(output_iter.collect()))
         }
+    }
+
+    async fn evaluate_single_layer_interactive(
+        &mut self,
+        sender: &mut Sender<Message<P>>,
+        receiver: &mut Receiver<Message<P>>,
+        mut setup_storage: &mut P::SetupStorage,
+        scalar: &ExecutableLayer<'_, P::Plain, P::Gate, Idx>,
+        simd: &ExecutableLayer<'_, P::Plain, P::Gate, Idx>
+    ) {
+        let scalar_gate_iter = scalar.interactive_gates().flatten().cloned();
+        // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
+        // over .await
+        let scalar_msg = {
+            let scalar_output_iter = scalar.interactive_indices().flat_map(|(sc, gate_ids)| {
+                let this = &*self;
+                gate_ids.iter().map(move |gate_id| {
+                    this.gate_outputs
+                        .get_unchecked(SubCircuitGate::new(sc, *gate_id))
+                })
+            });
+            let input_iter = scalar
+                .interactive_parents_iter(self.circuit)
+                .flat_map(|parents| self.inputs(parents));
+            self.protocol_state.compute_msg(
+                self.party_id,
+                scalar_gate_iter.clone(),
+                scalar_output_iter,
+                input_iter,
+                &mut setup_storage,
+            )
+        };
+
+        let simd_gate_iter = simd.interactive_gates().flatten().cloned();
+        // interactive_parents_iter is !Send so we introduce a block s.t. it is not hold
+        // over .await
+        let simd_msg = P::SIMD_SUPPORT.then(|| {
+            let simd_output_iter = simd.interactive_indices().flat_map(|(sc, gate_ids)| {
+                let this = &*self;
+                gate_ids.iter().map(move |gate_id| {
+                    this.gate_outputs
+                        .get_simd_unchecked(SubCircuitGate::new(sc, *gate_id))
+                })
+            });
+            let input_iter = simd
+                .interactive_parents_iter(self.circuit)
+                .flat_map(|parents| parents.map(|parent| self.gate_outputs.get_simd(parent)));
+            self.protocol_state.compute_msg_simd(
+                self.party_id,
+                simd_gate_iter.clone(),
+                simd_output_iter,
+                input_iter,
+                &mut setup_storage,
+            )
+        });
+        let msg = ExecutorMsg {
+            scalar: scalar_msg.clone(),
+            simd: simd_msg.clone(),
+        };
+        sender.send(msg).await.ok().unwrap();
+        for gate in simd.freeable_simd_gates() {
+            match &mut self.gate_outputs.data[gate.circuit_id as usize] {
+                Input::Scalar(_) => {
+                    error!("BUG in freeable_simd_gates, please report this.")
+                }
+                Input::Simd(shares) => {
+                    // take the vec element, which is likely some kind of vec
+                    // for a simd share, and thus, free it
+                    mem::take(&mut shares[gate.gate_id.as_usize()]);
+                }
+            }
+        }
+        debug!("Sending interactive gates layer");
+        let ExecutorMsg {
+            scalar: resp_scalar,
+            simd: resp_simd,
+        } = receiver.recv().await.ok().unwrap().unwrap();
+
+        // recreate iters afer .await point, for some reason holding them over that
+        // results in a weird compile error. The iterators are Send, but if held over .await
+        // the future is not... Seems like a compiler bug
+        let scalar_output_iter = scalar.interactive_indices().flat_map(|(sc, gate_ids)| {
+            let this = &*self;
+            gate_ids.iter().map(move |gate_id| {
+                this.gate_outputs
+                    .get_unchecked(SubCircuitGate::new(sc, *gate_id))
+            })
+        });
+        let simd_output_iter = simd.interactive_indices().flat_map(|(sc, gate_ids)| {
+            let this = &*self;
+            gate_ids.iter().map(move |gate_id| {
+                this.gate_outputs
+                    .get_simd_unchecked(SubCircuitGate::new(sc, *gate_id))
+            })
+        });
+
+        let scalar_interactive_outputs = self.protocol_state.evaluate_interactive(
+            self.party_id,
+            scalar_gate_iter,
+            scalar_output_iter,
+            scalar_msg,
+            resp_scalar,
+            &mut setup_storage,
+        );
+        let simd_interactive_outputs = match (simd_msg, resp_simd) {
+            (Some(simd_msg), Some(resp_simd)) => {
+                Some(self.protocol_state.evaluate_interactive_simd(
+                    self.party_id,
+                    simd_gate_iter,
+                    simd_output_iter,
+                    simd_msg,
+                    resp_simd,
+                    &mut setup_storage,
+                ))
+            }
+            (Some(_), None) | (None, Some(_)) => panic!("Sent and received simd msg differ"),
+            (None, None) => None,
+        };
+
+        scalar
+            .interactive_iter()
+            .zip(scalar_interactive_outputs)
+            .for_each(|((_, id), out)| {
+                self.gate_outputs.set(id, out.clone());
+                trace!(?out, gate_id = %id, "Evaluated interactive gate");
+            });
+        if let Some(simd_interactive_outputs) = simd_interactive_outputs {
+            simd.interactive_iter()
+                .zip(simd_interactive_outputs)
+                .for_each(|((_, id), out)| {
+                    self.gate_outputs.set_simd(id, out.clone());
+                    trace!(?out, gate_id = %id, "Evaluated SIMD interactive gate");
+                });
+        }
+    }
+
+    async fn evaluate_single_layer_non_interactive(
+        &mut self,
+        inputs: &Input<P::ShareStorage>,
+        main_is_simd: bool,
+        layer: &mut ExecutableLayer<'_, P::Plain, P::Gate, Idx>
+    ) -> Result<usize, ExecutorError> {
+        for ((gate, sc_gate_id), mut parents) in
+            layer.non_interactive_with_parents_iter(self.circuit)
+        {
+            trace!(?gate, ?sc_gate_id, "Evaluating");
+
+            match gate.as_base_gate() {
+                Some(BaseGate::Input(_)) => {
+                    assert_eq!(
+                        sc_gate_id.circuit_id, 0,
+                        "Input gate in SubCircuit. Use SubCircuitInput"
+                    );
+                    // TODO, ugh log(n) in loop... and i'm not even sure if this is correct
+                    let inp_idx = self
+                        .circuit
+                        .input_gates()
+                        .binary_search(&sc_gate_id.gate_id)
+                        .expect("Input gate not contained in input_gates");
+                    if main_is_simd {
+                        let output = self.protocol_state.evaluate_non_interactive_simd(
+                            self.party_id,
+                            &gate,
+                            iter::once(
+                                &inputs.as_simd().expect("main circ is simd but input not")
+                                    [inp_idx],
+                            ),
+                        );
+                        trace!(
+                                ?output,
+                                sc_gate_id = %sc_gate_id,
+                                "Evaluated SIMD {:?} gate",
+                                gate
+                            );
+                        self.gate_outputs.set_simd(sc_gate_id, output);
+                    } else {
+                        let output = self.protocol_state.evaluate_non_interactive(
+                            self.party_id,
+                            &gate,
+                            iter::once(
+                                inputs
+                                    .as_scalar()
+                                    .expect("main circ is scalar but input is simd")
+                                    .get(inp_idx),
+                            ),
+                        );
+                        trace!(
+                                ?output,
+                                sc_gate_id = %sc_gate_id,
+                                "Evaluated {:?} gate",
+                                gate
+                            );
+                        self.gate_outputs.set(sc_gate_id, output);
+                    }
+                }
+                Some(BaseGate::SubCircuitInput(_)) => {
+                    let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
+                    match (main_is_simd, simd_size.is_some()) {
+                        (true, true) => {
+                            // simd to siimd
+                            let inputs = self.simd_inputs(parents);
+                            let simd_output = self
+                                .protocol_state
+                                .evaluate_non_interactive_simd(self.party_id, &gate, inputs);
+                            trace!(
+                                    ?simd_output,
+                                    sc_gate_id = %sc_gate_id,
+                                    "Evaluated SIMD {:?} gate",
+                                    gate
+                                );
+                            self.gate_outputs.set_simd(sc_gate_id, simd_output);
+                        }
+                        (false, true) => {
+                            // non-simd to simd
+                            let output = self.inputs(parents).collect();
+                            trace!(
+                                    ?output,
+                                    sc_gate_id = %sc_gate_id,
+                                    "Evaluated {:?} gate",
+                                    gate
+                                );
+                            self.gate_outputs.set_simd(sc_gate_id, output);
+                        }
+                        (false, false) => {
+                            // non-simd to non-simd
+                            let inputs = self.inputs(parents);
+                            let output = self.protocol_state.evaluate_non_interactive(
+                                self.party_id,
+                                &gate,
+                                inputs,
+                            );
+                            trace!(
+                                    ?output,
+                                    sc_gate_id = %sc_gate_id,
+                                    "Evaluated {:?} gate",
+                                    gate
+                                );
+                            self.gate_outputs.set(sc_gate_id, output);
+                        }
+                        (true, false) => {
+                            // simd to non-simd is illegal
+                            return Err(ExecutorError::IllegalCircuit);
+                        }
+                    }
+                }
+                Some(BaseGate::ConnectToMainFromSimd((_, select))) => {
+                    let input = self
+                        .gate_outputs
+                        .get_simd(parents.next().expect("Missing input"));
+                    let output = input.get(*select as usize);
+                    trace!(
+                            ?output,
+                            sc_gate_id = %sc_gate_id,
+                            "Evaluated {:?} gate",
+                            gate
+                        );
+                    self.gate_outputs.set(sc_gate_id, output);
+                    continue;
+                }
+                other => {
+                    let simd_size = self.circuit.simd_size(sc_gate_id.circuit_id);
+                    if let Some(simd_size) = simd_size {
+                        let output = if let Some(BaseGate::Constant(c)) = other {
+                            // get unchecked because it was not set from a gate evaluation
+                            // before. However, this value might have been initialized in
+                            // setup_gate_outputs
+                            let current_out = self.gate_outputs.get_simd_unchecked(sc_gate_id);
+                            self.protocol_state.share_constant_simd(
+                                self.party_id,
+                                current_out,
+                                c.clone(),
+                                simd_size,
+                            )
+                        } else {
+                            let inputs = self.simd_inputs(parents);
+                            self.protocol_state.evaluate_non_interactive_simd(
+                                self.party_id,
+                                &gate,
+                                inputs,
+                            )
+                        };
+
+                        trace!(
+                                ?output,
+                                sc_gate_id = %sc_gate_id,
+                                "Evaluated SIMD {:?} gate",
+                                gate
+                            );
+                        self.gate_outputs.set_simd(sc_gate_id, output);
+                    } else {
+                        let output = if let Some(BaseGate::Constant(c)) = other {
+                            // get unchecked because it was not set from a gate evaluation
+                            // before. However, this value might have been initialized in
+                            // setup_gate_outputs
+                            let current_out = self.gate_outputs.get_unchecked(sc_gate_id);
+                            self.protocol_state.share_constant(
+                                self.party_id,
+                                current_out,
+                                c.clone(),
+                            )
+                        } else {
+                            let inputs = self.inputs(parents);
+                            self.protocol_state.evaluate_non_interactive(
+                                self.party_id,
+                                &gate,
+                                inputs,
+                            )
+                        };
+                        trace!(
+                                ?output,
+                                sc_gate_id = %sc_gate_id,
+                                "Evaluated {:?} gate",
+                                gate
+                            );
+                        self.gate_outputs.set(sc_gate_id, output);
+                    }
+                }
+            };
+        }
+
+        Ok(layer.interactive_count_times_simd())
     }
 
     pub fn gate_outputs(&self) -> &GateOutputs<P::ShareStorage> {
