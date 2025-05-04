@@ -389,16 +389,14 @@ impl<P, G: Gate<P>, Idx: GateIdx> Default for CircuitBuilder<P, G, Idx> {
     }
 }
 
+type EitherOrBothGate<'a, Idx> = EitherOrBoth<&'a SubCircuitGate<Idx>, &'a SubCircuitGate<Idx>>;
+type GateGroups<'a, Idx, It, F> = Option<GroupBy<SubCircuitGate<Idx>, It, F>>;
+
 fn group_gates_iter<'a, Idx>(
     gates: &'a [SubCircuitGate<Idx>],
-) -> Option<
-    GroupBy<
-        SubCircuitGate<Idx>,
-        impl Iterator<Item = EitherOrBoth<&'a SubCircuitGate<Idx>, &'a SubCircuitGate<Idx>>>,
-        impl FnMut(
-            &EitherOrBoth<&'a SubCircuitGate<Idx>, &'a SubCircuitGate<Idx>>,
-        ) -> SubCircuitGate<Idx>,
-    >,
+) -> GateGroups<'a, Idx,
+    impl Iterator<Item=EitherOrBothGate<'a, Idx>>,
+    impl FnMut(&EitherOrBothGate<'a, Idx>) -> SubCircuitGate<Idx>
 >
 where
     Idx: GateIdx,

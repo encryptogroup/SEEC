@@ -514,7 +514,7 @@ where
     fn simd_inputs<'s, 'p>(
         &'s self,
         parent_ids: impl Iterator<Item = SubCircuitGate<Idx>> + 'p,
-    ) -> impl Iterator<Item = &SimdShareOf<P::Share>> + 'p
+    ) -> impl Iterator<Item = &'s SimdShareOf<P::Share>> + 'p
     where
         's: 'p,
     {
@@ -657,6 +657,7 @@ impl<S> Default for GateOutputs<S> {
     fn default() -> Self {
         Self {
             data: vec![],
+            #[cfg(debug_assertions)]
             output_set: Default::default(),
         }
     }
@@ -675,6 +676,7 @@ impl<Shares> FromIterator<Input<Shares>> for GateOutputs<Shares> {
     fn from_iter<T: IntoIterator<Item = Input<Shares>>>(iter: T) -> Self {
         Self {
             data: iter.into_iter().collect(),
+            #[cfg(debug_assertions)]
             output_set: Default::default(),
         }
     }
