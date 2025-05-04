@@ -394,9 +394,11 @@ type GateGroups<'a, Idx, It, F> = Option<GroupBy<SubCircuitGate<Idx>, It, F>>;
 
 fn group_gates_iter<'a, Idx>(
     gates: &'a [SubCircuitGate<Idx>],
-) -> GateGroups<'a, Idx,
-    impl Iterator<Item=EitherOrBothGate<'a, Idx>>,
-    impl FnMut(&EitherOrBothGate<'a, Idx>) -> SubCircuitGate<Idx>
+) -> GateGroups<
+    'a,
+    Idx,
+    impl Iterator<Item = EitherOrBothGate<'a, Idx>>,
+    impl FnMut(&EitherOrBothGate<'a, Idx>) -> SubCircuitGate<Idx>,
 >
 where
     Idx: GateIdx,
