@@ -14,19 +14,19 @@ use std::{array, mem};
 
 pub(crate) struct ByAddress<'a, T: ?Sized>(pub(crate) &'a T);
 
-impl<'a, T: ?Sized> Hash for ByAddress<'a, T> {
+impl<T: ?Sized> Hash for ByAddress<'_, T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::ptr::hash(self.0, state)
     }
 }
 
-impl<'a, T: ?Sized> PartialEq for ByAddress<'a, T> {
+impl<T: ?Sized> PartialEq for ByAddress<'_, T> {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.0, other.0)
     }
 }
 
-impl<'a, T: ?Sized> Eq for ByAddress<'a, T> {}
+impl<T: ?Sized> Eq for ByAddress<'_, T> {}
 
 #[derive(Eq, Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RangeInclusiveStartWrapper<T> {

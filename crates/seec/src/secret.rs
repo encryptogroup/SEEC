@@ -288,7 +288,7 @@ impl<Idx: GateIdx> Not for Secret<BooleanGmw, Idx> {
     }
 }
 
-impl<'a, Idx: GateIdx> Not for &'a Secret<BooleanGmw, Idx> {
+impl<Idx: GateIdx> Not for &Secret<BooleanGmw, Idx> {
     type Output = Secret<BooleanGmw, Idx>;
 
     fn not(self) -> Self::Output {

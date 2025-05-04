@@ -168,7 +168,7 @@ where
 {
     struct SenderMutWrapper<'a, T>(&'a Sender<T>);
     #[async_trait]
-    impl<'a, T: RemoteSend> SenderT<T> for SenderMutWrapper<'a, T> {
+    impl<T: RemoteSend> SenderT<T> for SenderMutWrapper<'_, T> {
         type Error = <Sender<T> as SenderT<T>>::Error;
 
         async fn send(&mut self, item: T) -> Result<(), Self::Error> {

@@ -19,12 +19,12 @@ use tracing::{debug, instrument};
 #[rustfmt::skip]
 mod module_generated;
 
-/// Plan:
-/// - read fb file
-/// - identify main circuit
-/// - parse all **other** circuits, which should be sub-circuits, error on SCCall
-/// - add SCs to builder, storing mapping of sc name -> shared_circ
-/// - parse main circ, if sccall is encountered, use connect_sub_circuit and connect_to_main on sc
+// Plan:
+// - read fb file
+// - identify main circuit
+// - parse all **other** circuits, which should be sub-circuits, error on SCCall
+// - add SCs to builder, storing mapping of sc name -> shared_circ
+// - parse main circ, if sccall is encountered, use connect_sub_circuit and connect_to_main on sc
 
 type BaseCircuit<R> = crate::circuit::BaseCircuit<Mixed<R>, MixedGate<R>>;
 

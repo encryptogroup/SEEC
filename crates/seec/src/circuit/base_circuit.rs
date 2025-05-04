@@ -699,7 +699,7 @@ impl<G: Clone, Idx: GateIdx> CircuitLayer<G, Idx> {
     }
 }
 
-impl<'a, P, G: Gate<P>, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'a, P, G, Idx, W> {
+impl<P, G: Gate<P>, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'_, P, G, Idx, W> {
     type Item = CircuitLayer<G, Idx>;
 
     #[tracing::instrument(level = "trace", skip(self), ret)]

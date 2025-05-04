@@ -278,7 +278,7 @@ impl<'a, T: BitStore<Unalias = T>> BitMatrixView<'a, T> {
     }
 }
 
-impl<'a, T: Storage + BitStore<Unalias = T>> BitMatrixView<'a, T> {
+impl<T: Storage + BitStore<Unalias = T>> BitMatrixView<'_, T> {
     pub fn transpose(&self) -> BitMatrix<T> {
         let transposed = if self.can_do_sse_trans()
             && (cfg!(is_nightly) || cfg!(all(target_arch = "x86_64", target_feature = "sse2")))
