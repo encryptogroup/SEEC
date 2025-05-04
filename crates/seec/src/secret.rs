@@ -5,17 +5,20 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-use std::mem;
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
-
+use std::{iter, mem};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Mul, Not};
+use bitvec::view::BitViewSized;
 use itertools::Itertools;
-
+use rand::distributions::{Distribution, Standard};
 use crate::circuit::builder::SharedCircuit;
 use crate::circuit::{BooleanGate, CircuitId, DefaultIdx, GateId, GateIdx};
 use crate::gate::base::BaseGate;
 use crate::protocols::boolean_gmw::BooleanGmw;
-use crate::protocols::ScalarDim;
+use crate::protocols::mixed::Mixed;
+use crate::protocols::{Gate, Ring, ScalarDim};
 use crate::CircuitBuilder;
+use crate::protocols::arithmetic_gmw::{ArithmeticGate, ArithmeticGmw};
+use crate::protocols::mixed_gmw::{ConvGate, MixedGate, MixedGmw};
 
 pub struct Secret<P = BooleanGmw, Idx = DefaultIdx> {
     pub(crate) circuit_id: CircuitId,
@@ -54,16 +57,6 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
         Self::from_parts(circuit_id, output_of)
     }
 
-    pub fn input(circuit_id: CircuitId) -> Self {
-        let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
-            panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
-        });
-        let output_of = circuit
-            .lock()
-            .add_gate(BooleanGate::Base(BaseGate::Input(ScalarDim)));
-        Self::from_parts(circuit_id, output_of)
-    }
-
     pub fn sub_circuit_input(circuit_id: CircuitId, gate: BooleanGate) -> Self {
         let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
             panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
@@ -83,16 +76,6 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
             &[self.output_of],
         );
         Self::from_parts(self.circuit_id, output_of)
-    }
-
-    /// Constructs a `Gate::Output` in the circuit with this secret's value
-    pub fn output(&self) -> GateId<Idx> {
-        let circuit = self.get_circuit();
-        let mut circuit = circuit.lock();
-        circuit.add_wired_gate(
-            BooleanGate::Base(BaseGate::Output(ScalarDim)),
-            &[self.output_of],
-        )
     }
 
     pub fn into_output(self) -> GateId<Idx> {
@@ -122,11 +105,40 @@ impl<Idx: GateIdx> Secret<BooleanGmw, Idx> {
     pub fn circuit_id(&self) -> CircuitId {
         self.circuit_id
     }
+}
 
-    pub(crate) fn get_circuit(&self) -> SharedCircuit<bool, BooleanGate, Idx> {
+impl<Idx, P, G> Secret<P, Idx>
+where
+    Idx: GateIdx,
+    P: crate::protocols::Protocol<Gate = G>,
+    G: Gate<P::Plain, DimTy = ScalarDim>
+{
+    pub(crate) fn get_circuit(&self) -> SharedCircuit<P::Plain, P::Gate, Idx> {
         CircuitBuilder::get_global_circuit(self.circuit_id)
             .expect("circuit_id is not stored in global CircuitBuilder")
     }
+
+    /// Constructs a `Gate::Output` in the circuit with this secret's value
+    pub fn output(&self) -> GateId<Idx> {
+        let circuit = self.get_circuit();
+        let mut circuit = circuit.lock();
+        circuit.add_wired_gate(
+            G::wrap_base_gate(BaseGate::Output(ScalarDim)),
+            &[self.output_of],
+        )
+    }
+
+    pub fn input(circuit_id: CircuitId) -> Self {
+        let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
+            panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
+        });
+        let output_of = circuit
+            .lock()
+            .add_gate(G::wrap_base_gate(BaseGate::Input(ScalarDim)));
+        Self::from_parts(circuit_id, output_of)
+    }
+
+
 }
 
 impl<Idx: GateIdx, Rhs: Borrow<Self>> BitXor<Rhs> for Secret<BooleanGmw, Idx> {
@@ -210,6 +222,24 @@ impl<Idx: GateIdx> BitAnd<bool> for Secret<BooleanGmw, Idx> {
             let mut circuit = circuit.lock();
             let const_gate = circuit.add_gate(BooleanGate::Base(BaseGate::Constant(rhs)));
             circuit.add_wired_gate(BooleanGate::And, &[self.output_of, const_gate])
+        };
+        self
+    }
+}
+
+impl<Idx: GateIdx, Rhs: Borrow<Self>, R: Ring> Mul<Rhs> for Secret<ArithmeticGmw<R>, Idx> {
+    type Output = Self;
+
+    fn mul(mut self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
+        assert_eq!(
+            self.circuit_id, rhs.circuit_id,
+            "Secret operations are only defined on Wrappers for the same circuit"
+        );
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
+            circuit.add_wired_gate(ArithmeticGate::Mul, &[self.output_of, rhs.output_of])
         };
         self
     }
@@ -300,6 +330,85 @@ impl<Idx: GateIdx> Not for &Secret<BooleanGmw, Idx> {
         Secret::from_parts(self.circuit_id, output_of)
     }
 }
+
+impl<Idx, R, Rhs: Borrow<Self>> BitAnd<Rhs> for Secret<MixedGmw<R>, Idx>
+where
+    Idx: GateIdx,
+    R: Ring,
+    [R; 1]: BitViewSized,
+    Standard: Distribution<R>,
+{
+    type Output = Self;
+
+    fn bitand(mut self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
+
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
+            circuit.add_wired_gate(MixedGate::Bool(BooleanGate::And),
+                                   &[self.output_of, rhs.output_of])
+        };
+        self
+    }
+}
+
+impl<Idx, R, Rhs: Borrow<Self>> Mul<Rhs> for Secret<MixedGmw<R>, Idx>
+where
+    Idx: GateIdx,
+    R: Ring,
+    [R; 1]: BitViewSized,
+    Standard: Distribution<R>,
+{
+    type Output = Self;
+
+    fn mul(mut self, rhs: Rhs) -> Self::Output {
+        let rhs = rhs.borrow();
+        self.output_of = {
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();
+            circuit.add_wired_gate(MixedGate::Arith(ArithmeticGate::Mul),
+                                   &[self.output_of, rhs.output_of])
+        };
+        self
+    }
+}
+
+impl<Idx, R> Secret<MixedGmw<R>, Idx>
+where 
+    Idx: GateIdx,
+    R: Ring,
+    [R; 1]: BitViewSized,
+    Standard: Distribution<R>,
+{
+    pub fn from_const_mixed(circuit_id: CircuitId, constant: Mixed<R>) -> Self {
+        let circuit = CircuitBuilder::get_global_circuit(circuit_id).unwrap_or_else(|| {
+            panic!("circuit_id {circuit_id} is not stored in global CircuitBuilder")
+        });
+        let output_of = {
+            let mut circuit = circuit.lock();
+            circuit.add_gate(MixedGate::Base(BaseGate::Constant(constant)))
+        };
+        Self::from_parts(circuit_id, output_of)
+    }
+
+    pub fn bit_to_a(mut self) -> Self {
+        let inputs: Vec<_> = iter::repeat_with(|| Secret::from_const_mixed(self.circuit_id, Mixed::Bool(false)))
+                .map(|cnst| cnst.output_of)
+                .take(R::BITS - 1)
+                .chain(iter::once(self.output_of))
+                .collect();
+
+        self.output_of = {
+
+            let circuit = self.get_circuit();
+            let mut circuit = circuit.lock();            
+            circuit.add_wired_gate(MixedGate::Conv(ConvGate::B2A), &inputs)
+        };
+        self
+    }
+}
+
 
 impl<P, Idx: GateIdx> Debug for Secret<P, Idx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

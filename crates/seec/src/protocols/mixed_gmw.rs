@@ -7,8 +7,7 @@ use crate::mul_triple::{arithmetic, boolean, MTProvider};
 use crate::protocols::arithmetic_gmw::ArithmeticGmw;
 use crate::protocols::boolean_gmw::BooleanGmw;
 use crate::protocols::{
-    arithmetic_gmw, boolean_gmw, Gate, Plain, Protocol, Ring, ScalarDim, SetupStorage, Share,
-    ShareStorage, Sharing,
+    arithmetic_gmw, boolean_gmw, Gate, Protocol, Ring, ScalarDim, SetupStorage, ShareStorage, Sharing,
 };
 use crate::{bristol, circuit, GateId};
 use async_trait::async_trait;
@@ -25,8 +24,10 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::{iter, mem};
+use bitvec::bitvec;
 use tracing::trace;
 use typemap_rev::{TypeMap, TypeMapKey};
+pub use crate::protocols::mixed::Mixed;
 
 #[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct MixedGmw<R> {
@@ -47,47 +48,6 @@ pub struct Msg<R> {
     /// the A2BBoolShareSnd gate
     #[serde(skip)]
     own_bool_reshares: Vec<R>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum Mixed<R> {
-    Bool(bool),
-    Arith(R),
-}
-
-impl<R> Mixed<R> {
-    pub fn into_bool(self) -> Option<bool> {
-        match self {
-            Mixed::Bool(b) => Some(b),
-            Mixed::Arith(_) => None,
-        }
-    }
-    pub fn into_arith(self) -> Option<R> {
-        match self {
-            Mixed::Bool(_) => None,
-            Mixed::Arith(r) => Some(r),
-        }
-    }
-
-    pub fn unwrap_bool(self) -> bool {
-        match self {
-            Mixed::Bool(b) => b,
-            Mixed::Arith(_) => panic!("called unwrap_bool on Arith"),
-        }
-    }
-    pub fn unwrap_arith(self) -> R {
-        match self {
-            Mixed::Bool(_) => panic!("called unwrap_arith on Bool"),
-            Mixed::Arith(r) => r,
-        }
-    }
-}
-
-// TODO Default here is prob wrong
-impl<R> Default for Mixed<R> {
-    fn default() -> Self {
-        Self::Bool(false)
-    }
 }
 
 #[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
@@ -175,13 +135,23 @@ impl<R: Ring> MixedShareStorage<R> {
             (Self::Mixed(v), s) => {
                 v.push(s);
             }
-            (Self::Bool(_), Mixed::Arith(_)) => {
-                panic!("Can't push Arith share on Bool storage")
-            }
-            (Self::Arith(_), Mixed::Bool(_)) => {
-                panic!("Can't push Bool share on Arith storage")
+            (storage, s) => {
+                storage.convert_to_mixed();
+                storage.try_push(s)
             }
         }
+    }
+    
+    fn convert_to_mixed(&mut self) {
+        *self = MixedShareStorage::Mixed(match self {
+            MixedShareStorage::Bool(b) => {
+                b.into_iter().map(|b| Mixed::Bool(*b)).collect()
+            },
+            MixedShareStorage::Arith(a) => { 
+                mem::take(a).into_iter().map(Mixed::Arith).collect()
+            },
+            MixedShareStorage::Mixed(_) => return,
+        });
     }
 
     pub fn as_mixed(&mut self) {
@@ -513,7 +483,10 @@ where
                 ConvGate::B2A => {
                     let mut buf = BitArray::<_, Lsb0>::new([R::ZERO]);
                     for (mut dest, inp) in buf.iter_mut().zip(conv_inputs.by_ref()) {
-                        dest.set(inp.unwrap_bool());
+                        // TODO I dont know if this sense like this.
+                        //  This is needed bc of fd setup for mixed aby2
+                        //  a bool may be expected at several places
+                        dest.set(inp.convert_into_bool().unwrap_bool());
                     }
                     let [xi] = buf.data;
                     let ti = xi
@@ -641,20 +614,6 @@ where
     }
 }
 
-impl<R: Ring> Plain for Mixed<R> {}
-
-impl<R: Ring> Share for Mixed<R> {
-    type Plain = Mixed<R>;
-    type SimdShare = MixedShareStorage<R>;
-
-    fn zero(&self) -> Self {
-        match self {
-            Mixed::Bool(_) => Mixed::Bool(false),
-            Mixed::Arith(_) => Mixed::Arith(R::ZERO),
-        }
-    }
-}
-
 impl<R: Ring> Gate<Mixed<R>> for MixedGate<R> {
     type DimTy = ScalarDim;
 
@@ -733,8 +692,15 @@ where
         match input {
             MixedShareStorage::Bool(bv) => self.bool.share(bv).map(MixedShareStorage::Bool),
             MixedShareStorage::Arith(v) => self.arith.share(v).map(MixedShareStorage::Arith),
-            MixedShareStorage::Mixed(_) => {
-                todo!()
+            MixedShareStorage::Mixed(v) => {
+                v.into_iter().flat_map(
+                    |s| match s {
+                        Mixed::Bool(b) => self.bool.share(iter::once(b).collect()).map(MixedShareStorage::Bool),
+                        Mixed::Arith(a) => self.arith.share(vec![a]).map(MixedShareStorage::Arith),
+                    }
+                ).collect::<Vec<_>>()
+                    .try_into()
+                    .expect("We have exactly two elements")
             }
         }
     }
@@ -747,9 +713,23 @@ where
             [MixedShareStorage::Arith(v0), MixedShareStorage::Arith(v1)] => {
                 MixedShareStorage::Arith(A::reconstruct([v0, v1]))
             }
-            _ => {
-                todo!("how to handle this case")
-            }
+            [MixedShareStorage::Mixed(v1), MixedShareStorage::Mixed(v2)] => {
+                // TODO improve this. the singleton vecs are ugly.
+                MixedShareStorage::Mixed(
+                    v1.into_iter().zip(v2.into_iter()).map(|shares| match shares {
+                        (Mixed::Arith(a), Mixed::Arith(b)) =>
+                            Mixed::Arith(A::reconstruct(
+                                [vec![a], vec![b]]).get(0)
+                            ),
+                        (Mixed::Bool(a), Mixed::Bool(b)) => 
+                            Mixed::Bool(B::reconstruct(
+                                [iter::once(a).collect(), iter::once(b).collect()]).get(0)
+                            ),
+                        (_, _) => panic!("Missmatching share types!"),                    
+                    }).collect()
+                )
+            },
+            [_, _] => todo!(),
         }
     }
 }

@@ -79,7 +79,7 @@ pub struct SetupData {
 
 #[derive(Clone)]
 pub struct EvalShares {
-    shares: BitVec,
+    pub shares: BitVec,
 }
 
 impl BooleanAby2 {
@@ -306,7 +306,7 @@ impl BooleanGate {
         }
     }
 
-    fn setup_output_share(
+    pub(crate) fn setup_output_share(
         &self,
         mut inputs: impl Iterator<Item = Share>,
         mut rng: impl Rng,
@@ -399,6 +399,15 @@ impl BooleanGate {
                 Some(processed_set) => processed_set.clone(),
             })
             .collect()
+    }
+
+    pub fn from_gmw_gate(g: boolean_gmw::BooleanGate) -> Self {
+        match g {
+            crate::BooleanGate::Base(base_gate) => Self::Base(base_gate),
+            crate::BooleanGate::And => Self::And { n: 2 },
+            crate::BooleanGate::Xor => Self::Xor,
+            crate::BooleanGate::Inv => Self::Inv,
+        }
     }
 }
 
