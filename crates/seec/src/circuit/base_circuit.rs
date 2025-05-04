@@ -778,7 +778,10 @@ impl<P, G: Gate<P>, Idx: GateIdx, W: Wire> Iterator for BaseLayerIter<'_, P, G, 
 
 impl<P, G: Gate<P>, Idx: GateIdx, W: Wire> LayerIterable for BaseCircuit<P, G, Idx, W> {
     type Layer = CircuitLayer<G, Idx>;
-    type LayerIter<'this> = BaseLayerIter<'this, P, G, Idx, W> where Self: 'this;
+    type LayerIter<'this>
+        = BaseLayerIter<'this, P, G, Idx, W>
+    where
+        Self: 'this;
 
     fn layer_iter(&self) -> Self::LayerIter<'_> {
         BaseLayerIter::new(self)

@@ -202,9 +202,7 @@ pub struct CircuitLayer<P, G, Idx: Hash + PartialEq + Eq> {
     _plain: PhantomData<P>,
 }
 
-impl<P: Debug, G: Gate<P>, Idx: GateIdx, W: Wire> Iterator
-    for CircuitLayerIter<'_, P, G, Idx, W>
-{
+impl<P: Debug, G: Gate<P>, Idx: GateIdx, W: Wire> Iterator for CircuitLayerIter<'_, P, G, Idx, W> {
     type Item = CircuitLayer<P, G, Idx>;
 
     // TODO optimize this method, it makes up a big part of the runtime
