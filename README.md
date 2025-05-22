@@ -9,7 +9,7 @@ Boolean part of the ABY2.0 protocol.
 ## Citing SEEC
 If you use SEEC for your academic projects, please cite as follows:
 ```
-@inproceedings{HKS24,
+@inproceedings{DHKS24,
     author={Henri Dohmen and Robin Hundt and Nora Khayata and Thomas Schneider},
     title={{SEEC} — {M}emory Safety Meets Efficiency in Secure Two-Party Computation},
     booktitle={ASIACCS},
