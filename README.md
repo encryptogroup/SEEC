@@ -10,10 +10,10 @@ Boolean part of the ABY2.0 protocol.
 If you use SEEC for your academic projects, please cite as follows:
 ```
 @inproceedings{HKS24,
-    author={Robin William Hundt and Nora Khayata and Thomas Schneider},
-    title={{POSTER}: {SEEC} — {M}emory Safety Meets Efficiency in Secure Two-Party Computation},
-    booktitle={ACSAC},
-    year={2024},
+    author={Henri Dohmen and Robin Hundt and Nora Khayata and Thomas Schneider},
+    title={{SEEC} — {M}emory Safety Meets Efficiency in Secure Two-Party Computation},
+    booktitle={ASIACCS},
+    year={2025},
 }
 ```
 Our poster abstract is available [here](https://encrypto.de/papers/HKS24Poster.pdf).
